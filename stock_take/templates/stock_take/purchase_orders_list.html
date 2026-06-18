@@ -14,24 +14,81 @@
 {% endblock %}
 
 {% block content %}
-<div class="content-card">
-    <div class="purchase-orders-header">
-        <div class="po-stats">
-            <span class="po-stat-label">Showing</span>
-            <span class="po-stat-value">{{ total_filtered }}</span>
-        </div>
-        <div class="po-actions">
-            <button class="btn btn-outline" title="Carnehill Summary — Approved POs awaiting delivery" onclick="document.getElementById('carnehillModal').style.display='flex'">
-                <i class="bi bi-truck"></i> <span>Carnehill Summary</span>
-            </button>
-            <button class="btn btn-outline" title="Report — All approved Purchase Orders, value and expected date" onclick="document.getElementById('approvedReportModal').style.display='flex'">
-                <i class="bi bi-file-earmark-bar-graph"></i> <span>Report</span>
-            </button>
-            <button class="btn btn-success" title="Create new Purchase Order" onclick="document.getElementById('createPOModal').style.display='flex'">
-                <i class="bi bi-plus-lg"></i> <span>New PO</span>
-            </button>
+<div class="po-toolbar">
+    <div class="view-mode-switcher" style="margin-bottom:0;">
+        <a href="{% url 'purchase_orders_list' %}" class="view-mode-btn active">
+            <i class="bi bi-cart3"></i>&nbsp; Purchase Orders
+        </a>
+        <a href="{% url 'overhead_po_list' %}" class="view-mode-btn">
+            <i class="bi bi-receipt"></i>&nbsp; Overheads
+        </a>
+    </div>
+
+    <div class="po-search-box">
+        <i class="bi bi-search"></i>
+        <input type="text" id="po-search" placeholder="Search PO number, supplier, project, description..." value="{{ search_query }}" autocomplete="off">
+        {% if search_query %}
+        <button class="po-search-clear" onclick="clearSearch()" title="Clear search">&times;</button>
+        {% endif %}
+    </div>
+
+    <div class="po-supplier-filter">
+        <button class="po-filter-btn" onclick="toggleSupplierDropdown()" id="supplier-filter-btn">
+            <i class="bi bi-funnel"></i>
+            Suppliers
+            {% if excluded_suppliers %}<span class="po-filter-badge">{{ excluded_suppliers|length }}</span>{% endif %}
+        </button>
+        <div class="po-supplier-dropdown" id="supplier-dropdown">
+            <div class="po-supplier-dropdown-header">
+                <span>Filter Suppliers</span>
+                <div class="po-supplier-dropdown-actions">
+                    <button onclick="setAllSuppliers(true)">All</button>
+                    <button onclick="setAllSuppliers(false)">None</button>
+                </div>
+            </div>
+            <div class="po-supplier-search">
+                <input type="text" id="supplier-search-input" placeholder="Search suppliers..." oninput="filterSupplierList()" autocomplete="off">
+            </div>
+            <div class="po-supplier-list" id="supplier-list">
+                {% for supplier in all_suppliers %}
+                <label class="po-supplier-item" data-name="{{ supplier|lower }}">
+                    <input type="checkbox" value="{{ supplier }}" {% if supplier not in excluded_suppliers %}checked{% endif %}>
+                    <span>{{ supplier }}</span>
+                </label>
+                {% endfor %}
+            </div>
+            <div class="po-supplier-dropdown-footer">
+                <button class="po-filter-apply" onclick="applySupplierFilter()">Apply Filter</button>
+            </div>
         </div>
     </div>
+
+    <div class="kebab-menu">
+        <button class="po-filter-btn kebab-trigger" onclick="toggleKebab(this, event)" title="More actions">
+            <i class="bi bi-three-dots"></i>
+        </button>
+        <div class="kebab-dropdown">
+            <a class="kebab-item {% if show_zero %}active{% endif %}" onclick="toggleZeroFilter()">
+                <i class="bi bi-exclamation-triangle"></i>
+                £0 Balance
+                {% if zero_count %}<span class="po-filter-badge po-zero-badge" style="margin-left:auto;">{{ zero_count }}</span>{% endif %}
+            </a>
+            <div class="kebab-divider"></div>
+            <a class="kebab-item" onclick="document.getElementById('carnehillModal').style.display='flex'">
+                <i class="bi bi-truck"></i> Carnehill Summary
+            </a>
+            <a class="kebab-item" onclick="document.getElementById('approvedReportModal').style.display='flex'">
+                <i class="bi bi-file-earmark-bar-graph"></i> Report
+            </a>
+        </div>
+    </div>
+
+    <button class="btn btn-success" title="Create new Purchase Order" onclick="document.getElementById('createPOModal').style.display='flex'">
+        <i class="bi bi-plus-lg"></i> New PO
+    </button>
+</div>
+
+<div class="content-card">
 
     <!-- Sync Progress -->
     <div id="sync-progress" class="sync-progress" style="display: none;">
@@ -39,53 +96,6 @@
             <div class="sync-progress-fill" id="sync-fill" style="width: 0%"></div>
         </div>
         <div class="sync-progress-text" id="sync-status">Starting sync...</div>
-    </div>
-
-    <!-- Search & Filter Bar -->
-    <div class="po-filter-bar">
-        <div class="po-search-box">
-            <i class="bi bi-search"></i>
-            <input type="text" id="po-search" placeholder="Search PO number, supplier, project, description..." value="{{ search_query }}" autocomplete="off">
-            {% if search_query %}
-            <button class="po-search-clear" onclick="clearSearch()" title="Clear search">&times;</button>
-            {% endif %}
-        </div>
-
-        <div class="po-supplier-filter">
-            <button class="po-filter-btn" onclick="toggleSupplierDropdown()" id="supplier-filter-btn">
-                <i class="bi bi-funnel"></i>
-                Suppliers
-                {% if excluded_suppliers %}<span class="po-filter-badge">{{ excluded_suppliers|length }}</span>{% endif %}
-            </button>
-            <div class="po-supplier-dropdown" id="supplier-dropdown">
-                <div class="po-supplier-dropdown-header">
-                    <span>Filter Suppliers</span>
-                    <div class="po-supplier-dropdown-actions">
-                        <button onclick="setAllSuppliers(true)">All</button>
-                        <button onclick="setAllSuppliers(false)">None</button>
-                    </div>
-                </div>
-                <div class="po-supplier-search">
-                    <input type="text" id="supplier-search-input" placeholder="Search suppliers..." oninput="filterSupplierList()" autocomplete="off">
-                </div>
-                <div class="po-supplier-list" id="supplier-list">
-                    {% for supplier in all_suppliers %}
-                    <label class="po-supplier-item" data-name="{{ supplier|lower }}">
-                        <input type="checkbox" value="{{ supplier }}" {% if supplier not in excluded_suppliers %}checked{% endif %}>
-                        <span>{{ supplier }}</span>
-                    </label>
-                    {% endfor %}
-                </div>
-                <div class="po-supplier-dropdown-footer">
-                    <button class="po-filter-apply" onclick="applySupplierFilter()">Apply Filter</button>
-                </div>
-            </div>
-        </div>
-
-        <button class="po-filter-btn po-zero-btn {% if show_zero %}active{% endif %}" onclick="toggleZeroFilter()" title="Show POs with £0 total">
-            <i class="bi bi-exclamation-triangle"></i>
-            £0 <span class="po-filter-badge po-zero-badge">{{ zero_count }}</span>
-        </button>
     </div>
 
     <!-- Status Tabs -->
@@ -97,7 +107,7 @@
             Draft <span class="po-tab-count">{{ draft_count }}</span>
         </a>
         <a href="javascript:void(0)" onclick="switchTab('approved')" class="po-tab {% if status_filter == 'approved' %}active{% endif %}">
-            Approved <span class="po-tab-count">{{ approved_count }}</span>
+            Ordered <span class="po-tab-count">{{ approved_count }}</span>
         </a>
         <a href="javascript:void(0)" onclick="switchTab('partially received')" class="po-tab {% if status_filter == 'partially received' %}active{% endif %}">
             Partially Received <span class="po-tab-count">{{ partial_count }}</span>
@@ -108,6 +118,11 @@
         <a href="javascript:void(0)" onclick="switchTab('cancelled')" class="po-tab {% if status_filter == 'cancelled' %}active{% endif %}">
             Cancelled <span class="po-tab-count">{{ cancelled_count }}</span>
         </a>
+        {% if excluded_suppliers %}
+        <button class="po-clear-filter-btn" onclick="window.location.href=buildUrl({exclude_supplier:[], status:'{{ status_filter }}'})" title="Clear supplier filter">
+            <i class="bi bi-x-circle"></i> {{ excluded_suppliers|length }} supplier{{ excluded_suppliers|length|pluralize }} hidden
+        </button>
+        {% endif %}
     </div>
 
     {% if purchase_orders %}
@@ -115,13 +130,9 @@
         <table class="po-table">
             <thead>
                 <tr>
-                    <th>PO Number</th>
+                    <th>PO</th>
                     <th>Supplier</th>
                     <th>Project</th>
-                    <th>Description</th>
-                    <th>Issue Date</th>
-                    <th>Expected Date</th>
-                    <th>Received Date</th>
                     <th class="text-right">Total</th>
                     <th>Status</th>
                     <th class="text-center">Emailed</th>
@@ -137,7 +148,18 @@
                             {{ po.display_number|default:"-" }}
                         </a>
                     </td>
-                    <td>{{ po.supplier_name|default:"-" }}</td>
+                    <td>
+                        <div class="po-supplier-cell">
+                            {% if po.supplier_id %}
+                            <a href="{% url 'supplier_detail' po.supplier_id %}" class="po-supplier-name" title="View supplier">{{ po.supplier_name|default:"-" }}</a>
+                            {% else %}
+                            <span class="po-supplier-name" style="color:var(--text-primary);">{{ po.supplier_name|default:"-" }}</span>
+                            {% endif %}
+                            <button class="po-supplier-filter-btn" title="Filter by {{ po.supplier_name|escapejs }}" onclick="filterBySingleSupplier('{{ po.supplier_name|escapejs }}')">
+                                <i class="bi bi-funnel"></i>
+                            </button>
+                        </div>
+                    </td>
                     <td>
                         {% if po.linked_order_info %}
                         <a href="{% url 'order_details' po.linked_order_info.id %}" class="po-project-link" title="View order {{ po.linked_order_info.sale_number }}">
@@ -147,14 +169,10 @@
                         {{ po.project_name|default:"-" }}
                         {% endif %}
                     </td>
-                    <td class="po-desc-cell">{{ po.description|default:"-"|truncatewords:10 }}</td>
-                    <td>{{ po.issue_date|default:po.creation_time_wg|format_date_str|default:"-" }}</td>
-                    <td>{{ po.expected_date|format_date_str|default:"-" }}</td>
-                    <td>{{ po.received_date|format_date_str|default:"-" }}</td>
                     <td class="text-right">£{{ po.total|floatformat:2 }}</td>
                     <td>
                         <span class="po-status {% if po.status == 'Draft' %}draft{% elif po.status == 'Sent' %}sent{% elif po.status == 'Received' %}received{% elif po.status == 'Partially Received' %}partially-received{% elif po.status == 'Approved' %}approved{% elif po.status == 'Cancelled' %}cancelled{% endif %}">
-                            {% if po.status == 'Partially Received' %}Partial{% else %}{{ po.status|default:"Draft" }}{% endif %}
+                            {% if po.status == 'Partially Received' %}Partial{% elif po.status == 'Approved' %}Ordered{% else %}{{ po.status|default:"Draft" }}{% endif %}{% if po.status == 'Approved' %}{% with po.approved_date|default:po.expected_date|format_date_str as d %}{% if d %}<span class="po-status-date">{{ d }}</span>{% endif %}{% endwith %}{% elif po.status == 'Partially Received' %}{% with po.expected_date|format_date_str as d %}{% if d %}<span class="po-status-date">{{ d }}</span>{% endif %}{% endwith %}{% elif po.status == 'Received' %}{% with po.received_date|format_date_str as d %}{% if d %}<span class="po-status-date">{{ d }}</span>{% endif %}{% endwith %}{% endif %}
                         </span>
                     </td>
                     <td class="text-center">
@@ -167,12 +185,12 @@
                     <td class="text-center">
                         {% if po.linked_invoices_list %}
                         {% with po.linked_invoices_list|first as inv %}
-                        <a href="{% url 'purchase_invoice_detail' inv.id %}" class="po-xero-badge pushed" title="{{ inv.invoice_number }} – {{ inv.supplier_name }}{% if po.linked_invoices_list|length > 1 %} (+{{ po.linked_invoices_list|length|add:'-1' }} more){% endif %}" style="text-decoration:none;">
+                        <a href="{% url 'purchase_invoice_detail' inv.id %}" class="po-icon-link" title="{{ inv.invoice_number }} – {{ inv.supplier_name }}{% if po.linked_invoices_list|length > 1 %} (+{{ po.linked_invoices_list|length|add:'-1' }} more){% endif %}">
                             <i class="bi bi-receipt"></i>
                         </a>
                         {% endwith %}
                         {% elif po.invoice_not_required %}
-                        <span class="po-xero-badge" title="Marked as not requiring a supplier invoice" style="background:rgba(220,53,69,0.12);color:#dc3545;">
+                        <span class="po-icon-link" title="Marked as not requiring a supplier invoice" style="color:var(--danger-color,#dc3545);">
                             <i class="bi bi-slash-circle"></i>
                         </span>
                         {% endif %}
@@ -280,6 +298,15 @@ function applySupplierFilter() {
     const excluded = [];
     document.querySelectorAll('#supplier-list input[type="checkbox"]').forEach(cb => {
         if (!cb.checked) excluded.push(cb.value);
+    });
+    window.location.href = buildUrl({ exclude_supplier: excluded, status: 'all' });
+}
+
+function filterBySingleSupplier(name) {
+    // Exclude all suppliers except this one
+    const excluded = [];
+    document.querySelectorAll('#supplier-list input[type="checkbox"]').forEach(cb => {
+        if (cb.value !== name) excluded.push(cb.value);
     });
     window.location.href = buildUrl({ exclude_supplier: excluded, status: 'all' });
 }
@@ -579,7 +606,7 @@ function selectOrder(id, saleNumber, customerName) {
                 {% endfor %}
             </div>
             {% else %}
-            <p style="color: var(--text-secondary); margin: 0;">No approved Carnehill POs found.</p>
+            <p style="color: var(--text-secondary); margin: 0;">No ordered Carnehill POs found.</p>
             {% endif %}
         </div>
         <div class="modal-footer">
@@ -595,7 +622,7 @@ function selectOrder(id, saleNumber, customerName) {
 <div class="modal-overlay" id="approvedReportModal" style="display:none;">
     <div class="modal-box" style="max-width: 900px;">
         <div class="modal-header">
-            <h2><i class="bi bi-file-earmark-bar-graph"></i> Approved Purchase Orders</h2>
+            <h2><i class="bi bi-file-earmark-bar-graph"></i> Ordered Purchase Orders</h2>
             <button class="modal-close" onclick="document.getElementById('approvedReportModal').style.display='none'">&times;</button>
         </div>
         <div class="modal-body">
@@ -633,7 +660,7 @@ function selectOrder(id, saleNumber, customerName) {
                 </table>
             </div>
             {% else %}
-            <p style="padding: 24px; color: var(--text-secondary); margin: 0;">No approved Purchase Orders found.</p>
+            <p style="padding: 24px; color: var(--text-secondary); margin: 0;">No ordered Purchase Orders found.</p>
             {% endif %}
         </div>
         <div class="modal-footer">
