@@ -1,18 +1,58 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 {% load static humanize %}
 
-{% block title %}Sales Invoices{% endblock %}
-{% block page_title %}Sales Invoices ({{ total_invoices|intcomma }}){% endblock %}
+{% block title %}Invoices{% endblock %}
+{% block page_title %}Invoices ({{ total_invoices|intcomma }}){% endblock %}
 
 {% block nav_invoices_active %}active{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/invoices.css' %}">
+<link rel="stylesheet" href="{% static 'css/purchase_invoices.css' %}">
+<style>
+.inv-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 16px;
+    padding: 8px 0 4px;
+}
+.inv-page-btn {
+    padding: 5px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+}
+.inv-page-btn:hover { background: var(--primary-color); color: var(--text-on-color); border-color: var(--primary-color); }
+.inv-page-btn.active { background: var(--primary-color); color: var(--text-on-color); border-color: var(--primary-color); font-weight: 600; cursor: default; }
+.inv-page-ellipsis { padding: 5px 6px; color: var(--text-muted); font-size: 0.8rem; }
+</style>
 {% endblock %}
 
 {% block content %}
 
-<!-- Toolbar: tabs + search + actions -->
+<!-- Type Selector Tabs -->
+<div class="tab-nav" style="margin-bottom: 20px;">
+    <a href="?type=sales{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if invoice_type == 'sales' %}active{% endif %}">
+        <i class="bi bi-file-earmark-text"></i> Sales Invoices
+    </a>
+    <a href="?type=purchase{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if invoice_type == 'purchase' %}active{% endif %}">
+        <i class="bi bi-file-earmark-minus"></i> Purchase Invoices
+    </a>
+</div>
+
+{% if invoice_type == 'sales' %}
+{# ═══════════════════════ SALES INVOICES ═══════════════════════ #}
+
+<!-- Toolbar: search + actions -->
 <div class="inv-toolbar">
     <div class="search-input-wrapper">
         <i class="bi bi-search"></i>
@@ -37,11 +77,11 @@
 <!-- Status Tabs -->
 <div class="inv-toolbar" style="margin-bottom: 16px;">
     <div class="tab-nav tab-nav-pills">
-        <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=all" 
+        <a href="?type=sales{% if search_query %}&q={{ search_query }}{% endif %}&status=all"
            class="tab-button {% if status_filter == 'all' %}active{% endif %}">
             All ({{ total_invoices }})
         </a>
-        <a href="?{% if search_query %}q={{ search_query }}&{% endif %}status=unpaid" 
+        <a href="?type=sales{% if search_query %}&q={{ search_query }}{% endif %}&status=unpaid"
            class="tab-button {% if status_filter == 'unpaid' %}active{% endif %}">
             Unpaid ({{ unpaid_count }})
         </a>
@@ -84,29 +124,18 @@
                 <td>{{ invoice.showroom|default:"—" }}</td>
                 <td>{{ invoice.payment_type|default:"—" }}</td>
                 <td>
-                    {% if invoice.date %}
-                    {{ invoice.date|date:"d M Y" }}
-                    {% else %}
-                    —
-                    {% endif %}
+                    {% if invoice.date %}{{ invoice.date|date:"d M Y" }}{% else %}—{% endif %}
                 </td>
                 <td>{{ invoice.payment_method|default:"—" }}</td>
                 <td>
                     <span class="inv-status {{ invoice.anthill_payment_status|lower|default:invoice.status|lower }}">{{ invoice.anthill_payment_status|default:invoice.status }}</span>
                 </td>
-                <td class="number-cell">
-                    £{{ invoice.total|floatformat:2|intcomma }}
-                </td>
+                <td class="number-cell">£{{ invoice.total|floatformat:2|intcomma }}</td>
                 <td>
-                    {% if invoice.is_overdue %}
-                    <span class="inv-payment overdue">Overdue</span>
-                    {% elif invoice.payment_status == 'paid' %}
-                    <span class="inv-payment paid">Paid</span>
-                    {% elif invoice.payment_status == 'partial' %}
-                    <span class="inv-payment partial">Partial</span>
-                    {% else %}
-                    <span class="inv-payment unpaid">Unpaid</span>
-                    {% endif %}
+                    {% if invoice.is_overdue %}<span class="inv-payment overdue">Overdue</span>
+                    {% elif invoice.payment_status == 'paid' %}<span class="inv-payment paid">Paid</span>
+                    {% elif invoice.payment_status == 'partial' %}<span class="inv-payment partial">Partial</span>
+                    {% else %}<span class="inv-payment unpaid">Unpaid</span>{% endif %}
                 </td>
                 <td style="text-align: center;">
                     <span class="inv-xero-cell">
@@ -129,6 +158,29 @@
     </div>
     {% endif %}
 </div>
+
+<!-- Sales Pagination -->
+{% if page_obj.has_other_pages %}
+<nav class="inv-pagination" aria-label="Invoice pages">
+    {% if page_obj.has_previous %}
+    <a href="?type=sales&page={{ page_obj.previous_page_number }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">&laquo; Prev</a>
+    {% endif %}
+    {% for page_n in page_obj.paginator.page_range %}
+        {% if page_n == page_obj.number %}
+        <span class="inv-page-btn active">{{ page_n }}</span>
+        {% elif page_n == 1 or page_n == page_obj.paginator.num_pages %}
+        <a href="?type=sales&page={{ page_n }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">{{ page_n }}</a>
+        {% elif page_n >= page_obj.number|add:"-2" and page_n <= page_obj.number|add:"2" %}
+        <a href="?type=sales&page={{ page_n }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">{{ page_n }}</a>
+        {% elif page_n == page_obj.number|add:"-3" or page_n == page_obj.number|add:"3" %}
+        <span class="inv-page-ellipsis">&hellip;</span>
+        {% endif %}
+    {% endfor %}
+    {% if page_obj.has_next %}
+    <a href="?type=sales&page={{ page_obj.next_page_number }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">Next &raquo;</a>
+    {% endif %}
+</nav>
+{% endif %}
 
 <!-- Add Invoice Modal -->
 <div class="modal-overlay" id="add-invoice-modal" style="display:none;" onclick="closeAddInvoiceModal(event)">
@@ -198,7 +250,6 @@
             <button class="modal-close" onclick="closeAnthillSyncModal()">&times;</button>
         </div>
         <div class="modal-body" style="padding: 0; max-height: 65vh; overflow-y: auto;">
-            <!-- Period selection step -->
             <div id="anthill-period-picker" style="padding: 20px 24px;">
                 <p style="margin: 0 0 12px; font-size: 0.85rem; color: var(--text-secondary);">Select a time period to sync:</p>
                 <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
@@ -212,7 +263,6 @@
                     <button class="btn-cancel" onclick="startSync('all_time')" style="justify-content: center;"><i class="bi bi-clock-history"></i>&nbsp; All Time</button>
                 </div>
             </div>
-            <!-- Sync progress + results -->
             <div id="anthill-sync-status" style="padding: 12px 16px; font-size: 0.85rem; color: var(--text-secondary); display: none;">
                 <i class="bi bi-arrow-repeat spinning"></i> Fetching payments from Anthill...
                 <span id="anthill-sync-timer" style="float:right; font-variant-numeric: tabular-nums; opacity:0.7;"></span>
@@ -221,14 +271,8 @@
                 <thead>
                     <tr>
                         <th style="width:32px; text-align:center;"></th>
-                        <th>Showroom</th>
-                        <th>Date</th>
-                        <th>Customer</th>
-                        <th>Type</th>
-                        <th style="text-align:right;">Amount</th>
-                        <th>Status</th>
-                        <th>Contract #</th>
-                        <th>Method</th>
+                        <th>Showroom</th><th>Date</th><th>Customer</th><th>Type</th>
+                        <th style="text-align:right;">Amount</th><th>Status</th><th>Contract #</th><th>Method</th>
                     </tr>
                 </thead>
                 <tbody id="anthill-sync-tbody"></tbody>
@@ -244,9 +288,152 @@
     </div>
 </div>
 
+{% else %}
+{# ═══════════════════════ PURCHASE INVOICES ═══════════════════════ #}
+
+<!-- Toolbar -->
+<div class="pinv-toolbar">
+    <form method="get" action="" class="pinv-search-box">
+        <i class="bi bi-search"></i>
+        <input type="text" name="q" id="pinv-search" value="{{ search_query }}"
+               placeholder="Search by invoice number or supplier…" autocomplete="off">
+        <input type="hidden" name="type" value="purchase">
+        {% if search_query %}<a href="?type=purchase" class="pinv-search-clear">&times;</a>{% endif %}
+    </form>
+    <span class="pinv-selection-count" id="pinv-selection-count" style="display:none;"></span>
+    <button class="pinv-btn" id="sync-xero-btn" onclick="syncXeroPayments()" title="Check payment status of all Xero-linked invoices" style="background:var(--bg-tertiary);color:var(--text-secondary);">
+        <i class="bi bi-arrow-repeat"></i>
+        <span>Sync from Xero</span>
+    </button>
+    <button class="pinv-btn" onclick="openCreateModal()">
+        <i class="bi bi-plus-lg"></i>
+        <span>Add Invoice</span>
+    </button>
+    <div class="kebab-menu pinv-bulk-kebab-wrap">
+        <button type="button" class="kebab-trigger pinv-bulk-kebab-trigger" onclick="toggleKebab(this, event)" title="Bulk actions">
+            <i class="bi bi-three-dots-vertical"></i>
+        </button>
+        <div class="kebab-dropdown">
+            <button type="button" class="kebab-item" onclick="pushSelectedToXero()">
+                <i class="bi bi-cloud-upload"></i> Push to Xero
+            </button>
+            <div class="kebab-divider"></div>
+            <button type="button" class="kebab-item" onclick="clearPinvSelection()">
+                <i class="bi bi-x-circle"></i> Clear selection
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Purchase Invoices Table -->
+<div class="pinv-table-container pinv-table-container--full">
+    {% if invoices %}
+    <table class="pinv-table" id="purchase-invoices-table">
+        <thead>
+            <tr>
+                <th style="width:36px;text-align:center;">
+                    <input type="checkbox" id="pinv-select-all" title="Select all" onclick="event.stopPropagation()" onchange="togglePinvSelectAll(this)">
+                </th>
+                <th>Invoice #</th>
+                <th>Supplier</th>
+                <th>Date</th>
+                <th>Due Date</th>
+                <th>Status</th>
+                <th style="text-align:right;">Total</th>
+                <th style="text-align:right;">Outstanding</th>
+                <th>Payment</th>
+                <th style="width:36px;text-align:center;" title="Xero"><i class="bi bi-cloud"></i></th>
+                <th style="width:36px;text-align:center;" title="PDF"><i class="bi bi-paperclip"></i></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for invoice in invoices %}
+            <tr onclick="window.location='{% url 'purchase_invoice_detail' invoice.id %}'" style="cursor:pointer;">
+                <td style="text-align:center;">
+                    <input type="checkbox" class="pinv-row-check" value="{{ invoice.id }}"
+                           data-xero-id="{{ invoice.xero_id }}"
+                           data-invoice-number="{{ invoice.invoice_number }}"
+                           onclick="event.stopPropagation(); updatePinvSelection();">
+                </td>
+                <td>
+                    <a href="{% url 'purchase_invoice_detail' invoice.id %}" class="pinv-number">{{ invoice.invoice_number }}</a>
+                </td>
+                <td>
+                    <span class="pinv-supplier" title="{{ invoice.supplier_name }}">{{ invoice.supplier_name|default:"—" }}</span>
+                </td>
+                <td>{{ invoice.date|date:"d M Y"|default:"—" }}</td>
+                <td>{{ invoice.due_date|date:"d M Y"|default:"—" }}</td>
+                <td><span class="pinv-status {{ invoice.status|lower }}">{{ invoice.status }}</span></td>
+                <td class="number-cell">£{{ invoice.total|floatformat:2|intcomma }}</td>
+                <td class="number-cell">
+                    {% if invoice.amount_outstanding > 0 %}
+                    <span style="color:#dc3545;">£{{ invoice.amount_outstanding|floatformat:2|intcomma }}</span>
+                    {% else %}
+                    <span style="color:#28a745;">£0.00</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if invoice.payment_status == 'paid' %}<span class="pinv-payment paid">Paid</span>
+                    {% elif invoice.payment_status == 'partial' %}<span class="pinv-payment partial">Partial</span>
+                    {% else %}<span class="pinv-payment unpaid">Unpaid</span>{% endif %}
+                </td>
+                <td style="text-align:center;">
+                    {% if invoice.xero_id %}
+                    <a href="https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={{ invoice.xero_id }}" target="_blank" onclick="event.stopPropagation()" title="View in Xero" class="pinv-tbl-icon xero-linked"><i class="bi bi-check-circle-fill"></i></a>
+                    {% else %}
+                    <button class="pinv-tbl-icon xero-unlinked" onclick="event.stopPropagation(); checkXeroStatus({{ invoice.id }}, this)" title="Not in Xero — click to search Xero"><i class="bi bi-x-circle-fill"></i></button>
+                    {% endif %}
+                </td>
+                <td style="text-align:center;">
+                    {% if invoice.attachment %}
+                    <a href="{{ invoice.attachment.url }}" target="_blank" onclick="event.stopPropagation()" title="View attachment" class="pinv-tbl-icon pdf-link"><i class="bi bi-file-earmark-pdf"></i></a>
+                    {% else %}
+                    <span class="pinv-tbl-icon pdf-none" title="No attachment"><i class="bi bi-dash"></i></span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="pinv-empty">
+        <i class="bi bi-receipt"></i>
+        <p>No purchase invoices yet — click <strong>Add Invoice</strong> to get started.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Purchase Pagination -->
+{% if page_obj.has_other_pages %}
+<nav class="inv-pagination" aria-label="Purchase invoice pages">
+    {% if page_obj.has_previous %}
+    <a href="?type=purchase&page={{ page_obj.previous_page_number }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">&laquo; Prev</a>
+    {% endif %}
+    {% for page_n in page_obj.paginator.page_range %}
+        {% if page_n == page_obj.number %}
+        <span class="inv-page-btn active">{{ page_n }}</span>
+        {% elif page_n == 1 or page_n == page_obj.paginator.num_pages %}
+        <a href="?type=purchase&page={{ page_n }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">{{ page_n }}</a>
+        {% elif page_n >= page_obj.number|add:"-2" and page_n <= page_obj.number|add:"2" %}
+        <a href="?type=purchase&page={{ page_n }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">{{ page_n }}</a>
+        {% elif page_n == page_obj.number|add:"-3" or page_n == page_obj.number|add:"3" %}
+        <span class="inv-page-ellipsis">&hellip;</span>
+        {% endif %}
+    {% endfor %}
+    {% if page_obj.has_next %}
+    <a href="?type=purchase&page={{ page_obj.next_page_number }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">Next &raquo;</a>
+    {% endif %}
+</nav>
+{% endif %}
+
+{% include 'stock_take/partials/invoice_modal.html' with attachment_mode='upload' %}
+
+{% endif %}{# end invoice_type check #}
+
 {% endblock %}
 
 {% block extra_js %}
+{% if invoice_type == 'sales' %}
 <script>
 
 // ── Add Invoice Modal ─────────────────────────────────────────
@@ -262,10 +449,7 @@ function closeAddInvoiceModal(e) {
 
 function submitNewInvoice() {
     const invoiceNumber = document.getElementById('new-inv-number').value.trim();
-    if (!invoiceNumber) {
-        alert('Invoice number is required');
-        return;
-    }
+    if (!invoiceNumber) { alert('Invoice number is required'); return; }
 
     const payload = {
         invoice_number: invoiceNumber,
@@ -279,25 +463,19 @@ function submitNewInvoice() {
 
     fetch('{% url "create_invoice" %}', {
         method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json'
-        },
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
     })
     .then(r => r.json())
     .then(data => {
-        if (data.success) {
-            window.location.href = data.invoice_url;
-        } else {
-            alert(data.error || 'Failed to create invoice');
-        }
+        if (data.success) { window.location.href = data.invoice_url; }
+        else { alert(data.error || 'Failed to create invoice'); }
     })
     .catch(err => alert('Error: ' + err.message));
 }
 
-// ── Sync via SSE stream ───────────────────────────────────────
-let _newPayments = [];  // payments not yet in our DB
+// ── Anthill sync via SSE stream ───────────────────────────────
+let _newPayments = [];
 let _syncTimerInterval = null;
 let _syncStartTime = null;
 
@@ -318,7 +496,6 @@ function _stopSyncTimer() {
 }
 
 function syncFromAnthill() {
-    // Just open modal and show period picker
     const modal = document.getElementById('anthill-sync-modal');
     modal.style.display = 'flex';
     document.getElementById('anthill-period-picker').style.display = '';
@@ -340,11 +517,10 @@ function startSync(period) {
     _newPayments = [];
     _startSyncTimer();
 
-    // Hide picker, show status
     document.getElementById('anthill-period-picker').style.display = 'none';
-    const statusEl = document.getElementById('anthill-sync-status');
-    const tableEl  = document.getElementById('anthill-sync-table');
-    const tbodyEl  = document.getElementById('anthill-sync-tbody');
+    const statusEl  = document.getElementById('anthill-sync-status');
+    const tableEl   = document.getElementById('anthill-sync-table');
+    const tbodyEl   = document.getElementById('anthill-sync-tbody');
     const summaryEl = document.getElementById('anthill-sync-summary');
     statusEl.style.display = '';
     statusEl.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> Connecting to Anthill...';
@@ -353,9 +529,7 @@ function startSync(period) {
     summaryEl.textContent = '';
     document.getElementById('anthill-import-btn').style.display = 'none';
 
-    let rowCount = 0;
-    let matchedCount = 0;
-    let newCount = 0;
+    let rowCount = 0, matchedCount = 0, newCount = 0;
 
     fetch('{% url "sync_invoices_anthill" %}?period=' + encodeURIComponent(period), { credentials: 'same-origin' })
     .then(response => {
@@ -367,116 +541,74 @@ function startSync(period) {
         function processChunk({ done, value }) {
             if (done) return;
             buffer += decoder.decode(value, { stream: true });
-
-            // SSE lines are "data: {...}\n\n"
             let boundary;
             while ((boundary = buffer.indexOf('\n\n')) !== -1) {
                 const raw = buffer.slice(0, boundary).trim();
                 buffer = buffer.slice(boundary + 2);
                 if (!raw.startsWith('data: ')) continue;
-
                 let evt;
                 try { evt = JSON.parse(raw.slice(6)); } catch { continue; }
-                handleEvent(evt);
+                handleSyncEvent(evt);
             }
             return reader.read().then(processChunk);
         }
-
         return reader.read().then(processChunk);
     })
     .catch(err => {
-        console.error('Sync stream error:', err);
         _stopSyncTimer();
-        statusEl.innerHTML =
-            '<i class="bi bi-exclamation-triangle" style="color:var(--danger-color);"></i> ' + err.message;
-        btn.disabled = false;
-        icon.classList.remove('spinning');
-        text.textContent = 'Sync Invoices from Anthill';
+        statusEl.innerHTML = '<i class="bi bi-exclamation-triangle" style="color:var(--danger-color);"></i> ' + err.message;
+        btn.disabled = false; icon.classList.remove('spinning'); text.textContent = 'Sync from Anthill';
     });
 
-    function handleEvent(evt) {
+    function handleSyncEvent(evt) {
         switch (evt.type) {
             case 'status':
                 statusEl.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> ' + evt.message +
                     '<span id="anthill-sync-timer" style="float:right; font-variant-numeric: tabular-nums; opacity:0.7;"></span>';
                 break;
-
             case 'page':
-                statusEl.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> Scraping page ' +
-                    evt.current + ' of ' + evt.total + '...' +
+                statusEl.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> Scraping page ' + evt.current + ' of ' + evt.total + '...' +
                     '<span id="anthill-sync-timer" style="float:right; font-variant-numeric: tabular-nums; opacity:0.7;"></span>';
                 break;
-
             case 'row': {
                 if (rowCount === 0) tableEl.style.display = '';
                 rowCount++;
-
                 const pay = evt.payment;
                 const isNew = evt.action === 'new';
-                if (isNew) {
-                    newCount++;
-                    _newPayments.push(pay);
-                } else {
-                    matchedCount++;
-                }
-
+                if (isNew) { newCount++; _newPayments.push(pay); } else { matchedCount++; }
                 const tr = document.createElement('tr');
-                if (isNew) {
-                    tr.style.background = 'rgba(255,193,7,0.08)';
-                } else {
-                    tr.style.opacity = '0.45';
-                }
-
+                tr.style.background = isNew ? 'rgba(255,193,7,0.08)' : '';
+                if (!isNew) tr.style.opacity = '0.45';
                 const icon = isNew
                     ? '<i class="bi bi-plus-circle" style="color:var(--warning-color);"></i>'
                     : '<i class="bi bi-check-circle" style="color:var(--success-color);"></i>';
-
-                tr.innerHTML =
-                    '<td style="text-align:center;">' + icon + '</td>' +
-                    '<td>' + (pay.showroom || '') + '</td>' +
-                    '<td>' + (pay.payment_date || '') + '</td>' +
-                    '<td>' + (pay.customer || '') + '</td>' +
-                    '<td>' + (pay.payment_type || '') + '</td>' +
+                tr.innerHTML = '<td style="text-align:center;">' + icon + '</td>' +
+                    '<td>' + (pay.showroom || '') + '</td><td>' + (pay.payment_date || '') + '</td>' +
+                    '<td>' + (pay.customer || '') + '</td><td>' + (pay.payment_type || '') + '</td>' +
                     '<td class="number-cell">' + (pay.amount || '') + '</td>' +
                     '<td><span class="inv-status ' + (pay.status || '').toLowerCase() + '">' + (pay.status || '') + '</span></td>' +
-                    '<td>' + (pay.contract_number || '') + '</td>' +
-                    '<td>' + (pay.method || '') + '</td>';
+                    '<td>' + (pay.contract_number || '') + '</td><td>' + (pay.method || '') + '</td>';
                 tbodyEl.appendChild(tr);
-
                 const body = tbodyEl.closest('.modal-body');
                 if (body) body.scrollTop = body.scrollHeight;
-
                 summaryEl.textContent = rowCount + ' row(s) — ' + matchedCount + ' matched, ' + newCount + ' new';
                 break;
             }
-
             case 'done':
                 _stopSyncTimer();
-                btn.disabled = false;
-                icon.classList.remove('spinning');
-                text.textContent = 'Sync Invoices from Anthill';
+                btn.disabled = false; icon.classList.remove('spinning'); text.textContent = 'Sync from Anthill';
                 var elapsed = Math.floor((Date.now() - _syncStartTime) / 1000);
                 var doneTime = (elapsed >= 60 ? Math.floor(elapsed/60) + 'm ' : '') + (elapsed % 60) + 's';
-                statusEl.innerHTML =
-                    '<i class="bi bi-check-circle" style="color:var(--success-color);"></i> Sync complete — ' + evt.location +
+                statusEl.innerHTML = '<i class="bi bi-check-circle" style="color:var(--success-color);"></i> Sync complete — ' + evt.location +
                     '<span style="float:right; font-variant-numeric: tabular-nums; opacity:0.7;">' + doneTime + '</span>';
-                summaryEl.textContent = evt.total + ' payment(s) — ' +
-                    evt.matched + ' matched, ' + evt.new + ' new';
-                if (evt.filtered_out > 0) {
-                    summaryEl.textContent += ' (' + evt.filtered_out + ' other locations filtered out)';
-                }
-                if (evt.new > 0) {
-                    document.getElementById('anthill-import-btn').style.display = '';
-                }
+                summaryEl.textContent = evt.total + ' payment(s) — ' + evt.matched + ' matched, ' + evt.new + ' new';
+                if (evt.filtered_out > 0) summaryEl.textContent += ' (' + evt.filtered_out + ' other locations filtered out)';
+                if (evt.new > 0) document.getElementById('anthill-import-btn').style.display = '';
                 break;
-
             case 'error':
                 _stopSyncTimer();
-                btn.disabled = false;
-                icon.classList.remove('spinning');
-                text.textContent = 'Sync Invoices from Anthill';
-                statusEl.innerHTML =
-                    '<i class="bi bi-exclamation-triangle" style="color:var(--danger-color);"></i> ' + evt.message;
+                btn.disabled = false; icon.classList.remove('spinning'); text.textContent = 'Sync from Anthill';
+                statusEl.innerHTML = '<i class="bi bi-exclamation-triangle" style="color:var(--danger-color);"></i> ' + evt.message;
                 break;
         }
     }
@@ -489,20 +621,13 @@ function importNewInvoices() {
     importBtn.innerHTML = '<i class="bi bi-arrow-repeat spinning"></i> Importing...';
 
     fetch('{% url "create_invoices_from_anthill" %}', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json'
-        },
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
         body: JSON.stringify({ payments: _newPayments })
     })
     .then(r => {
         const ct = r.headers.get('content-type') || '';
-        if (!ct.includes('application/json')) {
-            // Session may have expired — server returned a redirect/HTML page
-            throw new Error('Your session may have expired. Please refresh the page and try again.');
-        }
+        if (!ct.includes('application/json')) throw new Error('Your session may have expired. Please refresh and try again.');
         return r.json();
     })
     .then(data => {
@@ -536,10 +661,7 @@ function pushToXero(invoiceId) {
 
     fetch(`/invoices/${invoiceId}/push-to-xero/`, {
         method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json',
-        },
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({ gl_code: 'G1001' }),
     })
@@ -547,7 +669,6 @@ function pushToXero(invoiceId) {
     .then(data => {
         if (data.ok) {
             const cell = btn.closest('.inv-xero-cell');
-            // Add Xero link if not already present
             if (cell && !cell.querySelector('.inv-xero-link') && data.xero_id) {
                 btn.insertAdjacentHTML('beforebegin',
                     '<a href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + data.xero_id + '" target="_blank" class="inv-xero-link" title="View in Xero" onclick="event.stopPropagation();"><i class="bi bi-box-arrow-up-right"></i></a>');
@@ -556,15 +677,10 @@ function pushToXero(invoiceId) {
             btn.innerHTML = '<i class="bi bi-cloud-upload"></i>';
         } else {
             alert('Xero error: ' + (data.error || 'Unknown error'));
-            btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-cloud-upload"></i>';
+            btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-upload"></i>';
         }
     })
-    .catch(err => {
-        alert('Network error: ' + err);
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-cloud-upload"></i>';
-    });
+    .catch(err => { alert('Network error: ' + err); btn.disabled = false; btn.innerHTML = '<i class="bi bi-cloud-upload"></i>'; });
 }
 
 // ── Check all invoices against Xero ───────────────────────────
@@ -572,22 +688,16 @@ function checkXero() {
     const btn = document.getElementById('check-xero-btn');
     const icon = document.getElementById('check-xero-icon');
     const text = document.getElementById('check-xero-text');
-    btn.disabled = true;
-    icon.className = 'bi bi-arrow-repeat spinning';
-    text.textContent = 'Checking...';
+    btn.disabled = true; icon.className = 'bi bi-arrow-repeat spinning'; text.textContent = 'Checking...';
 
     fetch('{% url "check_invoices_in_xero" %}', {
         method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json',
-        },
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
         credentials: 'same-origin',
     })
     .then(r => r.json())
     .then(data => {
         if (data.ok) {
-            // Add Xero links to matched rows
             const xeroIds = data.matched_xero_ids || {};
             document.querySelectorAll('.inv-xero-push').forEach(btn => {
                 const onclick = btn.getAttribute('onclick') || '';
@@ -609,15 +719,9 @@ function checkXero() {
             text.textContent = 'Error';
             alert('Xero check failed: ' + (data.error || 'Unknown error'));
         }
-        icon.className = 'bi bi-search';
-        btn.disabled = false;
+        icon.className = 'bi bi-search'; btn.disabled = false;
     })
-    .catch(err => {
-        icon.className = 'bi bi-search';
-        text.textContent = 'Check Xero';
-        btn.disabled = false;
-        alert('Network error: ' + err);
-    });
+    .catch(err => { icon.className = 'bi bi-search'; text.textContent = 'Check Xero'; btn.disabled = false; alert('Network error: ' + err); });
 }
 
 // ── Hide invoices without a date (on by default) ─────────────
@@ -627,11 +731,8 @@ function applyDateFilter() {
     const table = document.getElementById('invoices-table');
     if (!table) return;
     table.querySelectorAll('tbody tr').forEach(row => {
-        if (_hideNoDate && row.dataset.hasDate === '0') {
-            row.classList.add('hidden-no-date');
-        } else {
-            row.classList.remove('hidden-no-date');
-        }
+        if (_hideNoDate && row.dataset.hasDate === '0') row.classList.add('hidden-no-date');
+        else row.classList.remove('hidden-no-date');
     });
 }
 
@@ -639,35 +740,317 @@ function toggleHideNoDate() {
     _hideNoDate = !_hideNoDate;
     const text = document.getElementById('hide-no-date-text');
     const icon = document.getElementById('hide-no-date-icon');
-    if (_hideNoDate) {
-        text.textContent = 'Show No-Date';
-        icon.className = 'bi bi-calendar-x';
-    } else {
-        text.textContent = 'Hide No-Date';
-        icon.className = 'bi bi-calendar-check';
-    }
+    if (_hideNoDate) { text.textContent = 'Show No-Date'; icon.className = 'bi bi-calendar-x'; }
+    else { text.textContent = 'Hide No-Date'; icon.className = 'bi bi-calendar-check'; }
     applyDateFilter();
 }
 
 // ── Client-side search filtering ──────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
-    // Apply date filter on load (hidden by default)
     applyDateFilter();
-
     const searchInput = document.getElementById('invoiceSearch');
     const table = document.getElementById('invoices-table');
-
     if (searchInput && table) {
         searchInput.addEventListener('input', function() {
             const filter = this.value.toLowerCase();
-            const rows = table.querySelectorAll('tbody tr');
-
-            rows.forEach(row => {
-                const matchesSearch = row.textContent.toLowerCase().includes(filter);
-                row.style.display = matchesSearch ? '' : 'none';
+            table.querySelectorAll('tbody tr').forEach(row => {
+                row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
             });
         });
     }
 });
 </script>
+
+{% else %}
+{% include 'stock_take/partials/invoice_modal_js.html' %}
+<script>
+
+// ── Page-specific modal functions ─────────────────────────────
+function openCreateModal() {
+    modalLineCount = 0;
+    document.getElementById('modal-lines').innerHTML = '';
+    document.getElementById('modal-total').textContent = '£0.00';
+    document.getElementById('new-pinv-number').value = '';
+    document.getElementById('modal-duplicate-warning').style.display = 'none';
+    document.getElementById('new-pinv-reference').value = '';
+    document.getElementById('new-pinv-supplier-ref').value = '';
+    document.getElementById('new-pinv-date').value = '';
+    document.getElementById('new-pinv-due-date').value = '';
+    document.getElementById('new-pinv-status').value = 'Draft';
+    document.getElementById('new-pinv-notes').value = '';
+    setModalCurrency('GBP');
+    clearModalPO();
+    clearModalSupplier();
+    const attInput = document.getElementById('modal-attachment-input');
+    if (attInput) attInput.value = '';
+    document.getElementById('modal-attachment-name').textContent = 'Click or drag \u0026 drop to attach a file';
+    document.getElementById('modal-attachment-icon').className = 'bi bi-cloud-upload';
+    fetch('/api/next-invoice-number/', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(r => r.json())
+        .then(d => { const el = document.getElementById('new-pinv-number'); if (el && !el.value) el.value = d.invoice_number || ''; })
+        .catch(() => {});
+    addModalLine();
+    document.getElementById('create-invoice-modal').classList.add('open');
+}
+
+function closeCreateModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('create-invoice-modal').classList.remove('open');
+}
+
+function submitCreateInvoice() {
+    const invoiceNumber = document.getElementById('new-pinv-number').value.trim();
+    if (!invoiceNumber) { alert('Invoice number is required'); return; }
+
+    const lineItems = [];
+    document.querySelectorAll('.pinv-line-row').forEach(row => {
+        const desc    = row.querySelector('.pinv-line-desc').value.trim();
+        const qty     = parseFloat(row.querySelector('.pinv-line-qty')?.value) || 1;
+        const rate    = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
+        const totalRaw = parseFloat(row.querySelector('.pinv-line-total')?.value);
+        const total    = Number.isFinite(totalRaw) ? totalRaw : null;
+        const ordInp  = row.querySelector('.pinv-line-order-input');
+        const orderId = ordInp ? (ordInp.dataset.orderId || null) : null;
+        if (desc) lineItems.push({ description: desc, quantity: qty, rate, line_total: total, order_id: orderId || null, po_product_id: row.dataset.poProductId || '', is_carriage: row.dataset.isCarriage === '1' });
+    });
+
+    const fd = new FormData();
+    fd.append('invoice_number', invoiceNumber);
+    fd.append('supplier_name', document.getElementById('new-pinv-supplier').value.trim());
+    fd.append('date', document.getElementById('new-pinv-date').value);
+    fd.append('due_date', document.getElementById('new-pinv-due-date').value);
+    fd.append('status', document.getElementById('new-pinv-status').value);
+    fd.append('notes', document.getElementById('new-pinv-notes').value.trim());
+    fd.append('reference', document.getElementById('new-pinv-reference').value.trim());
+    fd.append('supplier_reference', document.getElementById('new-pinv-supplier-ref').value.trim());
+    const poId = document.getElementById('new-pinv-po-search').dataset.poId || '';
+    if (poId) fd.append('purchase_order_id', poId);
+    fd.append('currency', typeof _modalCurrency !== 'undefined' ? _modalCurrency : 'GBP');
+    const _vatEnabled = document.getElementById('modal-vat-enabled')?.checked;
+    const _vatRate    = parseFloat(document.getElementById('modal-vat-rate')?.value) || 0;
+    if (_vatEnabled && _vatRate > 0) fd.append('vat_rate', _vatRate);
+    const carriageLine = lineItems.find(li => li.is_carriage);
+    if (carriageLine) fd.append('freight_cost', (carriageLine.quantity || 1) * carriageLine.rate);
+    lineItems.forEach((li, i) => {
+        fd.append(`line_desc_${i}`, li.description);
+        fd.append(`line_qty_${i}`, li.quantity);
+        fd.append(`line_rate_${i}`, li.rate);
+        if (li.line_total !== null && li.line_total !== undefined) fd.append(`line_total_${i}`, li.line_total);
+        fd.append(`line_order_${i}`, li.order_id || '');
+        if (li.po_product_id) fd.append(`line_po_product_${i}`, li.po_product_id);
+    });
+    const fileInput = document.getElementById('modal-attachment-input');
+    if (fileInput && fileInput.files.length) fd.append('attachment', fileInput.files[0]);
+
+    fetch('{% url "create_purchase_invoice" %}', {
+        method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token }}' }, body: fd
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) { window.location.href = data.invoice_url; }
+        else { alert(data.error || 'Failed to create invoice'); }
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function handleModalAttachment(input) {
+    const nameSpan = document.getElementById('modal-attachment-name');
+    const icon = document.getElementById('modal-attachment-icon');
+    if (input.files.length) {
+        const file = input.files[0];
+        nameSpan.textContent = file.name;
+        icon.className = 'bi bi-file-earmark-check';
+        const refEl = document.getElementById('new-pinv-reference');
+        if (refEl && !refEl.value) refEl.value = file.name.replace(/\.[^/.]+$/, '');
+        if (file.name.toLowerCase().endsWith('.pdf')) { parsePdfAndFillModal(file); }
+        else { autoPopulateFromFilename(file.name); }
+    } else {
+        nameSpan.textContent = 'Click or drag & drop to attach a file';
+        icon.className = 'bi bi-cloud-upload';
+    }
+}
+
+function parsePdfAndFillModal(file) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+    const nameSpan = document.getElementById('modal-attachment-name');
+    const originalText = nameSpan.textContent;
+    nameSpan.textContent = originalText + '  — extracting data…';
+    fetch('{% url "parse_purchase_invoice_pdf" %}', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+        nameSpan.textContent = originalText;
+        if (!data.success || !data.extracted) { autoPopulateFromFilename(file.name); return; }
+        const ex = data.extracted;
+        const hasAnyField = ex.invoice_number || ex.supplier_name || ex.date || ex.due_date || (ex.line_items && ex.line_items.length);
+        if (!hasAnyField) { autoPopulateFromFilename(file.name); return; }
+        if (ex.invoice_number) { const srEl = document.getElementById('new-pinv-supplier-ref'); if (srEl && !srEl.value) srEl.value = ex.invoice_number; }
+        if (ex.supplier_name) selectModalSupplier(ex.supplier_name);
+        if (ex.date) document.getElementById('new-pinv-date').value = ex.date;
+        if (ex.due_date) document.getElementById('new-pinv-due-date').value = ex.due_date;
+        if (ex.line_items && ex.line_items.length > 0) {
+            modalLineCount = 0;
+            document.getElementById('modal-lines').innerHTML = '';
+            ex.line_items.forEach(li => {
+                addModalLine();
+                const container = document.getElementById('modal-lines');
+                const lastRow = container.lastElementChild;
+                if (lastRow) {
+                    const descInput = lastRow.querySelector('.pinv-line-desc');
+                    const rateInput  = lastRow.querySelector('.pinv-line-rate');
+                    const totalInput = lastRow.querySelector('.pinv-line-total');
+                    if (descInput) descInput.value = li.description || '';
+                    if (rateInput) rateInput.value = li.amount != null ? li.amount : '';
+                    if (totalInput) totalInput.value = li.amount != null ? li.amount : '';
+                    if (li.description) autoLinkOrder(lastRow, li.description);
+                }
+            });
+            recalcModalTotal();
+        }
+    })
+    .catch(err => { nameSpan.textContent = originalText; autoPopulateFromFilename(file.name); });
+}
+
+function handleDroppedFile(e) {
+    const files = e.dataTransfer.files;
+    if (!files.length) return;
+    const input = document.getElementById('modal-attachment-input');
+    const dt = new DataTransfer();
+    dt.items.add(files[0]);
+    input.files = dt.files;
+    handleModalAttachment(input);
+}
+
+// ── Search Xero from list ─────────────────────────────────────
+function checkXeroStatus(invoiceId, btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+    fetch(`/purchase-invoices/${invoiceId}/search-in-xero/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.found) {
+            const td = btn.closest('td');
+            td.innerHTML = `<a href="${data.xero_url}" target="_blank" onclick="event.stopPropagation()" title="View in Xero" class="pinv-tbl-icon xero-linked"><i class="bi bi-check-circle-fill"></i></a>`;
+        } else {
+            btn.disabled = false; btn.innerHTML = '<i class="bi bi-x-circle-fill"></i>';
+            btn.title = data.message || 'Not found in Xero — open invoice to push';
+        }
+    })
+    .catch(() => { btn.disabled = false; btn.innerHTML = '<i class="bi bi-x-circle-fill"></i>'; });
+}
+
+// ── Sync payment statuses from Xero ───────────────────────────
+function syncXeroPayments() {
+    const btn = document.getElementById('sync-xero-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Syncing…';
+    fetch('/purchase-invoices/sync-xero-payments/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const msg = data.updated > 0 ? `Updated ${data.updated} invoice(s). Reloading…` : 'All statuses up to date.';
+            btn.innerHTML = `<i class="bi bi-check-circle"></i> ${msg}`;
+            if (data.updated > 0) { setTimeout(() => window.location.reload(), 1200); }
+            else { setTimeout(() => { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync from Xero'; }, 2500); }
+        } else {
+            btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync from Xero';
+            alert(data.error || 'Sync failed');
+        }
+    })
+    .catch(() => { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync from Xero'; });
+}
+
+// ── Client-side search ─────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('pinv-search');
+    const table = document.getElementById('purchase-invoices-table');
+    if (searchInput && table) {
+        searchInput.addEventListener('input', function() {
+            const filter = this.value.toLowerCase();
+            table.querySelectorAll('tbody tr').forEach(row => {
+                row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
+            });
+        });
+    }
+});
+
+// ── Row selection + bulk Xero push ─────────────────────────────
+function getSelectedPinvRows() {
+    return Array.from(document.querySelectorAll('.pinv-row-check:checked'));
+}
+
+function updatePinvSelection() {
+    const all = Array.from(document.querySelectorAll('.pinv-row-check'));
+    const checked = all.filter(cb => cb.checked);
+    const countEl = document.getElementById('pinv-selection-count');
+    if (countEl) {
+        if (checked.length) { countEl.textContent = `${checked.length} selected`; countEl.style.display = ''; }
+        else { countEl.style.display = 'none'; }
+    }
+    const master = document.getElementById('pinv-select-all');
+    if (master) {
+        master.checked = checked.length > 0 && checked.length === all.length;
+        master.indeterminate = checked.length > 0 && checked.length < all.length;
+    }
+}
+
+function togglePinvSelectAll(master) {
+    document.querySelectorAll('.pinv-row-check').forEach(cb => {
+        const row = cb.closest('tr');
+        if (row && row.style.display !== 'none') cb.checked = master.checked;
+    });
+    updatePinvSelection();
+}
+
+function clearPinvSelection() {
+    document.querySelectorAll('.pinv-row-check').forEach(cb => { cb.checked = false; });
+    updatePinvSelection();
+}
+
+function pushSelectedToXero() {
+    const selected = getSelectedPinvRows();
+    if (!selected.length) { alert('Select one or more invoices first (use the checkboxes on the right).'); return; }
+    const toPush = selected.filter(cb => !(cb.dataset.xeroId || '').trim());
+    const alreadyLinked = selected.length - toPush.length;
+    if (!toPush.length) { alert('All selected invoices are already in Xero.'); return; }
+    let confirmMsg = `Push ${toPush.length} invoice(s) to Xero as draft bills? Each is pushed individually.`;
+    if (alreadyLinked > 0) confirmMsg += `\n\n${alreadyLinked} already-linked invoice(s) will be skipped.`;
+    if (!confirm(confirmMsg)) return;
+
+    const items = toPush.map(cb => ({ id: cb.value, number: cb.dataset.invoiceNumber || cb.value, row: cb.closest('tr') }));
+    let pushed = 0;
+    const failures = [];
+
+    const run = (pos) => {
+        if (pos >= items.length) {
+            const summary = failures.length
+                ? `${pushed} pushed, ${failures.length} failed:\n` + failures.join('\n')
+                : `${pushed} invoice(s) pushed to Xero. Reloading…`;
+            alert(summary);
+            if (pushed > 0) setTimeout(() => window.location.reload(), 600);
+            return;
+        }
+        const item = items[pos];
+        if (item.row) item.row.classList.add('pinv-pushing');
+        fetch(`/purchase-invoices/${item.id}/push-to-xero/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        })
+        .then(r => r.json().catch(() => ({ success: false, error: `HTTP ${r.status}` })))
+        .then(data => { if (data.success) pushed++; else failures.push(`${item.number}: ${data.error || 'Unknown error'}`); })
+        .catch(err => { failures.push(`${item.number}: ${err.message}`); })
+        .finally(() => { if (item.row) item.row.classList.remove('pinv-pushing'); run(pos + 1); });
+    };
+    run(0);
+}
+</script>
+{% endif %}
 {% endblock %}

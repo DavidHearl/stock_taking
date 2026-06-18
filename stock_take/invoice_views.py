@@ -13,14 +13,15 @@ from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.core.paginator import Paginator
+from django.db.models import Case, Count, ExpressionWrapper, DecimalField as OrmDecimalField, F, IntegerField, Q, Sum, When
 from django.shortcuts import render, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.http import StreamingHttpResponse, JsonResponse
 from django.utils import timezone
 
 
-from .models import Invoice, PurchaseOrder, PurchaseOrderProduct, AnthillSale, Customer, Order, EnabledGLCode
+from .models import Invoice, OverheadPurchaseOrder, PurchaseInvoice, PurchaseOrder, PurchaseOrderProduct, AnthillSale, Customer, Order, EnabledGLCode, Supplier
 
 logger = logging.getLogger(__name__)
 
@@ -140,14 +141,36 @@ def _ensure_sale_and_customer(contract_number: str, customer_name: str, showroom
     return sale, customer
 
 
-# ── Invoice list ──────────────────────────────────────────────────
+_INV_PER_PAGE = 50
+
+
+# ── Invoice list (combined sales + purchase) ──────────────────────
 @login_required
 def invoices_list(request):
-    """Display invoices from the local database."""
-
+    """Display sales or purchase invoices — combined page with a type selector."""
+    invoice_type = request.GET.get('type', 'sales')
+    if invoice_type not in ('sales', 'purchase'):
+        invoice_type = 'sales'
     status_filter = request.GET.get('status', 'all')
     search_query = request.GET.get('q', '').strip()
+    try:
+        page_num = max(1, int(request.GET.get('page', 1)))
+    except (ValueError, TypeError):
+        page_num = 1
 
+    if invoice_type == 'purchase':
+        context = _purchase_invoices_context(status_filter, search_query, page_num)
+    else:
+        context = _sales_invoices_context(request, status_filter, search_query, page_num)
+
+    context['invoice_type'] = invoice_type
+    context['status_filter'] = status_filter
+    context['search_query'] = search_query
+    return render(request, 'stock_take/invoices.html', context)
+
+
+def _sales_invoices_context(request, status_filter, search_query, page_num):
+    """Build context for the Sales Invoices tab."""
     qs = Invoice.objects.all()
 
     # Location filter — match Anthill sync behaviour
@@ -178,35 +201,30 @@ def invoices_list(request):
             | Q(description__icontains=search_query)
         )
 
-    invoices = list(qs.select_related('customer', 'order').order_by('-date'))
+    qs = qs.order_by('-date', '-id')
 
-    # Backfill link integrity for legacy scraped rows: every payment invoice should
-    # have a customer and a matching sale in Atlas.
-    for inv in invoices:
-        if not inv.contract_number:
-            continue
-        sale, customer = _ensure_sale_and_customer(inv.contract_number, inv.client_name, inv.showroom)
-        if customer and not inv.customer_id:
-            inv.customer = customer
-            inv.save(update_fields=['customer'])
-            inv.customer_id = customer.pk
-        inv.sale_pk = sale.pk if sale else None
+    # Aggregate stats over the full filtered set (before pagination)
+    stats = qs.aggregate(
+        total_invoices=Count('id'),
+        total_value=Sum('total'),
+        total_outstanding=Sum('amount_outstanding'),
+        total_paid_sum=Sum('amount_paid'),
+        paid_count=Count(Case(When(payment_status='paid', then=1), output_field=IntegerField())),
+        unpaid_count=Count(Case(When(payment_status='unpaid', then=1), output_field=IntegerField())),
+        partial_count=Count(Case(When(payment_status='partial', then=1), output_field=IntegerField())),
+        overdue_count=Count(Case(When(is_overdue=True, then=1), output_field=IntegerField())),
+    )
 
-    # Summary stats (over filtered set)
-    total_invoices = len(invoices)
-    total_value = sum(inv.total for inv in invoices)
-    total_outstanding = sum(inv.amount_outstanding for inv in invoices)
-    total_paid = sum(inv.amount_paid for inv in invoices)
-    paid_count = sum(1 for inv in invoices if inv.payment_status == 'paid')
-    unpaid_count = sum(1 for inv in invoices if inv.payment_status == 'unpaid')
-    partial_count = sum(1 for inv in invoices if inv.payment_status == 'partial')
-    overdue_count = sum(1 for inv in invoices if inv.is_overdue)
+    # Paginate — only load _INV_PER_PAGE records per page
+    paginator = Paginator(qs.select_related('customer', 'order'), _INV_PER_PAGE)
+    page_obj = paginator.get_page(page_num)
+    invoices = list(page_obj.object_list)
 
-    # Last sync timestamp
-    last_sync = Invoice.objects.order_by('-synced_at').values_list('synced_at', flat=True).first()
-
-    # Map contract numbers to AnthillSale PKs and customer PKs for linking
-    contract_numbers = set(inv.contract_number for inv in invoices if inv.contract_number)
+    # Map contract numbers to AnthillSale PKs and customer PKs for current page.
+    # A single bulk query replaces the previous per-row _ensure_sale_and_customer
+    # backfill (which issued several queries per invoice). Link-integrity backfill
+    # is handled during the Anthill sync, not on every list page load.
+    contract_numbers = {inv.contract_number for inv in invoices if inv.contract_number}
     sale_map = {}
     sale_customer_map = {}
     if contract_numbers:
@@ -218,7 +236,6 @@ def invoices_list(request):
             if cust_pk:
                 sale_customer_map[cn] = cust_pk
 
-    # Build a name→PK map for invoices still missing a customer link
     unlinked_names = set()
     for inv in invoices:
         if not inv.customer_id and inv.contract_number not in sale_customer_map and inv.client_name:
@@ -231,30 +248,82 @@ def invoices_list(request):
         )
 
     for inv in invoices:
-        inv.sale_pk = getattr(inv, 'sale_pk', None) or sale_map.get(inv.contract_number)
-        # If invoice has no customer FK, try sale's customer, then name match
+        inv.sale_pk = sale_map.get(inv.contract_number)
         if not inv.customer_id:
             inv.sale_customer_pk = (
                 sale_customer_map.get(inv.contract_number)
                 or name_customer_map.get(inv.client_name)
             )
 
-    context = {
+    last_sync = Invoice.objects.order_by('-synced_at').values_list('synced_at', flat=True).first()
+
+    return {
         'invoices': invoices,
-        'total_invoices': total_invoices,
-        'total_value': total_value,
-        'total_outstanding': total_outstanding,
-        'total_paid': total_paid,
-        'paid_count': paid_count,
-        'unpaid_count': unpaid_count,
-        'partial_count': partial_count,
-        'overdue_count': overdue_count,
-        'status_filter': status_filter,
-        'search_query': search_query,
+        'page_obj': page_obj,
+        'total_invoices': stats['total_invoices'] or 0,
+        'total_value': stats['total_value'] or Decimal('0'),
+        'total_outstanding': stats['total_outstanding'] or Decimal('0'),
+        'total_paid': stats['total_paid_sum'] or Decimal('0'),
+        'paid_count': stats['paid_count'] or 0,
+        'unpaid_count': stats['unpaid_count'] or 0,
+        'partial_count': stats['partial_count'] or 0,
+        'overdue_count': stats['overdue_count'] or 0,
         'last_sync': last_sync,
     }
 
-    return render(request, 'stock_take/invoices.html', context)
+
+def _purchase_invoices_context(status_filter, search_query, page_num):
+    """Build context for the Purchase Invoices tab."""
+    qs = PurchaseInvoice.objects.all()
+
+    if status_filter == 'unpaid':
+        qs = qs.exclude(payment_status='paid')
+    elif status_filter not in ('', 'all'):
+        qs = qs.filter(status=status_filter.capitalize())
+
+    if search_query:
+        qs = qs.filter(
+            Q(invoice_number__icontains=search_query)
+            | Q(supplier_name__icontains=search_query)
+            | Q(notes__icontains=search_query)
+        )
+
+    qs = qs.order_by('-date', '-id')
+
+    # Aggregate stats over the full filtered set (before pagination).
+    # amount_outstanding is a @property (total - amount_paid), so we must derive it.
+    _outstanding_expr = ExpressionWrapper(F('total') - F('amount_paid'), output_field=OrmDecimalField(max_digits=12, decimal_places=2))
+    stats = qs.aggregate(
+        total_invoices=Count('id'),
+        total_value=Sum('total'),
+        total_outstanding=Sum(_outstanding_expr),
+        total_paid_sum=Sum('amount_paid'),
+        paid_count=Count(Case(When(payment_status='paid', then=1), output_field=IntegerField())),
+        unpaid_count=Count(Case(When(payment_status='unpaid', then=1), output_field=IntegerField())),
+        partial_count=Count(Case(When(payment_status='partial', then=1), output_field=IntegerField())),
+    )
+
+    # Paginate — only load _INV_PER_PAGE records per page
+    paginator = Paginator(qs, _INV_PER_PAGE)
+    page_obj = paginator.get_page(page_num)
+    invoices = list(page_obj.object_list)
+
+    suppliers = list(Supplier.objects.values_list('name', flat=True).order_by('name'))
+
+    return {
+        'invoices': invoices,
+        'page_obj': page_obj,
+        'total_invoices': stats['total_invoices'] or 0,
+        'total_value': stats['total_value'] or Decimal('0'),
+        'total_outstanding': stats['total_outstanding'] or Decimal('0'),
+        'total_paid': stats['total_paid_sum'] or Decimal('0'),
+        'paid_count': stats['paid_count'] or 0,
+        'unpaid_count': stats['unpaid_count'] or 0,
+        'partial_count': stats['partial_count'] or 0,
+        'suppliers': suppliers,
+        'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
+        'opo_gl_codes': EnabledGLCode.objects.filter(enabled=True).order_by('code'),
+    }
 
 
 # ── Invoice detail ────────────────────────────────────────────────

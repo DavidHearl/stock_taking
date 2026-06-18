@@ -763,59 +763,14 @@ def parse_purchase_invoice_pdf(request):
 # ── List ──────────────────────────────────────────────────────────
 @login_required
 def purchase_invoices_list(request):
-    status_filter = request.GET.get('status', 'all')
-    search_query  = request.GET.get('q', '').strip()
-
-    qs = PurchaseInvoice.objects.all()
-
-    if status_filter == 'unpaid':
-        qs = qs.exclude(payment_status='paid')
-    elif status_filter not in ('', 'all'):
-        qs = qs.filter(status=status_filter.capitalize())
-
-    if search_query:
-        qs = qs.filter(
-            Q(invoice_number__icontains=search_query) |
-            Q(supplier_name__icontains=search_query) |
-            Q(notes__icontains=search_query)
-        )
-
-    invoices = list(qs)
-
-    # Order by invoice number, largest first (e.g. INV-A00-014 then INV-A00-013).
-    # Use a natural sort key so the numeric suffix sorts numerically and the
-    # alpha prefix groups correctly, rather than a plain string comparison.
-    def _invoice_sort_key(inv):
-        parts = re.split(r'(\d+)', inv.invoice_number or '')
-        return [int(p) if p.isdigit() else p.lower() for p in parts]
-
-    invoices.sort(key=_invoice_sort_key, reverse=True)
-
-    total_value       = sum(inv.total for inv in invoices)
-    total_outstanding = sum(inv.amount_outstanding for inv in invoices)
-    total_paid        = sum(inv.amount_paid for inv in invoices)
-    paid_count        = sum(1 for inv in invoices if inv.payment_status == 'paid')
-    unpaid_count      = sum(1 for inv in invoices if inv.payment_status == 'unpaid')
-    partial_count     = sum(1 for inv in invoices if inv.payment_status == 'partial')
-
-    suppliers = list(Supplier.objects.values_list('name', flat=True).order_by('name'))
-
-    context = {
-        'invoices': invoices,
-        'total_invoices': len(invoices),
-        'total_value': total_value,
-        'total_outstanding': total_outstanding,
-        'total_paid': total_paid,
-        'paid_count': paid_count,
-        'unpaid_count': unpaid_count,
-        'partial_count': partial_count,
-        'status_filter': status_filter,
-        'search_query': search_query,
-        'suppliers': suppliers,
-        'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
-        'opo_gl_codes': EnabledGLCode.objects.filter(enabled=True).order_by('code'),
-    }
-    return render(request, 'stock_take/purchase_invoices.html', context)
+    """Redirect to the combined invoices page, purchase tab."""
+    from django.shortcuts import redirect
+    qs = request.GET.urlencode()
+    base = '/invoices/?type=purchase'
+    if qs:
+        # Carry forward any existing query params (e.g. status, q, page)
+        base += '&' + qs
+    return redirect(base)
 
 
 # ── Detail ────────────────────────────────────────────────────────
