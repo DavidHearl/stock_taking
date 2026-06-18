@@ -1,11 +1,11 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}{% if view_mode == 'contacts' %}Contacts{% else %}Customers{% endif %}{% endblock %}
+{% block title %}{% if view_mode == 'contacts' %}Contacts{% elif view_mode == 'events' %}Events{% else %}Customers{% endif %}{% endblock %}
 
 {% block nav_customers_active %}active{% endblock %}
 
-{% block page_title %}{% if view_mode == 'contacts' %}Contacts{% else %}Customers{% endif %}{% endblock %}
+{% block page_title %}{% if view_mode == 'contacts' %}Contacts{% elif view_mode == 'events' %}Events{% else %}Customers{% endif %}{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/customers.css' %}">
@@ -79,10 +79,21 @@
 <!-- Unified toolbar: switcher + search + actions -->
 <div class="tabs">
     <div class="view-mode-switcher">
-        <a href="{% url 'customers_list' %}" class="view-mode-btn {% if view_mode != 'contacts' %}active{% endif %}">Customers</a>
+        <a href="{% url 'customers_list' %}" class="view-mode-btn {% if view_mode == 'customers' %}active{% endif %}">Customers</a>
         <a href="{% url 'customers_list' %}?view=contacts" class="view-mode-btn {% if view_mode == 'contacts' %}active{% endif %}">Contacts</a>
+        <a href="{% url 'customers_list' %}?view=events" class="view-mode-btn {% if view_mode == 'events' %}active{% endif %}">Events</a>
     </div>
-    {% if view_mode == 'contacts' %}
+    {% if view_mode == 'events' %}
+    <div class="search-input-wrapper">
+        <i class="bi bi-search"></i>
+        <input type="text" id="event-search" value="{{ search_query }}" placeholder="Search by customer, activity ID, type, status..." autocomplete="off">
+    </div>
+    <div class="tab-actions">
+        {% if location_filter %}
+        <span style="font-size:0.8rem; color:var(--text-secondary);"><i class="bi bi-geo-alt-fill"></i> {{ location_filter }}</span>
+        {% endif %}
+    </div>
+    {% elif view_mode == 'contacts' %}
     <div class="search-input-wrapper">
         <i class="bi bi-search"></i>
         <input type="text" id="lead-search" value="{{ search_query }}" placeholder="Search by name, email, phone, city or postcode..." autocomplete="off">
@@ -133,7 +144,90 @@
     {% endif %}
 </div>
 
-{% if view_mode == 'contacts' %}
+{% if view_mode == 'events' %}
+<!-- ═══════════════════════════════════════ EVENTS TAB ════════════════════════════════════════ -->
+
+{% if events %}
+<div class="customers-table-container">
+    <table class="customers-table" style="table-layout:fixed;">
+        <thead>
+            <tr>
+                <th style="width:10%;">Activity ID</th>
+                <th style="width:16%;">Customer</th>
+                <th style="width:10%;">Type</th>
+                <th style="width:8%;">Status</th>
+                <th style="width:12%;">Assigned To</th>
+                <th style="width:8%;">Value</th>
+                <th style="width:10%;">Contract</th>
+                <th style="width:9%;">Date</th>
+                <th style="width:9%;">Location</th>
+                <th style="width:8%;">Order</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in events %}
+            <tr>
+                <td><a href="{% url 'sale_detail' event.pk %}" class="customer-name-link">{{ event.anthill_activity_id }}</a></td>
+                <td>
+                    {% if event.customer %}
+                    <a href="{% url 'customer_detail' event.customer.pk %}" class="customer-name-link">{{ event.customer.name|default:event.customer_name }}</a>
+                    {% else %}{{ event.customer_name|default:"-" }}{% endif %}
+                </td>
+                <td>{{ event.activity_type|default:"-" }}</td>
+                <td>
+                    <span class="customer-active-badge {% if event.status == 'won' %}active{% elif event.status == 'dead' %}danger{% else %}inactive{% endif %}">
+                        {{ event.status|default:"-" }}
+                    </span>
+                </td>
+                <td>{{ event.assigned_to_name|default:"-" }}</td>
+                <td class="text-right">{% if event.sale_value %}£{{ event.sale_value|floatformat:0 }}{% else %}-{% endif %}</td>
+                <td><span style="font-size:0.75rem;">{{ event.contract_number|default:"-" }}</span></td>
+                <td>{{ event.activity_date|date:"d/m/Y"|default:"-" }}</td>
+                <td>{{ event.location|default:"-" }}</td>
+                <td>
+                    {% if event.order %}
+                    <a href="{% url 'order_details' event.order.id %}" class="customer-order-badge">{{ event.order.sale_number }}</a>
+                    {% else %}<span class="text-muted">-</span>{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="customers-empty-state">
+    <i class="bi bi-calendar-event"></i>
+    <p>No events found.</p>
+</div>
+{% endif %}
+
+<!-- Pagination -->
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="customers-pagination">
+    <div class="pagination-info">
+        Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} events
+    </div>
+    <div class="pagination-controls">
+        {% if page_obj.has_previous %}
+        <a href="?view=events&page=1{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+        <a href="?view=events&page={{ page_obj.previous_page_number }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+        {% endif %}
+        {% for num in page_obj.paginator.page_range %}
+            {% if page_obj.number == num %}<span class="page-btn active">{{ num }}</span>
+            {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}<a href="?view=events&page={{ num }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+            {% elif num == 1 or num == page_obj.paginator.num_pages %}<a href="?view=events&page={{ num }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+            {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}<span class="page-ellipsis">&hellip;</span>
+            {% endif %}
+        {% endfor %}
+        {% if page_obj.has_next %}
+        <a href="?view=events&page={{ page_obj.next_page_number }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+        <a href="?view=events&page={{ page_obj.paginator.num_pages }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% elif view_mode == 'contacts' %}
 <!-- ═══════════════════════════════════════ CONTACTS TAB ═══════════════════════════════════════ -->
 
 {% if leads %}
@@ -686,7 +780,37 @@ function bulkDeleteLeads() {
 
 {% endif %}{# end view_mode == contacts #}
 
-{% if view_mode != 'contacts' %}
+{% if view_mode == 'events' %}
+<script>
+const eventSearchInput = document.getElementById('event-search');
+let eventSearchTimeout;
+if (eventSearchInput) {
+    eventSearchInput.addEventListener('input', function() {
+        clearTimeout(eventSearchTimeout);
+        eventSearchTimeout = setTimeout(() => {
+            const query = this.value.trim();
+            const params = new URLSearchParams(window.location.search);
+            if (query) params.set('q', query); else params.delete('q');
+            params.delete('page');
+            window.location.href = '?' + params.toString();
+        }, 500);
+    });
+    eventSearchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            clearTimeout(eventSearchTimeout);
+            const query = this.value.trim();
+            const params = new URLSearchParams(window.location.search);
+            if (query) params.set('q', query); else params.delete('q');
+            params.delete('page');
+            window.location.href = '?' + params.toString();
+        }
+    });
+    eventSearchInput.focus();
+}
+</script>
+{% endif %}{# end view_mode == events #}
+
+{% if view_mode == 'customers' %}
 <script>
 // --- Server-side search with debounce ---
 const searchInput = document.getElementById('customer-search');
@@ -879,5 +1003,5 @@ function bulkDelete() {
     .catch(err => alert('Network error: ' + err.message));
 }
 </script>
-{% endif %}{# end view_mode != contacts #}
+{% endif %}{# end view_mode == customers #}
 {% endblock %}

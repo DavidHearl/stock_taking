@@ -26,7 +26,65 @@ def customers_list(request):
     from django.core.paginator import Paginator
     from datetime import timedelta
 
-    view_mode = request.GET.get('view', 'customers')  # 'customers' or 'contacts'
+    view_mode = request.GET.get('view', 'customers')  # 'customers', 'contacts', or 'events'
+
+    # ── Events (AnthillSale) view ─────────────────────────────────────────
+    if view_mode == 'events':
+        from django.utils import timezone
+        from django.core.paginator import Paginator
+        from datetime import timedelta
+
+        search_query = request.GET.get('q', '').strip()
+        category_filter = request.GET.get('cat', '').strip()
+
+        profile = getattr(request.user, 'profile', None)
+        location_filter = profile.selected_location if profile else ''
+
+        events_base = AnthillSale.objects.select_related('customer', 'order').order_by('-activity_date')
+
+        if location_filter and not search_query:
+            events_base = events_base.filter(location__iexact=location_filter)
+
+        if category_filter:
+            events_base = events_base.filter(category=category_filter)
+
+        if search_query:
+            terms = search_query.split()
+            per_term_qs = []
+            for term in terms:
+                per_term_qs.append(
+                    Q(customer_name__icontains=term) |
+                    Q(anthill_activity_id__icontains=term) |
+                    Q(activity_type__icontains=term) |
+                    Q(status__icontains=term) |
+                    Q(assigned_to_name__icontains=term) |
+                    Q(contract_number__icontains=term) |
+                    Q(source__icontains=term) |
+                    Q(customer__name__icontains=term) |
+                    Q(customer__first_name__icontains=term) |
+                    Q(customer__last_name__icontains=term)
+                )
+            search_q = per_term_qs[0]
+            for extra in per_term_qs[1:]:
+                search_q &= extra
+            events_base = events_base.filter(search_q)
+
+        page_number = request.GET.get('page', 1)
+        paginator = Paginator(events_base, 100)
+        page_obj = paginator.get_page(page_number)
+
+        context = {
+            'view_mode': 'events',
+            'events': page_obj,
+            'page_obj': page_obj,
+            'filtered_count': paginator.count,
+            'search_query': search_query,
+            'category_filter': category_filter,
+            'location_filter': location_filter,
+            'source_choices': Lead.SOURCE_CHOICES,
+            'status_choices': Lead.STATUS_CHOICES,
+        }
+        return render(request, 'stock_take/customers_list.html', context)
 
     # ── Contacts (Leads) view ────────────────────────────────────────────
     if view_mode == 'contacts':

@@ -266,7 +266,7 @@ urlpatterns = [
     path('supplier/<int:supplier_id>/contacts/<int:contact_id>/set-default/', supplier_contact_set_default, name='supplier_contact_set_default'),
     
     # Customers
-    path('events/', events_list, name='events_list'),
+    path('events/', RedirectView.as_view(url='/customers/?view=events', permanent=False), name='events_list'),
     path('sales/', sales_list, name='sales_list'),
     path('sales/by-designer/', sales_by_designer_api, name='sales_by_designer_api'),
     path('sale/<int:pk>/', sale_detail, name='sale_detail'),
