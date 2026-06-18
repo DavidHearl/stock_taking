@@ -188,7 +188,7 @@ def lead_create(request):
     name = request.POST.get('name', '').strip()
     if not name:
         messages.error(request, 'Lead name is required.')
-        return redirect('leads_list')
+        return redirect('/customers/?view=contacts')
 
     lead = Lead.objects.create(
         name=name,

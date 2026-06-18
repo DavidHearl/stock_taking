@@ -20,44 +20,84 @@ logger = logging.getLogger(__name__)
 def customers_list(request):
     """Display list of all customers with date-bracket filters and cascading search.
     Location is taken from the user's profile (site-wide selector in the top navbar).
+    Also handles the 'contacts' view mode (Leads) via ?view=contacts.
     """
     from django.utils import timezone
     from django.core.paginator import Paginator
     from datetime import timedelta
 
+    view_mode = request.GET.get('view', 'customers')  # 'customers' or 'contacts'
+
+    # ── Contacts (Leads) view ────────────────────────────────────────────
+    if view_mode == 'contacts':
+        search_query = request.GET.get('q', '').strip()
+        status_filter = request.GET.get('status', 'all')
+
+        leads = Lead.objects.all()
+
+        if status_filter == 'active':
+            leads = leads.exclude(status__in=['converted', 'lost'])
+        elif status_filter == 'converted':
+            leads = leads.filter(status='converted')
+        elif status_filter == 'lost':
+            leads = leads.filter(status='lost')
+        elif status_filter != 'all':
+            leads = leads.filter(status=status_filter)
+
+        if search_query:
+            terms = search_query.split()
+            per_term_qs = []
+            for term in terms:
+                per_term_qs.append(
+                    Q(name__icontains=term) |
+                    Q(email__icontains=term) |
+                    Q(phone__icontains=term) |
+                    Q(city__icontains=term) |
+                    Q(postcode__icontains=term) |
+                    Q(source__icontains=term) |
+                    Q(anthill_customer_id__icontains=term)
+                )
+            search_q = per_term_qs[0]
+            for extra in per_term_qs[1:]:
+                search_q &= extra
+            leads = leads.filter(search_q)
+
+        total_count = Lead.objects.count()
+        active_count = Lead.objects.exclude(status__in=['converted', 'lost']).count()
+        converted_count = Lead.objects.filter(status='converted').count()
+        lost_count = Lead.objects.filter(status='lost').count()
+        filtered_count = leads.count()
+
+        paginator = Paginator(leads, 100)
+        page_number = request.GET.get('page', 1)
+        page_obj = paginator.get_page(page_number)
+
+        context = {
+            'view_mode': 'contacts',
+            'leads': page_obj,
+            'page_obj': page_obj,
+            'total_count': total_count,
+            'active_count': active_count,
+            'converted_count': converted_count,
+            'lost_count': lost_count,
+            'filtered_count': filtered_count,
+            'search_query': search_query,
+            'status_filter': status_filter,
+            'status_choices': Lead.STATUS_CHOICES,
+            'source_choices': Lead.SOURCE_CHOICES,
+        }
+        return render(request, 'stock_take/customers_list.html', context)
+
+    # ── Customers view (default) ─────────────────────────────────────────
     search_query = request.GET.get('q', '').strip()
-    age_filter = request.GET.get('age', '1y')  # default to <1 year
 
     # Location comes from the user's profile (site-wide setting)
     profile = getattr(request.user, 'profile', None)
     location_filter = profile.selected_location if profile else ''
 
-    now = timezone.now()
-
-    # Define date bracket cutoffs
-    cutoff_1y = now - timedelta(days=365)    # ~1 year
-    cutoff_2y = now - timedelta(days=730)    # ~2 years
-
-    # Annotate whether each customer has at least one historic sale
-    historic_sale_subquery = AnthillSale.objects.filter(
-        customer=OuterRef('pk'),
-        activity_type__istartswith='Historic'
-    )
-
-    # Use the most recent sale date (if available) to determine age bracket.
-    # If a customer had a sale 3 months ago, they are in the <1y bracket
-    # even if their account was created 10 years ago.
-    from django.db.models.functions import Coalesce, Greatest
-    customers_base = Customer.objects.prefetch_related('orders').annotate(
-        latest_sale=Max('anthill_sales__activity_date'),
-        base_date=Coalesce('creation_time', 'anthill_created_date'),
-        has_historic_sale=Exists(historic_sale_subquery),
-    ).annotate(
-        effective_date=Coalesce(
-            Greatest('base_date', 'latest_sale'),
-            'latest_sale',
-            'base_date',
-        )
+    from django.db.models import Prefetch
+    customers_base = Customer.objects.prefetch_related(
+        Prefetch('orders', queryset=Order.objects.order_by('sale_number', 'id').distinct('sale_number'))
     ).order_by('name', 'last_name', 'first_name')
 
     # Apply location filter from profile (skip when searching so results
@@ -66,10 +106,7 @@ def customers_list(request):
         customers_base = customers_base.filter(location__iexact=location_filter)
 
     # Build search Q filter
-    search_q = None
     if search_query:
-        # Split into individual terms so "Lewis McKee" matches
-        # first_name="Lewis" + last_name="McKee"
         terms = search_query.split()
         per_term_qs = []
         for term in terms:
@@ -84,115 +121,31 @@ def customers_list(request):
                 Q(postcode__icontains=term) |
                 Q(anthill_customer_id__icontains=term)
             )
-        # All terms must match (AND), but each term can match any field
         search_q = per_term_qs[0]
         for extra in per_term_qs[1:]:
             search_q &= extra
-
-    # Date bracket filters
-    # Historic = customer has at least one sale with activity_type starting with 'Historic'
-    # The date-based brackets exclude historic customers
-    def bracket_filter(qs, bracket):
-        if bracket == '1y':
-            return qs.filter(has_historic_sale=False, effective_date__gte=cutoff_1y)
-        elif bracket == '1_2y':
-            return qs.filter(has_historic_sale=False, effective_date__gte=cutoff_2y, effective_date__lt=cutoff_1y)
-        elif bracket == '2_10y':
-            return qs.filter(has_historic_sale=False, effective_date__lt=cutoff_2y).exclude(effective_date__isnull=True)
-        elif bracket == 'historic':
-            return qs.filter(has_historic_sale=True)
-        return qs
-
-    # Compute counts for each bracket (before search, after location filter)
-    count_1y = bracket_filter(customers_base, '1y').count()
-    count_1_2y = bracket_filter(customers_base, '1_2y').count()
-    count_2_10y = bracket_filter(customers_base, '2_10y').count()
-    count_historic = bracket_filter(customers_base, 'historic').count()
-
-    # Apply date filter to get the current bracket's queryset
-    customers = bracket_filter(customers_base, age_filter)
-
-    # When searching, show results from ALL brackets grouped by bracket
-    search_expanded_from = None
-    search_by_bracket = None  # List of (label, bracket_key, queryset) when searching across all
-    if search_q:
-        # Search across ALL brackets and group results
-        bracket_defs = [
-            ('< 1 Year', '1y'),
-            ('1-2 Years', '1_2y'),
-            ('2+ Years', '2_10y'),
-            ('Historic', 'historic'),
-        ]
-        search_by_bracket = []
-        total_search_count = 0
-        for label, key in bracket_defs:
-            bracket_qs = bracket_filter(customers_base, key).filter(search_q)
-            count = bracket_qs.count()
-            if count > 0:
-                search_by_bracket.append({
-                    'label': label,
-                    'key': key,
-                    'customers': bracket_qs[:100],  # cap per bracket
-                    'count': count,
-                })
-                total_search_count += count
-
-        if not search_by_bracket:
-            # No results anywhere — show empty for current bracket
-            customers = customers.filter(search_q)
-        else:
-            # We'll display grouped results instead of the normal paginated list
-            customers = None  # signal to template to use search_by_bracket
+        customers = customers_base.filter(search_q)
     else:
-        search_by_bracket = None
+        customers = customers_base
 
-    # When searching, also look for matching leads so users can find people
-    # who exist only in the Lead table (not yet converted to Customer)
-    matching_leads = None
-    if search_query:
-        lead_terms = search_query.split()
-        lead_per_term = []
-        for term in lead_terms:
-            lead_per_term.append(
-                Q(name__icontains=term) |
-                Q(email__icontains=term) |
-                Q(phone__icontains=term) |
-                Q(city__icontains=term) |
-                Q(postcode__icontains=term) |
-                Q(anthill_customer_id__icontains=term)
-            )
-        lead_q = lead_per_term[0]
-        for extra in lead_per_term[1:]:
-            lead_q &= extra
-        matching_leads = Lead.objects.filter(lead_q).order_by('-created_at')[:20]
-
-    # Pagination (only when not showing grouped search results)
-    if customers is not None:
-        page_number = request.GET.get('page', 1)
-        paginator = Paginator(customers, 100)
-        page_obj = paginator.get_page(page_number)
-    else:
-        page_obj = None
-        paginator = None
+    # Pagination
+    page_number = request.GET.get('page', 1)
+    paginator = Paginator(customers, 100)
+    page_obj = paginator.get_page(page_number)
 
     # Last Anthill customer sync log entry
     last_anthill_sync = SyncLog.objects.filter(script_name='sync_anthill_customers').order_by('-ran_at').first()
 
     context = {
+        'view_mode': 'customers',
         'customers': page_obj,
         'page_obj': page_obj,
         'filtered_count': paginator.count if paginator else 0,
         'search_query': search_query,
-        'age_filter': age_filter,
         'location_filter': location_filter,
-        'count_1y': count_1y,
-        'count_1_2y': count_1_2y,
-        'count_2_10y': count_2_10y,
-        'count_historic': count_historic,
-        'search_expanded_from': search_expanded_from,
-        'search_by_bracket': search_by_bracket,
         'last_anthill_sync': last_anthill_sync,
-        'matching_leads': matching_leads,
+        'source_choices': Lead.SOURCE_CHOICES,
+        'status_choices': Lead.STATUS_CHOICES,
     }
 
     return render(request, 'stock_take/customers_list.html', context)

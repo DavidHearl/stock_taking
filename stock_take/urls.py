@@ -1,4 +1,5 @@
 from django.urls import path
+from django.views.generic import RedirectView
 from . import views
 from django.contrib.auth import views as auth_views
 from .dark_mode_view import toggle_dark_mode
@@ -307,8 +308,8 @@ urlpatterns = [
     path('customer/<int:pk>/manage-payments/anthill-scrape/', customer_anthill_scrape, name='customer_anthill_scrape'),
     path('customer/<int:pk>/manage-payments/distribute/', customer_distribute_payments, name='customer_distribute_payments'),
     
-    # Contacts
-    path('contacts/', leads_list, name='leads_list'),
+    # Contacts — /contacts/ redirects to the Customers page contacts tab
+    path('contacts/', RedirectView.as_view(url='/customers/?view=contacts', permanent=False), name='leads_list'),
     path('contacts/create/', lead_create, name='lead_create'),
     path('contact/<int:pk>/', lead_detail, name='lead_detail'),
     path('contact/<int:pk>/save/', lead_save, name='lead_save'),
