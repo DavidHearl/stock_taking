@@ -43,16 +43,26 @@
                     <label>Paid</label>
                     <span id="detailPaid" class="detail-val-money detail-val-paid">-</span>
                 </div>
-                <div class="detail-row">
-                    <label>Outstanding</label>
-                    <span id="detailOutstanding" class="detail-val-money">-</span>
-                </div>
             </div>
-            <div class="detail-payment-wrap" id="detailPaymentBar" style="display:none;">
-                <div class="detail-payment-track">
-                    <div class="detail-payment-fill" id="detailPaymentFill"></div>
+            <div class="detail-fin-wrap" id="detailPaymentBar" style="display:none;">
+                <div class="detail-fin-track-outer">
+                    <div class="detail-fin-track">
+                        <div class="detail-fin-fill" id="detailPaymentFill"></div>
+                    </div>
+                    <div class="detail-fin-mile" style="left:45%">
+                        <div class="detail-fin-mile-tick"></div>
+                        <span class="detail-fin-mile-label">45%</span>
+                    </div>
+                    <div class="detail-fin-mile" style="left:90%">
+                        <div class="detail-fin-mile-tick"></div>
+                        <span class="detail-fin-mile-label">90%</span>
+                    </div>
+                    <div class="detail-fin-mile" style="left:100%">
+                        <div class="detail-fin-mile-tick"></div>
+                        <span class="detail-fin-mile-label">100%</span>
+                    </div>
                 </div>
-                <span class="detail-payment-pct" id="detailPaymentPct">0% paid</span>
+                <span id="detailOutstanding" class="detail-fin-remaining">-</span>
             </div>
 
             <!-- Section: Customer & Order -->
@@ -784,19 +794,29 @@ function selectAppointmentFromCard(el) {
     }
     document.getElementById('detailPaid').textContent = pt ? '£' + Number(pt).toLocaleString() : '-';
     const outEl = document.getElementById('detailOutstanding');
-    outEl.textContent = os ? '£' + Number(os).toLocaleString() : '-';
-    outEl.classList.toggle('detail-val-due', os && Number(os) > 0);
-    outEl.classList.toggle('detail-val-paid', os && Number(os) <= 0);
+    if (os !== undefined && os !== null && os !== '') {
+        const osNum = Number(os);
+        if (osNum <= 0) {
+            outEl.textContent = 'Paid';
+            outEl.classList.remove('detail-val-due');
+            outEl.classList.add('detail-val-paid');
+        } else {
+            outEl.textContent = '£' + osNum.toLocaleString();
+            outEl.classList.add('detail-val-due');
+            outEl.classList.remove('detail-val-paid');
+        }
+    } else {
+        outEl.textContent = '-';
+        outEl.classList.remove('detail-val-due', 'detail-val-paid');
+    }
 
     // Payment progress bar
     const bar = document.getElementById('detailPaymentBar');
     const fill = document.getElementById('detailPaymentFill');
-    const pctLabel = document.getElementById('detailPaymentPct');
     if (sv && Number(sv) > 0) {
         const pct = Math.min(100, Math.round((Number(pt || 0) / Number(sv)) * 100));
         fill.style.width = pct + '%';
         fill.classList.toggle('bar-complete', pct >= 100);
-        pctLabel.textContent = pct + '% paid';
         bar.style.display = '';
     } else {
         bar.style.display = 'none';

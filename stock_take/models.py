@@ -2622,8 +2622,6 @@ PAGE_SECTIONS = [
     ]),
     ('Tools', [
         ('map', 'Map'),
-        ('generate_materials', 'Order Generator'),
-        ('database_check', 'Database Check'),
     ]),
     ('Reports', [
         ('material_report', 'Material Report'),

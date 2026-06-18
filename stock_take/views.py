@@ -7739,20 +7739,82 @@ def completed_stock_takes(request):
 
 @login_required
 def map_view(request):
-    """Display a map with order locations using Leaflet and OpenStreetMap"""
-    # Get all orders with addresses for mapping
-    orders_with_addresses = Order.objects.exclude(address__isnull=True).exclude(address='').order_by('-order_date')
-    all_orders = Order.objects.all().order_by('-order_date')
+    """Full-screen map of every open (not-yet-completed) sale.
 
-    # Calculate statistics
-    completed_count = all_orders.filter(job_finished=True).count()
-    in_progress_count = all_orders.filter(job_finished=False).count()
+    Points come from the same Anthill sales shown on the sales page: Category 3,
+    not cancelled and not complete. A sale disappears from the map automatically once
+    it is marked complete (Anthill status won/complete, or its linked order's
+    ``job_finished`` flag), because the query simply stops returning it. Each point is
+    geocoded client-side from the customer's postcode via postcodes.io.
+    """
+    from django.urls import reverse
+    from .customer_views import _duplicate_sale_pks_to_drop
+
+    sales_base = AnthillSale.objects.select_related('customer', 'order').filter(
+        category='3'
+    ).exclude(status__iexact='cancelled')
+
+    # Collapse duplicate sales that share the same contract / sale number.
+    duplicate_pks = _duplicate_sale_pks_to_drop(sales_base)
+    if duplicate_pks:
+        sales_base = sales_base.exclude(pk__in=duplicate_pks)
+
+    # "Complete" mirrors the sales page: Anthill status says so, or the linked order's
+    # job has been finished (linked by FK or by sale_number == anthill_activity_id).
+    complete_statuses = ['complete', 'completed', 'won']
+    complete_re = r'^(' + '|'.join(complete_statuses) + ')$'
+    finished_order_ids = set(
+        Order.objects.filter(job_finished=True).values_list('id', flat=True)
+    )
+    finished_sale_numbers = set(
+        Order.objects.filter(job_finished=True)
+        .exclude(sale_number__isnull=True).exclude(sale_number='')
+        .values_list('sale_number', flat=True)
+    )
+    complete_q = (
+        Q(status__iregex=complete_re)
+        | Q(order_id__in=finished_order_ids)
+        | Q(anthill_activity_id__in=finished_sale_numbers)
+    )
+
+    open_sales = list(sales_base.exclude(complete_q))
+
+    # Sales whose linked order has an open remedial are coloured differently.
+    open_remedial_order_ids = set(
+        Remedial.objects.filter(is_completed=False)
+        .exclude(original_order__isnull=True)
+        .values_list('original_order_id', flat=True)
+    )
+
+    points = []
+    missing_location = 0
+    for sale in open_sales:
+        customer = sale.customer
+        postcode = (customer.postcode or '').strip() if customer else ''
+        if not postcode:
+            # Without a postcode the sale can't be placed accurately on the map.
+            missing_location += 1
+            continue
+
+        address_parts = [customer.address_1, customer.address_2, customer.city, customer.postcode]
+        address = ', '.join(p.strip() for p in address_parts if p and str(p).strip())
+        sale_label = (sale.contract_number or '').strip() or sale.anthill_activity_id
+        point_type = 'remedial' if sale.order_id in open_remedial_order_ids else 'sale'
+
+        points.append({
+            'postcode': postcode,
+            'address': address,
+            'customer': sale.customer_name or (customer.name if customer else '') or 'Unknown',
+            'label': sale_label,
+            'type': point_type,
+            'fit_date': sale.fit_date.strftime('%d/%m/%Y') if sale.fit_date else '',
+            'url': reverse('sale_detail', args=[sale.pk]),
+        })
 
     return render(request, 'stock_take/map.html', {
-        'orders': orders_with_addresses,
-        'orders_with_addresses': orders_with_addresses,
-        'completed_count': completed_count,
-        'in_progress_count': in_progress_count,
+        'map_points': points,
+        'open_count': len(points),
+        'missing_location': missing_location,
     })
 
 def import_csv(request):
@@ -11677,7 +11739,7 @@ def calendar_view(request):
     appointments = list(FitAppointment.objects.filter(
         fit_date__year=current_year,
         fit_date__month=current_month
-    ).select_related('order', 'remedial'))
+    ).select_related('order', 'remedial').prefetch_related('order__po_projects__purchase_order'))
 
     # Attach payment info (sale value / paid / outstanding) from linked AnthillSale
     sale_numbers = [a.order.sale_number for a in appointments if a.order]
@@ -11743,6 +11805,24 @@ def calendar_view(request):
                         fin['value_estimated'] = False
                 appt.fin = fin
     
+    # Linked purchase orders per appointment (for the appointment detail modal)
+    import json as _json
+    for appt in appointments:
+        _appt_pos = []
+        if appt.order:
+            _seen_po = set()
+            for _pp in appt.order.po_projects.all():
+                _po = _pp.purchase_order
+                if not _po or _po.workguru_id in _seen_po:
+                    continue
+                _seen_po.add(_po.workguru_id)
+                _appt_pos.append({
+                    'number': _po.display_number or _po.number or str(_po.workguru_id),
+                    'status': (_po.status or 'Draft').strip(),
+                    'supplier': _po.supplier_name or '',
+                })
+        appt.pos_json = _json.dumps(_appt_pos)
+
     # Get all orders with fit dates in this month (for quick add)
     orders_this_month = Order.objects.filter(
         fit_date__year=current_year,
@@ -11877,6 +11957,90 @@ def calendar_view(request):
             if outs > 0:
                 fits_with_balance += 1
 
+    # ── Build 6-week swim-lane structure (a fitter row per week) ─────────
+    FITTER_PALETTE = [
+        ('#5a9fd4', '90, 159, 212'),
+        ('#9c74c8', '156, 116, 200'),
+        ('#e0a23a', '224, 162, 58'),
+        ('#4cc080', '76, 192, 128'),
+        ('#e05260', '224, 82, 96'),
+        ('#26c6da', '38, 198, 218'),
+        ('#ec407a', '236, 64, 122'),
+        ('#8bc34a', '139, 195, 74'),
+        ('#ff7043', '255, 112, 67'),
+        ('#ab47bc', '171, 71, 188'),
+    ]
+    # Lane order: active fitters first, then any extra codes seen on appointments
+    _choice_names = {c: n for c, n in FitAppointment.FITTER_CHOICES}
+    lane_codes = []
+    lane_name_map = {}
+    for _code, _name in fitters:  # active fitters (code, name)
+        c = (_code or '').strip()
+        if c and c not in lane_name_map:
+            lane_codes.append(c)
+            lane_name_map[c] = _name
+    for appt in appointments:
+        c = appt.fitter or 'R'
+        if c not in lane_name_map:
+            lane_codes.append(c)
+            lane_name_map[c] = _choice_names.get(c, c)
+    fitter_color_map = {
+        c: FITTER_PALETTE[i % len(FITTER_PALETTE)] for i, c in enumerate(lane_codes)
+    }
+
+    grid_start = first_day - timedelta(days=first_day.weekday())  # Monday on/before 1st
+    month_weeks = []
+    for _w in range(6):
+        wk_start = grid_start + timedelta(days=7 * _w)
+        wk_end = wk_start + timedelta(days=6)
+        days = []
+        for _di in range(7):
+            d = wk_start + timedelta(days=_di)
+            in_m = (d.month == current_month and d.year == current_year)
+            days.append({
+                'date': d,
+                'day': d.day,
+                'in_month': in_m,
+                'is_today': d == today,
+                'date_str': d.strftime('%Y-%m-%d'),
+                'pos': pos_by_day.get(d.day, []) if in_m else [],
+            })
+        day_index = {wk_start + timedelta(days=i): i for i in range(7)}
+        lanes = []
+        for code in lane_codes:
+            entries = []
+            for appt in appointments:
+                if (appt.fitter or 'R') != code:
+                    continue
+                duration = appt.fit_duration or 1
+                start_date = appt.fit_date
+                end_date = start_date + timedelta(days=duration - 1)
+                if end_date < wk_start or start_date > wk_end:
+                    continue
+                cs = max(start_date, wk_start)
+                ce = min(end_date, wk_end)
+                entries.append({
+                    'appt': appt,
+                    'grid_col_start': day_index[cs] + 1,
+                    'grid_col_end': day_index[ce] + 2,
+                    'cont_left': start_date < wk_start,
+                    'cont_right': end_date > wk_end,
+                })
+            _col = fitter_color_map.get(code, ('#888888', '136, 136, 136'))
+            lanes.append({
+                'code': code,
+                'name': lane_name_map.get(code, code),
+                'color': _col[0],
+                'rgb': _col[1],
+                'appts': entries,
+            })
+        month_weeks.append({'widx': _w + 1, 'days': days, 'fitter_lanes': lanes})
+
+    fitter_legend = [
+        {'name': lane_name_map.get(c, c), 'color': fitter_color_map[c][0]}
+        for c in lane_codes
+    ]
+
     context = {
         'current_year': current_year,
         'current_month': current_month,
@@ -11885,6 +12049,8 @@ def calendar_view(request):
         'day_names': day_names,
         'appointments_by_date': appointments_by_date,
         'appointments_flat': appointments_flat,
+        'month_weeks': month_weeks,
+        'fitter_legend': fitter_legend,
         'orders_this_month': orders_this_month,
         'all_orders': all_orders,
         'prev_month': prev_month,
@@ -14042,12 +14208,14 @@ def add_fitter(request):
         data = json.loads(request.body)
         
         name = data.get('name', '').strip()
+        code = data.get('code', '').strip().upper()[:1]
         
         if not name:
             return JsonResponse({'success': False, 'error': 'Name is required'})
         
         fitter = Fitter.objects.create(
             name=name,
+            code=code,
             email='',
             phone='',
             hourly_rate=0,
@@ -14058,6 +14226,7 @@ def add_fitter(request):
             'success': True,
             'fitter': {
                 'id': fitter.id,
+                'code': fitter.code,
                 'name': fitter.name
             }
         })

@@ -118,10 +118,6 @@ URL_TO_PAGE = {
 
     # Tools
     'map': 'map',
-    'generate_materials': 'generate_materials',
-    'generate_pnx': 'generate_materials',
-    'generate_csv': 'generate_materials',
-    'check_database': 'database_check',
 
     # Reports
     'material_report': 'material_report',

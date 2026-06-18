@@ -15,69 +15,162 @@
     <!-- <h1>Fit Board Calendar</h1> -->
 </div>
 
-<div class="summary" id="appointmentSummary">
-    <div class="summary-header">
-        <div class="summary-title" id="summaryCustomerName"></div>
-        <button class="btn btn-secondary btn-sm" onclick="closeSummary()">✕ Close</button>
-    </div>
-    
-    <div class="summary-info" id="summaryInfo">
-        <div class="summary-info-item">
-            <label>Sale Number:</label>
-            <span id="summarySaleNumber">-</span>
+<!-- Appointment Detail Modal (shared with weekly view) -->
+<div id="appointmentDetailModal" class="modal">
+    <div class="modal-overlay" onclick="closeModal('appointmentDetailModal')"></div>
+    <div class="modal-content modal--md">
+        <div class="modal-header">
+            <h3 id="detailCustomerName">Appointment</h3>
+            <button type="button" class="modal-close" onclick="closeModal('appointmentDetailModal')">&times;</button>
         </div>
-        <div class="summary-info-item">
-            <label>System Number (CAD):</label>
-            <span id="summaryCustomerNumber">-</span>
+        <div class="modal-body">
+            <!-- Quick links -->
+            <div class="detail-links">
+                <a id="detailOrderLink" href="#" class="detail-link-btn" target="_blank">View Sale</a>
+                <a id="detailAnthillLink" href="#" class="detail-link-btn detail-link-anthill" target="_blank">
+                    <i class="bi bi-box-arrow-up-right"></i> Open in Anthill
+                </a>
+            </div>
+
+            <!-- Section: Financials -->
+            <div class="detail-section-label">Financials</div>
+            <div class="detail-grid">
+                <div class="detail-row">
+                    <label>Sale Value</label>
+                    <span id="detailSaleValue" class="detail-val-money">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Paid</label>
+                    <span id="detailPaid" class="detail-val-money detail-val-paid">-</span>
+                </div>
+            </div>
+            <div class="detail-fin-wrap" id="detailPaymentBar" style="display:none;">
+                <div class="detail-fin-track-outer">
+                    <div class="detail-fin-track">
+                        <div class="detail-fin-fill" id="detailPaymentFill"></div>
+                    </div>
+                    <div class="detail-fin-mile" style="left:45%">
+                        <div class="detail-fin-mile-tick"></div>
+                        <span class="detail-fin-mile-label">45%</span>
+                    </div>
+                    <div class="detail-fin-mile" style="left:90%">
+                        <div class="detail-fin-mile-tick"></div>
+                        <span class="detail-fin-mile-label">90%</span>
+                    </div>
+                    <div class="detail-fin-mile" style="left:100%">
+                        <div class="detail-fin-mile-tick"></div>
+                        <span class="detail-fin-mile-label">100%</span>
+                    </div>
+                </div>
+                <span id="detailOutstanding" class="detail-fin-remaining">-</span>
+            </div>
+
+            <!-- Section: Customer & Order -->
+            <div class="detail-section-label">Customer &amp; Order</div>
+            <div class="detail-grid">
+                <div class="detail-row">
+                    <label>Contract Number</label>
+                    <span id="detailContractNumber">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Customer No.</label>
+                    <span id="detailCustomerNumber">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Designer</label>
+                    <span id="detailDesigner">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Order Date</label>
+                    <span id="detailOrderDate">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Address</label>
+                    <span id="detailAddress">-</span>
+                </div>
+                <div class="detail-row">
+                    <label>Postcode</label>
+                    <span id="detailPostcode">-</span>
+                </div>
+            </div>
+
+            <!-- Section: Purchase Orders -->
+            <div class="detail-section-label">Purchase Orders</div>
+            <div class="detail-po-list" id="detailPoList">
+                <span class="detail-po-empty">No linked purchase orders.</span>
+            </div>
+
+            <!-- Section: Fit Assignment -->
+            <div class="detail-section-head">
+                <span class="detail-section-label">Fit Assignment</span>
+                <button type="button" class="detail-edit-toggle" id="fitEditToggle" onclick="toggleFitEdit()">
+                    <i class="bi bi-pencil"></i> Edit
+                </button>
+            </div>
+            <div class="detail-edit-list" id="fitEditList">
+                <div class="detail-edit-row">
+                    <label for="detailFitterSelect">Fitter</label>
+                    <div class="detail-edit-control">
+                        <span class="detail-edit-value" id="detailFitterValue">-</span>
+                        <select id="detailFitterSelect" class="modal-select detail-edit-input" onchange="syncDetailEditValue('Fitter')">
+                            {% for code, name in fitters %}
+                            <option value="{{ code }}">{{ name }} ({{ code }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="detail-edit-row">
+                    <label for="detailFitDate">Fit Date</label>
+                    <div class="detail-edit-control">
+                        <span class="detail-edit-value" id="detailFitDateValue">-</span>
+                        <input type="date" id="detailFitDate" class="modal-select detail-edit-input" onchange="syncDetailEditValue('FitDate')">
+                    </div>
+                </div>
+                <div class="detail-edit-row">
+                    <label for="detailFitDuration">Duration</label>
+                    <div class="detail-edit-control">
+                        <span class="detail-edit-value" id="detailFitDurationValue">-</span>
+                        <select id="detailFitDuration" class="modal-select detail-edit-input" onchange="syncDetailEditValue('FitDuration')">
+                            <option value="1">1 day</option>
+                            <option value="2">2 days</option>
+                            <option value="3">3 days</option>
+                            <option value="4">4 days</option>
+                            <option value="5">5 days</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section: Completion Status -->
+            <div class="detail-section-label">Completion Status</div>
+            <div class="detail-checks">
+                <div class="detail-check-item">
+                    <label for="detail-interior">Interior</label>
+                    <input type="checkbox" id="detail-interior" onchange="updateDetailStatus('interior', this.checked)">
+                </div>
+                <div class="detail-check-item">
+                    <label for="detail-door">Doors</label>
+                    <input type="checkbox" id="detail-door" onchange="updateDetailStatus('door', this.checked)">
+                </div>
+                <div class="detail-check-item">
+                    <label for="detail-accessories">Accessories</label>
+                    <input type="checkbox" id="detail-accessories" onchange="updateDetailStatus('accessories', this.checked)">
+                </div>
+                <div class="detail-check-item">
+                    <label for="detail-materials">Materials</label>
+                    <input type="checkbox" id="detail-materials" onchange="updateDetailStatus('materials', this.checked)">
+                </div>
+                <div class="detail-check-item">
+                    <label for="detail-paperwork">Paperwork</label>
+                    <input type="checkbox" id="detail-paperwork" onchange="updateDetailStatus('paperwork', this.checked)">
+                </div>
+            </div>
         </div>
-        <div class="summary-info-item">
-            <label>Fitter:</label>
-            <span id="summaryFitter">-</span>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-danger cal-footer-left" onclick="deleteDetailAppointment()">Delete</button>
+            <button type="button" class="btn btn-secondary" onclick="closeModal('appointmentDetailModal')">Close</button>
+            <button type="button" class="btn btn-primary" onclick="saveDetailMove()">Save Changes</button>
         </div>
-        <div class="summary-info-item">
-            <label>Order Date:</label>
-            <span id="summaryOrderDate">-</span>
-        </div>
-        <div class="summary-info-item">
-            <label>Fit Date:</label>
-            <span id="summaryFitDate">-</span>
-        </div>
-        <div class="summary-info-item">
-            <label>Address:</label>
-            <span id="summaryAddress">-</span>
-        </div>
-        <div class="summary-info-item">
-            <label>Postcode:</label>
-            <span id="summaryPostcode">-</span>
-        </div>
-    </div>
-    
-    <div class="summary-content">
-        <div class="summary-item">
-            <input type="checkbox" id="summary-interior" onchange="updateSummaryStatus('interior', this.checked)">
-            <label for="summary-interior">Interior Completed</label>
-        </div>
-        <div class="summary-item">
-            <input type="checkbox" id="summary-door" onchange="updateSummaryStatus('door', this.checked)">
-            <label for="summary-door">Doors</label>
-        </div>
-        <div class="summary-item">
-            <input type="checkbox" id="summary-accessories" onchange="updateSummaryStatus('accessories', this.checked)">
-            <label for="summary-accessories">Accessories</label>
-        </div>
-        <div class="summary-item">
-            <input type="checkbox" id="summary-materials" onchange="updateSummaryStatus('materials', this.checked)">
-            <label for="summary-materials">Materials</label>
-        </div>
-        <div class="summary-item">
-            <input type="checkbox" id="summary-paperwork" onchange="updateSummaryStatus('paperwork', this.checked)">
-            <label for="summary-paperwork">Paperwork</label>
-        </div>
-    </div>
-    
-    <div class="summary-actions">
-        <button class="btn btn-info btn-move" onclick="openMoveModal()">Move Appointment</button>
-        <button class="btn btn-danger delete-appointment-btn" onclick="deleteSummaryAppointment()">Delete Appointment</button>
     </div>
 </div>
 
@@ -98,7 +191,7 @@
                 <button class="kebab-item" id="togglePOsBtn" onclick="togglePOs()">
                     <i class="bi bi-truck"></i> Hide POs
                 </button>
-                <button class="kebab-item" onclick="openModal('manageFittersModal')">
+                <button class="kebab-item" onclick="openManageFitters()">
                     <i class="bi bi-people"></i> Manage Fitters
                 </button>
             </div>
@@ -138,146 +231,140 @@
 {% endif %}
 
 <div class="calendar-container">
-    <table class="calendar-table">
-        <thead>
-            <tr>
-                {% for day_name in day_names %}
-                <th>{{ day_name }}</th>
+    <div class="month-weeks" id="monthWeeks">
+        {% for week in month_weeks %}
+        <div class="month-week-block">
+            <!-- Day header row -->
+            <div class="mw-header-row">
+                <div class="mw-corner"></div>
+                {% for day in week.days %}
+                <div class="mw-col-header {% if not day.in_month %}other-month{% endif %} {% if day.is_today %}today{% endif %}">
+                    <span class="mw-col-dayname">{{ day.date|date:"D" }}</span>
+                    <span class="mw-col-date">{{ day.date|date:"j M" }}</span>
+                </div>
                 {% endfor %}
-            </tr>
-        </thead>
-        <tbody>
-            {% for week in month_days %}
-            <tr>
-                {% for cell in week %}
-                <td class="calendar-day {% if not cell.in_month %}other-month{% elif cell.day == today.day and current_month == today.month and current_year == today.year %}today{% endif %}"
-                    {% if cell.in_month %}data-date="{{ current_year }}-{{ current_month|stringformat:'02d' }}-{{ cell.day|stringformat:'02d' }}"
-                    ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)"{% endif %}>
-                    {% if cell.in_month %}
-                        <div class="day-header">
-                            <span class="day-number">{{ cell.day }}</span>
-                            <button class="add-btn-inline" onclick="openAddAppointment({{ current_year }}, {{ current_month }}, {{ cell.day }}, 'R')" title="Add appointment">+</button>
-                        </div>
+            </div>
 
-                        <div class="day-jobs">
-                            {% for entry in appointments_flat|get_item:cell.day %}
-                            {% with appt=entry.appointment is_cont=entry.is_continuation sp=entry.span_pos %}
-                            {% if appt.order %}
-                            <div class="job-card {% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %} span-{{ sp }}"
-                                 id="appointment-{{ appt.id }}{% if is_cont %}-cont-{{ cell.day }}{% endif %}"
-                                 {% if not is_cont %}draggable="true"
-                                 ondragstart="handleDragStart(event)"
-                                 ondragend="handleDragEnd(event)"{% endif %}
-                                 data-appointment-id="{{ appt.id }}"
-                                 data-order-id="{{ appt.order.id }}"
-                                 data-customer-name="{{ appt.order.first_name|escapejs }} {{ appt.order.last_name|escapejs }}"
-                                 data-interior="{{ appt.order.interior_completed|yesno:'true,false' }}"
-                                 data-door="{{ appt.order.door_completed|yesno:'true,false' }}"
-                                 data-accessories="{{ appt.order.accessories_completed|yesno:'true,false' }}"
-                                 data-materials="{{ appt.order.materials_completed|yesno:'true,false' }}"
-                                 data-paperwork="{{ appt.order.paperwork_completed|yesno:'true,false' }}"
-                                 data-sale-number="{{ appt.order.sale_number|escapejs }}"
-                                 data-customer-number="{{ appt.order.customer_number|escapejs }}"
-                                 data-fitter="{{ appt.get_fitter_display|escapejs }}"
-                                 data-order-date="{{ appt.order.order_date|date:'d/m/Y' }}"
-                                 data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
-                                 data-address="{{ appt.order.address|default:'-'|escapejs }}"
-                                 data-postcode="{{ appt.order.postcode|default:'-'|escapejs }}"
-                                 onclick="selectAppointmentFromCard(this)">
-                                {% if sp == 'start' %}
-                                <div class="wk-card-header">
-                                    <span class="wk-card-fitter">{{ appt.fitter }}</span>
-                                    <span class="wk-card-name">{{ appt.order.first_name|slice:":1" }}. {{ appt.order.last_name }}</span>
-                                    <span class="wk-card-meta">
-                                        <span class="wk-card-days">{{ appt.fit_duration }}d</span>
-                                        <span class="wk-card-salenum">{{ appt.order.sale_number }}</span>
-                                    </span>
-                                </div>
-                                {% if appt.fin and appt.fin.sale_value %}
-                                <div class="wk-card-rows">
-                                    <div class="wk-card-row">
-                                        <span class="wk-fin-label">Outstanding</span>
-                                        <span class="wk-fin-val {% if appt.fin.outstanding > 0 %}wk-fin-due{% else %}wk-fin-paid{% endif %}">&pound;{{ appt.fin.outstanding|floatformat:0 }}</span>
-                                    </div>
-                                </div>
-                                {% endif %}
-                                {% elif is_cont %}
-                                {% else %}
-                                <span class="job-fitter">{{ appt.fitter }}</span>
-                                <span class="job-name">{{ appt.order.first_name|slice:":1" }}. {{ appt.order.last_name }}</span>
-                                {% if appt.fin and appt.fin.outstanding > 0 %}
-                                <span class="job-balance">£{{ appt.fin.outstanding|floatformat:0 }}</span>
-                                {% elif appt.fin and appt.fin.outstanding <= 0 %}
-                                <span class="job-balance paid">Paid</span>
-                                {% endif %}
-                                {% endif %}
-                            </div>
-                            {% elif appt.remedial %}
-                            <div class="job-card remedial span-{{ sp }}"
-                                 id="appointment-{{ appt.id }}{% if is_cont %}-cont-{{ cell.day }}{% endif %}"
-                                 {% if not is_cont %}draggable="true"
-                                 ondragstart="handleDragStart(event)"
-                                 ondragend="handleDragEnd(event)"{% endif %}
-                                 data-appointment-id="{{ appt.id }}"
-                                 data-remedial-id="{{ appt.remedial.id }}"
-                                 data-customer-name="{{ appt.remedial.remedial_number|escapejs }} - {{ appt.remedial.first_name|escapejs }} {{ appt.remedial.last_name|escapejs }}"
-                                 data-sale-number="{{ appt.remedial.remedial_number|escapejs }}"
-                                 data-customer-number="{{ appt.remedial.customer_number|escapejs }}"
-                                 data-fitter="{{ appt.get_fitter_display|escapejs }}"
-                                 data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
-                                 data-address="{{ appt.remedial.address|default:'-'|escapejs }}"
-                                 data-postcode="{{ appt.remedial.postcode|default:'-'|escapejs }}"
-                                 onclick="selectAppointmentFromCard(this)">
-                                {% if sp == 'start' %}
-                                <div class="wk-card-header">
-                                    <span class="wk-card-fitter">{{ appt.fitter }}</span>
-                                    <span class="wk-card-name">{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name|slice:":1" }}. {{ appt.remedial.last_name }}</span>
-                                    <span class="wk-card-meta">
-                                        <span class="wk-card-days">{{ appt.fit_duration }}d</span>
-                                    </span>
-                                </div>
-                                {% elif is_cont %}
-                                {% else %}
-                                <span class="job-fitter">{{ appt.fitter }}</span>
-                                <span class="job-name">{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name|slice:":1" }}. {{ appt.remedial.last_name }}</span>
-                                {% endif %}
-                            </div>
-                            {% endif %}
-                            {% endwith %}
-                            {% endfor %}
-                        </div>
+            <!-- One swim-lane per fitter -->
+            {% for lane in week.fitter_lanes %}
+            <div class="mw-lane" style="--fitter-color: {{ lane.color }}; --fitter-rgb: {{ lane.rgb }};">
+                <div class="mw-lane-label">{{ lane.name }}</div>
+                <div class="mw-lane-grid">
+                    {# Background drop zones — full-height clickable day columns #}
+                    <div class="mw-dropzones">
+                        {% for day in week.days %}
+                        <div class="mw-drop-zone {% if not day.in_month %}other-month{% endif %} {% if day.is_today %}today{% endif %}"
+                             style="grid-column: {{ forloop.counter }};"
+                             {% if day.in_month %}data-date="{{ day.date_str }}" data-fitter-code="{{ lane.code }}"
+                             ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)"
+                             onclick="openAddAppointmentCell('{{ day.date_str }}', '{{ lane.code }}')"{% endif %}></div>
+                        {% endfor %}
+                    </div>
 
-                        {% if cell.day in pos_by_day %}
-                        <div class="monthly-po-rows">
-                            {% for po in pos_by_day|get_item:cell.day %}
-                            <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="monthly-po-card" title="{{ po.display_number }} — {{ po.supplier_name|default:'Unknown' }}">
-                                <i class="bi bi-truck"></i>
-                                <span class="monthly-po-text">{{ po.display_number }}</span>
-                            </a>
-                            {% endfor %}
-                        </div>
+                    {# Appointment cards — placed by grid column span #}
+                    {% for entry in lane.appts %}
+                    {% with appt=entry.appt %}
+                    {% if appt.order %}
+                    <div class="job-card {% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %}{% if entry.cont_left %} cont-left{% endif %}{% if entry.cont_right %} cont-right{% endif %}"
+                         style="grid-column: {{ entry.grid_col_start }} / {{ entry.grid_col_end }};"
+                         id="appointment-{{ appt.id }}-w{{ week.widx }}"
+                         draggable="true"
+                         ondragstart="handleDragStart(event)"
+                         ondragend="handleDragEnd(event)"
+                         data-appointment-id="{{ appt.id }}"
+                         data-order-id="{{ appt.order.id }}"
+                         data-customer-name="{{ appt.order.first_name|escapejs }} {{ appt.order.last_name|escapejs }}"
+                         data-interior="{{ appt.order.interior_completed|yesno:'true,false' }}"
+                         data-door="{{ appt.order.door_completed|yesno:'true,false' }}"
+                         data-accessories="{{ appt.order.accessories_completed|yesno:'true,false' }}"
+                         data-materials="{{ appt.order.materials_completed|yesno:'true,false' }}"
+                         data-paperwork="{{ appt.order.paperwork_completed|yesno:'true,false' }}"
+                         data-sale-number="{{ appt.order.sale_number|escapejs }}"
+                         data-customer-number="{{ appt.order.customer_number|escapejs }}"
+                         data-fitter="{{ appt.get_fitter_display|escapejs }}"
+                         data-fitter-code="{{ appt.fitter|escapejs }}"
+                         data-order-date="{{ appt.order.order_date|date:'d/m/Y' }}"
+                         data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
+                         data-fit-duration="{{ appt.fit_duration }}"
+                         data-address="{{ appt.order.address|default:'-'|escapejs }}"
+                         data-postcode="{{ appt.order.postcode|default:'-'|escapejs }}"
+                         data-designer="{{ appt.order.designer.name|default:'-'|escapejs }}"
+                         data-order-url="/order/{{ appt.order.id }}/"
+                         data-anthill-url="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ appt.order.sale_number }}"
+                         {% if appt.fin %}data-sale-value="{{ appt.fin.sale_value|floatformat:0 }}"
+                         data-payments-total="{{ appt.fin.payments_total|floatformat:0 }}"
+                         data-outstanding="{{ appt.fin.outstanding|floatformat:0 }}"
+                         data-value-estimated="{{ appt.fin.value_estimated|yesno:'1,' }}"
+                         {% endif %}
+                         data-pos="{{ appt.pos_json|default:'[]' }}"
+                         onclick="selectAppointmentFromCard(this)">
+                        <span class="job-name">{{ appt.order.first_name }} {{ appt.order.last_name }}</span>
+                        {% if appt.fin and appt.fin.outstanding > 0 %}
+                        <span class="job-balance">£{{ appt.fin.outstanding|floatformat:0 }}</span>
+                        {% elif appt.fin and appt.fin.outstanding <= 0 %}
+                        <span class="job-balance paid">Paid</span>
                         {% endif %}
-                    {% else %}
-                        <div class="day-header">
-                            <span class="day-number">{{ cell.day }}</span>
-                        </div>
+                    </div>
+                    {% elif appt.remedial %}
+                    <div class="job-card remedial{% if entry.cont_left %} cont-left{% endif %}{% if entry.cont_right %} cont-right{% endif %}"
+                         style="grid-column: {{ entry.grid_col_start }} / {{ entry.grid_col_end }};"
+                         id="appointment-{{ appt.id }}-w{{ week.widx }}"
+                         draggable="true"
+                         ondragstart="handleDragStart(event)"
+                         ondragend="handleDragEnd(event)"
+                         data-appointment-id="{{ appt.id }}"
+                         data-remedial-id="{{ appt.remedial.id }}"
+                         data-customer-name="{{ appt.remedial.remedial_number|escapejs }} - {{ appt.remedial.first_name|escapejs }} {{ appt.remedial.last_name|escapejs }}"
+                         data-sale-number="{{ appt.remedial.remedial_number|escapejs }}"
+                         data-customer-number="{{ appt.remedial.customer_number|escapejs }}"
+                         data-fitter="{{ appt.get_fitter_display|escapejs }}"
+                         data-fitter-code="{{ appt.fitter|escapejs }}"
+                         data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
+                         data-fit-duration="{{ appt.fit_duration }}"
+                         data-address="{{ appt.remedial.address|default:'-'|escapejs }}"
+                         data-postcode="{{ appt.remedial.postcode|default:'-'|escapejs }}"
+                         data-pos="[]"
+                         onclick="selectAppointmentFromCard(this)">
+                        <span class="job-name">{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name }} {{ appt.remedial.last_name }}</span>
+                    </div>
                     {% endif %}
-                </td>
-                {% endfor %}
-            </tr>
+                    {% endwith %}
+                    {% endfor %}
+                </div>
+            </div>
             {% endfor %}
-        </tbody>
-    </table>
-    
+
+            <!-- Deliveries lane -->
+            <div class="mw-lane mw-deliveries-lane">
+                <div class="mw-lane-label mw-deliveries-label"><i class="bi bi-truck"></i> Deliveries</div>
+                <div class="mw-deliveries-cells">
+                    {% for day in week.days %}
+                    <div class="mw-deliveries-cell {% if not day.in_month %}other-month{% endif %}">
+                        {% for po in day.pos %}
+                        <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="monthly-po-card" title="{{ po.display_number }} — {{ po.supplier_name|default:'Unknown' }}">
+                            <i class="bi bi-truck"></i>
+                            <span class="monthly-po-text">{{ po.display_number }}</span>
+                        </a>
+                        {% endfor %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
     <div class="legend">
         <div class="legend-item">
             <div class="legend-box today"></div>
             <span>Today</span>
         </div>
+        {% for f in fitter_legend %}
         <div class="legend-item">
-            <div class="legend-box completed"></div>
-            <span>Fully Completed</span>
+            <div class="legend-box" style="border-color: {{ f.color }}; background: {{ f.color }}22;"></div>
+            <span>{{ f.name }}</span>
         </div>
+        {% endfor %}
         <div class="legend-item">
             <div class="legend-box" style="border-color: #ff9800; background: rgba(255,152,0,0.1);"></div>
             <span>Remedial</span>
@@ -345,80 +432,26 @@
     </div>
 </div>
 
-<!-- Move Appointment Modal -->
-<div id="moveAppointmentModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3>Move Appointment</h3>
-            <span class="close" onclick="closeModal('moveAppointmentModal')">&times;</span>
-        </div>
-        <div class="modal-body">
-            <label for="moveFitterSelect">Select New Fitter:</label>
-            <select id="moveFitterSelect" class="modal-select">
-                {% for code, name in fitters %}
-                <option value="{{ code }}">{{ name }} ({{ code }})</option>
-                {% endfor %}
-            </select>
-            
-            <label for="moveDateInput">Select New Date:</label>
-            <input type="date" id="moveDateInput" class="modal-select">
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('moveAppointmentModal')">Cancel</button>
-            <button type="button" class="btn btn-primary" onclick="moveAppointment()">Move Appointment</button>
-        </div>
-    </div>
-</div>
-
 <!-- Manage Fitters Modal -->
 <div id="manageFittersModal" class="modal">
-    <div class="modal-content" style="max-width:520px;">
+    <div class="modal-overlay" onclick="closeModal('manageFittersModal')"></div>
+    <div class="modal-content modal--sm">
         <div class="modal-header">
             <h3><i class="bi bi-people"></i> Manage Fitters</h3>
-            <span class="close" onclick="closeModal('manageFittersModal')">&times;</span>
+            <button type="button" class="modal-close" onclick="closeModal('manageFittersModal')">&times;</button>
         </div>
-        <div class="modal-body" style="padding:0;">
-            <table class="table" style="margin:0;font-size:0.85rem;" id="fitterTable">
-                <thead><tr><th style="width:40px;">Code</th><th>Name</th><th style="width:70px;">Status</th><th style="width:60px;"></th></tr></thead>
-                <tbody>
-                    {% for code, name in fitters %}
-                    <tr>
-                        <td><strong>{{ code }}</strong></td>
-                        <td>{{ name }}</td>
-                        <td><span class="badge badge-success">Active</span></td>
-                        <td><button class="btn btn-secondary btn-sm" onclick="editFitterRow(this, '{{ code }}', '{{ name|escapejs }}')" title="Edit"><i class="bi bi-pencil"></i></button></td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <div class="modal-body">
+            <div class="fitter-crud-list" id="fitterCrudList">
+                <p class="cal-empty-note">Loading…</p>
+            </div>
+            <div class="fitter-crud-add">
+                <input type="text" id="newFitterCode" class="fitter-crud-input fitter-crud-code" maxlength="1" placeholder="A" oninput="this.value=this.value.toUpperCase()">
+                <input type="text" id="newFitterName" class="fitter-crud-input" placeholder="Fitter name…">
+                <button type="button" class="btn btn-primary btn-sm" onclick="addFitterCrud()"><i class="bi bi-plus-lg"></i> Add</button>
+            </div>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-secondary" onclick="closeModal('manageFittersModal')">Close</button>
-        </div>
-    </div>
-</div>
-
-<!-- Edit Fitter Modal -->
-<div id="editFitterModal" class="modal">
-    <div class="modal-content" style="max-width:400px;">
-        <div class="modal-header">
-            <h3>Edit Fitter</h3>
-            <span class="close" onclick="closeModal('editFitterModal')">&times;</span>
-        </div>
-        <div class="modal-body">
-            <input type="hidden" id="editFitterOldCode">
-            <div style="margin-bottom:12px;">
-                <label for="editFitterCode" style="font-size:0.82rem;font-weight:600;">Code (single letter)</label>
-                <input type="text" id="editFitterCode" class="modal-select" maxlength="1" style="width:60px;text-transform:uppercase;">
-            </div>
-            <div>
-                <label for="editFitterName" style="font-size:0.82rem;font-weight:600;">Name</label>
-                <input type="text" id="editFitterName" class="modal-select">
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" onclick="closeModal('editFitterModal')">Cancel</button>
-            <button type="button" class="btn btn-primary" onclick="saveFitterEdit()">Save</button>
         </div>
     </div>
 </div>
@@ -430,14 +463,13 @@
 
 let selectedAppointmentId = null;
 let draggedAppointmentId = null;
-let draggedFitter = '';
 
 /* ── PO toggle ─────────────────────────────────────────── */
 function togglePOs() {
-    const table = document.querySelector('.calendar-table');
+    const wrap = document.getElementById('monthWeeks');
     const btn = document.getElementById('togglePOsBtn');
-    table.classList.toggle('hide-pos');
-    const hidden = table.classList.contains('hide-pos');
+    wrap.classList.toggle('hide-pos');
+    const hidden = wrap.classList.contains('hide-pos');
     btn.innerHTML = hidden
         ? '<i class="bi bi-truck"></i> Show POs'
         : '<i class="bi bi-truck"></i> Hide POs';
@@ -446,83 +478,14 @@ function togglePOs() {
 // Restore saved preference
 document.addEventListener('DOMContentLoaded', function() {
     if (localStorage.getItem('fitBoardHidePOs') === '1') {
-        const table = document.querySelector('.calendar-table');
+        const wrap = document.getElementById('monthWeeks');
         const btn = document.getElementById('togglePOsBtn');
-        if (table && btn) {
-            table.classList.add('hide-pos');
+        if (wrap && btn) {
+            wrap.classList.add('hide-pos');
             btn.innerHTML = '<i class="bi bi-truck"></i> Show POs';
         }
     }
-    clearSpanBorders();
-    initSpanHover();
-    syncSpanHeights();
 });
-
-/* ── Linked hover for multi-day spans ──────────────────── */
-function initSpanHover() {
-    document.querySelectorAll('.job-card.span-start, .job-card.span-mid, .job-card.span-end').forEach(card => {
-        const apptId = card.dataset.appointmentId;
-        if (!apptId) return;
-        card.addEventListener('mouseenter', () => {
-            document.querySelectorAll('.job-card[data-appointment-id="' + apptId + '"]').forEach(c => c.classList.add('span-hover'));
-        });
-        card.addEventListener('mouseleave', () => {
-            document.querySelectorAll('.job-card[data-appointment-id="' + apptId + '"]').forEach(c => c.classList.remove('span-hover'));
-        });
-    });
-}
-
-/* ── Sync multi-day span heights across cells ────────── */
-function syncSpanHeights() {
-    // Group span cards by appointment ID
-    const groups = {};
-    document.querySelectorAll('.job-card.span-start, .job-card.span-mid, .job-card.span-end').forEach(card => {
-        const id = card.dataset.appointmentId;
-        if (!id) return;
-        if (!groups[id]) groups[id] = [];
-        groups[id].push(card);
-    });
-    // For each group, find the tallest card and apply that height to all
-    Object.values(groups).forEach(cards => {
-        // Reset heights first so we get natural sizes
-        cards.forEach(c => c.style.minHeight = '');
-        let maxH = 0;
-        cards.forEach(c => { maxH = Math.max(maxH, c.offsetHeight); });
-        if (maxH > 0) {
-            cards.forEach(c => c.style.minHeight = maxH + 'px');
-        }
-    });
-}
-
-/* ── Clear cell borders where multi-day bars cross ─────── */
-function clearSpanBorders() {
-    // Reset all cells first
-    document.querySelectorAll('.calendar-day').forEach(td => {
-        td.style.borderRightColor = '';
-        td.style.borderLeftColor = '';
-    });
-    // For each row, scan for span-start / span-mid / span-end cards
-    document.querySelectorAll('.calendar-table tbody tr').forEach(tr => {
-        const cells = Array.from(tr.querySelectorAll('.calendar-day:not(.other-month)'));
-        for (let i = 0; i < cells.length - 1; i++) {
-            const thisCell = cells[i];
-            const nextCell = cells[i + 1];
-            // Check if any appointment bleeds from this cell into the next
-            const rightCards = thisCell.querySelectorAll('.job-card.span-start, .job-card.span-mid');
-            const leftCards = nextCell.querySelectorAll('.job-card.span-mid, .job-card.span-end');
-            let matched = false;
-            rightCards.forEach(rc => {
-                leftCards.forEach(lc => {
-                    if (rc.dataset.appointmentId === lc.dataset.appointmentId) matched = true;
-                });
-            });
-            if (matched) {
-                thisCell.style.borderRightColor = 'transparent';
-                nextCell.style.borderLeftColor = 'transparent';
-            }
-        }
-    });
-}
 
 function bulkImportFitDates() {
     if (!confirm('This will create appointments for all unfinished orders based on their fit dates. Continue?')) {
@@ -549,26 +512,21 @@ function bulkImportFitDates() {
     });
 }
 
-// Drag and Drop Functions
+// ── Drag and Drop (swim-lane: drop zone carries fitter + date) ──
 function handleDragStart(event) {
-    draggedAppointmentId = event.target.dataset.appointmentId;
-    draggedFitter = event.target.querySelector('.job-fitter')?.textContent?.trim() || '';
-    event.target.classList.add('dragging');
+    draggedAppointmentId = event.currentTarget.dataset.appointmentId;
+    event.currentTarget.classList.add('dragging');
     event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setData('text/html', event.target.innerHTML);
+    try { event.dataTransfer.setData('text/plain', draggedAppointmentId); } catch (e) {}
 }
 
 function handleDragEnd(event) {
-    event.target.classList.remove('dragging');
-    document.querySelectorAll('.calendar-day').forEach(cell => {
-        cell.classList.remove('drag-over');
-    });
+    event.currentTarget.classList.remove('dragging');
+    document.querySelectorAll('.mw-drop-zone.drag-over').forEach(z => z.classList.remove('drag-over'));
 }
 
 function handleDragOver(event) {
-    if (event.preventDefault) {
-        event.preventDefault();
-    }
+    if (event.preventDefault) event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     event.currentTarget.classList.add('drag-over');
     return false;
@@ -579,140 +537,224 @@ function handleDragLeave(event) {
 }
 
 function handleDrop(event) {
-    if (event.stopPropagation) {
-        event.stopPropagation();
-    }
+    if (event.stopPropagation) event.stopPropagation();
     event.preventDefault();
-    
-    const targetCell = event.currentTarget;
-    targetCell.classList.remove('drag-over');
-    
-    const newDate = targetCell.dataset.date;
-    
-    if (!draggedAppointmentId) {
-        return false;
-    }
-    
-    // Move the appointment (keep same fitter, change date)
+
+    const zone = event.currentTarget;
+    zone.classList.remove('drag-over');
+
+    const newDate = zone.dataset.date;
+    const fitter = zone.dataset.fitterCode;
+    if (!draggedAppointmentId || !newDate) return false;
+
+    // Move to the target fitter lane + day
     fetch(`/fit-board/move-appointment/${draggedAppointmentId}/`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': '{{ csrf_token }}',
-        },
-        body: JSON.stringify({
-            fitter: draggedFitter,
-            fit_date: newDate
-        })
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ fitter: fitter, fit_date: newDate })
     })
     .then(response => response.json())
     .then(data => {
-        if (data.success) {
-            location.reload();
-        } else {
-            alert('Error: ' + (data.error || 'Unknown error'));
-        }
+        if (data.success) { location.reload(); }
+        else { alert('Error: ' + (data.error || 'Unknown error')); }
     })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Error moving appointment');
-    });
-    
+    .catch(() => alert('Error moving appointment'));
+
     return false;
+}
+
+// Add a sale/appointment by clicking an empty cell (fitter × day)
+function openAddAppointmentCell(dateStr, fitterCode) {
+    const parts = (dateStr || '').split('-').map(Number);
+    if (parts.length !== 3) return;
+    openAddAppointment(parts[0], parts[1], parts[2], fitterCode);
 }
 
 function openAddAppointment(year, month, day, fitterCode) {
     const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     document.getElementById('selectedDate').value = date;
     if (fitterCode) {
-        document.getElementById('fitterSelect').value = fitterCode;
+        const sel = document.getElementById('fitterSelect');
+        if (sel) sel.value = fitterCode;
     }
-    
+
     // Reset search fields and load initial results
     document.getElementById('customerSearch').value = '';
     document.getElementById('remedialSearch').value = '';
     document.getElementById('selectedOrderId').value = '';
     document.getElementById('selectedRemedialId').value = '';
-    
-    // Load initial lists
+
     searchCustomers();
-    
     openModal('addAppointmentModal');
 }
 
-function selectAppointmentFromCard(cardElement) {
-    const appointmentId = parseInt(cardElement.dataset.appointmentId);
-    const orderId = parseInt(cardElement.dataset.orderId);
-    const customerName = cardElement.dataset.customerName;
-    const interior = cardElement.dataset.interior === 'true';
-    const door = cardElement.dataset.door === 'true';
-    const accessories = cardElement.dataset.accessories === 'true';
-    const materials = cardElement.dataset.materials === 'true';
-    const paperwork = cardElement.dataset.paperwork === 'true';
-    const saleNumber = cardElement.dataset.saleNumber;
-    const customerNumber = cardElement.dataset.customerNumber;
-    const fitter = cardElement.dataset.fitter;
-    const orderDate = cardElement.dataset.orderDate;
-    const fitDate = cardElement.dataset.fitDate;
-    const address = cardElement.dataset.address;
-    const postcode = cardElement.dataset.postcode;
-    
-    selectAppointment(appointmentId, orderId, customerName, interior, door, accessories, materials, paperwork,
-                     saleNumber, customerNumber, fitter, orderDate, fitDate, address, postcode);
-}
+function selectAppointmentFromCard(el) {
+    const d = el.dataset;
+    selectedAppointmentId = parseInt(d.appointmentId);
+    window.selectedOrderId = parseInt(d.orderId) || null;
 
-function selectAppointment(appointmentId, orderId, customerName, interior, door, accessories, materials, paperwork, saleNumber, customerNumber, fitter, orderDate, fitDate, address, postcode) {
-    // Remove previous selection
-    document.querySelectorAll('.job-card.selected').forEach(card => {
-        card.classList.remove('selected');
-    });
-    
-    // Add selection to clicked card
-    const card = document.getElementById(`appointment-${appointmentId}`);
-    if (card) {
-        card.classList.add('selected');
+    document.querySelectorAll('.job-card.selected').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+
+    // Header
+    document.getElementById('detailCustomerName').textContent = d.customerName || 'Appointment';
+
+    // Links
+    const orderLink = document.getElementById('detailOrderLink');
+    const anthillLink = document.getElementById('detailAnthillLink');
+    if (d.orderUrl) { orderLink.href = d.orderUrl; orderLink.style.display = ''; }
+    else { orderLink.style.display = 'none'; }
+    if (d.anthillUrl) { anthillLink.href = d.anthillUrl; anthillLink.style.display = ''; }
+    else { anthillLink.style.display = 'none'; }
+
+    // Customer & Order
+    document.getElementById('detailContractNumber').textContent = d.contractNumber || d.saleNumber || '-';
+    document.getElementById('detailCustomerNumber').textContent = d.customerNumber || '-';
+    document.getElementById('detailDesigner').textContent = d.designer || '-';
+    document.getElementById('detailOrderDate').textContent = d.orderDate || '-';
+    document.getElementById('detailAddress').textContent = d.address || '-';
+    document.getElementById('detailPostcode').textContent = d.postcode || '-';
+
+    // Financials
+    const sv = d.saleValue, pt = d.paymentsTotal, os = d.outstanding;
+    document.getElementById('detailSaleValue').textContent = sv ? '£' + Number(sv).toLocaleString() : '-';
+    document.getElementById('detailSaleValue').classList.toggle('detail-val-estimated', !!(sv && d.valueEstimated === '1'));
+    document.getElementById('detailPaid').textContent = pt ? '£' + Number(pt).toLocaleString() : '-';
+    const outEl = document.getElementById('detailOutstanding');
+    if (os !== undefined && os !== null && os !== '') {
+        const osNum = Number(os);
+        if (osNum <= 0) { outEl.textContent = 'Paid'; outEl.className = 'detail-fin-remaining detail-val-paid'; }
+        else { outEl.textContent = '£' + osNum.toLocaleString(); outEl.className = 'detail-fin-remaining detail-val-due'; }
+    } else { outEl.textContent = '-'; outEl.className = 'detail-fin-remaining'; }
+    const bar = document.getElementById('detailPaymentBar');
+    const fill = document.getElementById('detailPaymentFill');
+    if (sv && Number(sv) > 0) {
+        const pct = Math.min(100, Math.round((Number(pt || 0) / Number(sv)) * 100));
+        fill.style.width = pct + '%';
+        fill.classList.toggle('bar-complete', pct >= 100);
+        bar.style.display = '';
+    } else { bar.style.display = 'none'; }
+
+    // POs
+    renderDetailPos(d.pos);
+
+    // Fit assignment
+    const fitterSelect = document.getElementById('detailFitterSelect');
+    if (fitterSelect && d.fitterCode) fitterSelect.value = d.fitterCode;
+    _origFitterCode = d.fitterCode;
+    syncDetailEditValue('Fitter');
+    if (d.fitDate) {
+        const parts = d.fitDate.split('/');
+        if (parts.length === 3) {
+            const iso = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            document.getElementById('detailFitDate').value = iso;
+            _origFitDate = iso;
+        }
     }
-    
-    // Update summary header
-    selectedAppointmentId = appointmentId;
-    window.selectedOrderId = orderId;
-    
-    document.getElementById('summaryCustomerName').textContent = customerName;
-    
-    // Update customer info
-    document.getElementById('summarySaleNumber').textContent = saleNumber;
-    document.getElementById('summaryCustomerNumber').textContent = customerNumber;
-    document.getElementById('summaryFitter').textContent = fitter;
-    document.getElementById('summaryOrderDate').textContent = orderDate;
-    document.getElementById('summaryFitDate').textContent = fitDate;
-    document.getElementById('summaryAddress').textContent = address;
-    document.getElementById('summaryPostcode').textContent = postcode;
-    
-    // Update checkboxes
-    document.getElementById('summary-interior').checked = interior;
-    document.getElementById('summary-door').checked = door;
-    document.getElementById('summary-accessories').checked = accessories;
-    document.getElementById('summary-materials').checked = materials;
-    document.getElementById('summary-paperwork').checked = paperwork;
-    
-    // Show summary
-    document.getElementById('appointmentSummary').classList.add('active');
+    syncDetailEditValue('FitDate');
+    document.getElementById('detailFitDuration').value = d.fitDuration || '1';
+    _origDuration = document.getElementById('detailFitDuration').value;
+    syncDetailEditValue('FitDuration');
+    resetDetailEdits();
+
+    // Checkboxes
+    document.getElementById('detail-interior').checked = d.interior === 'true';
+    document.getElementById('detail-door').checked = d.door === 'true';
+    document.getElementById('detail-accessories').checked = d.accessories === 'true';
+    document.getElementById('detail-materials').checked = d.materials === 'true';
+    document.getElementById('detail-paperwork').checked = d.paperwork === 'true';
+
+    openModal('appointmentDetailModal');
 }
 
-function closeSummary() {
-    document.getElementById('appointmentSummary').classList.remove('active');
-    document.querySelectorAll('.job-card.selected').forEach(card => {
-        card.classList.remove('selected');
+// ── Detail modal helpers ────────────────────────────────────────
+let _origFitterCode = null, _origFitDate = null, _origDuration = null;
+
+function renderDetailPos(posJson) {
+    const wrap = document.getElementById('detailPoList');
+    let pos = [];
+    try { pos = JSON.parse(posJson || '[]'); } catch (e) { pos = []; }
+    if (!pos.length) { wrap.innerHTML = '<span class="detail-po-empty">No linked purchase orders.</span>'; return; }
+    const groups = {}, order = [];
+    pos.forEach(po => {
+        const key = (po.supplier || '').trim() || 'Other';
+        if (!groups[key]) { groups[key] = []; order.push(key); }
+        groups[key].push(po);
     });
-    selectedAppointmentId = null;
-    window.selectedOrderId = null;
+    wrap.innerHTML = order.map(supplier => {
+        const rows = groups[supplier].map(po => {
+            const status = po.status || 'Draft';
+            const cls = 'po-status-' + status.toLowerCase().replace(/[^a-z]+/g, '-');
+            return `<div class="detail-po-row"><span class="detail-po-num">${escapeHtml(po.number)}</span><span class="detail-po-status ${cls}">${escapeHtml(status)}</span></div>`;
+        }).join('');
+        return `<div class="detail-po-group"><div class="detail-po-group-label">${escapeHtml(supplier)}</div>${rows}</div>`;
+    }).join('');
 }
 
-function updateSummaryStatus(field, checked) {
+function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function syncDetailEditValue(name) {
+    const inputEl = name === 'Fitter' ? document.getElementById('detailFitterSelect')
+                  : name === 'FitDate' ? document.getElementById('detailFitDate')
+                  : document.getElementById('detailFitDuration');
+    const displayEl = document.getElementById('detail' + name + 'Value');
+    if (!inputEl || !displayEl) return;
+    if (name === 'FitDate') {
+        if (inputEl.value) { const p = inputEl.value.split('-'); displayEl.textContent = `${p[2]}/${p[1]}/${p[0]}`; }
+    } else {
+        displayEl.textContent = inputEl.options[inputEl.selectedIndex] ? inputEl.options[inputEl.selectedIndex].text : '-';
+    }
+}
+
+function toggleFitEdit() {
+    const list = document.getElementById('fitEditList');
+    const btn = document.getElementById('fitEditToggle');
+    const editing = btn.classList.toggle('editing');
+    list.querySelectorAll('.detail-edit-row').forEach(r => r.classList.toggle('editing', editing));
+    btn.innerHTML = editing ? '<i class="bi bi-check2"></i> Done' : '<i class="bi bi-pencil"></i> Edit';
+}
+
+function resetDetailEdits() {
+    document.querySelectorAll('#fitEditList .detail-edit-row.editing').forEach(r => r.classList.remove('editing'));
+    const btn = document.getElementById('fitEditToggle');
+    if (btn) { btn.classList.remove('editing'); btn.innerHTML = '<i class="bi bi-pencil"></i> Edit'; }
+}
+
+function updateDetailStatus(field, checked) {
     if (!window.selectedOrderId) return;
-    
-    // Update the order status
     updateOrderStatus(window.selectedOrderId, field, checked);
+}
+
+function deleteDetailAppointment() {
+    if (!selectedAppointmentId) return;
+    if (!confirm('Delete this appointment?')) return;
+    fetch(`/fit-board/delete-appointment/${selectedAppointmentId}/`, {
+        method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    }).then(r => r.json()).then(data => { if (data.success) location.reload(); else alert(data.error); })
+    .catch(() => alert('Error deleting'));
+}
+
+function saveDetailMove() {
+    if (!selectedAppointmentId) return;
+    const newFitter = document.getElementById('detailFitterSelect').value;
+    const newDate = document.getElementById('detailFitDate').value;
+    const newDuration = document.getElementById('detailFitDuration').value;
+    if (newFitter !== _origFitterCode || newDate !== _origFitDate || newDuration !== _origDuration) {
+        const payload = { fitter: newFitter, fit_duration: parseInt(newDuration) };
+        if (newDate) payload.fit_date = newDate;
+        fetch(`/fit-board/move-appointment/${selectedAppointmentId}/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+            body: JSON.stringify(payload)
+        }).then(r => r.json()).then(data => {
+            if (data.success) { closeModal('appointmentDetailModal'); location.reload(); }
+            else alert(data.error || 'Save failed');
+        }).catch(() => alert('Error saving changes'));
+    } else {
+        closeModal('appointmentDetailModal');
+    }
 }
 
 function toggleAppointmentType() {
@@ -808,11 +850,6 @@ function selectRemedial(remedialId, remedialNumber, customerName) {
     document.getElementById('remedialSearchResults').style.display = 'none';
 }
 
-function deleteSummaryAppointment() {
-    if (!selectedAppointmentId) return;
-    deleteAppointment(selectedAppointmentId);
-}
-
 function addAppointment() {
     const appointmentType = document.getElementById('appointmentType').value;
     const fitDate = document.getElementById('selectedDate').value;
@@ -877,30 +914,14 @@ function updateOrderStatus(orderId, field, checked) {
     })
     .then(data => {
         if (data.success) {
-            // 1. Update M/P indicators for all cards with this order
+            // Update card indicators
             document.querySelectorAll(`[data-order-id="${orderId}"]`).forEach(card => {
                 const indicators = card.querySelectorAll('.indicator');
                 if (indicators.length >= 2) {
-                    // Update M indicator (index 0)
-                    if (field === 'materials') {
-                        indicators[0].classList.toggle('indicator-complete', checked);
-                        indicators[0].classList.toggle('indicator-missing', !checked);
-                    }
-                    // Update P indicator (index 1)
-                    if (field === 'paperwork') {
-                        indicators[1].classList.toggle('indicator-complete', checked);
-                        indicators[1].classList.toggle('indicator-missing', !checked);
-                    }
+                    if (field === 'materials') { indicators[0].classList.toggle('indicator-complete', checked); indicators[0].classList.toggle('indicator-missing', !checked); }
+                    if (field === 'paperwork') { indicators[1].classList.toggle('indicator-complete', checked); indicators[1].classList.toggle('indicator-missing', !checked); }
                 }
             });
-            
-            // 2. Update summary checkboxes if this order is currently selected in UI
-            if (window.selectedOrderId === orderId) {
-                const summaryElement = document.getElementById(`summary-${field}`);
-                if (summaryElement) {
-                    summaryElement.checked = checked;
-                }
-            }
         } else {
             alert('Error updating status: ' + (data.error || 'Unknown error'));
         }
@@ -934,96 +955,87 @@ function deleteAppointment(appointmentId) {
     });
 }
 
-function openMoveModal() {
-    if (!selectedAppointmentId) {
-        alert('No appointment selected');
-        return;
-    }
-    
-    // Get current fit date from summary
-    const currentFitDate = document.getElementById('summaryFitDate').textContent;
-    // Convert from d/m/Y to Y-m-d for date input
-    const dateParts = currentFitDate.split('/');
-    if (dateParts.length === 3) {
-        const isoDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
-        document.getElementById('moveDateInput').value = isoDate;
-    }
-    
-    openModal('moveAppointmentModal');
+// ── Manage Fitters (full CRUD) ──────────────────────────────────
+function openManageFitters() {
+    loadFitterCrud();
+    openModal('manageFittersModal');
 }
 
-function moveAppointment() {
-    if (!selectedAppointmentId) {
-        alert('No appointment selected');
-        return;
-    }
-    
-    const fitter = document.getElementById('moveFitterSelect').value;
-    const newDate = document.getElementById('moveDateInput').value;
-    
-    if (!newDate) {
-        alert('Please select a date');
-        return;
-    }
-    
-    fetch(`/fit-board/move-appointment/${selectedAppointmentId}/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': '{{ csrf_token }}',
-        },
-        body: JSON.stringify({
-            fitter: fitter,
-            fit_date: newDate
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            closeModal('moveAppointmentModal');
-            location.reload();
-        } else {
-            alert('Error: ' + (data.error || 'Unknown error'));
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('Error moving appointment');
-    });
-}
-
-// ── Manage Fitters ──────────────────────────────────────
-function editFitterRow(btn, code, name) {
-    // Fetch fitter by code to get its id
+function loadFitterCrud() {
+    const list = document.getElementById('fitterCrudList');
     fetch('/api/get-fitters/')
         .then(r => r.json())
         .then(data => {
-            const f = data.fitters.find(f => f.code === code && f.name === name);
-            if (!f) { alert('Fitter not found'); return; }
-            document.getElementById('editFitterOldCode').value = f.id;
-            document.getElementById('editFitterCode').value = f.code || '';
-            document.getElementById('editFitterName').value = f.name;
-            openModal('editFitterModal');
-        });
+            const fitters = data.fitters || [];
+            if (!fitters.length) {
+                list.innerHTML = '<p class="cal-empty-note">No fitters yet — add one below.</p>';
+                return;
+            }
+            list.innerHTML = fitters.map(f => `
+                <div class="fitter-crud-row" data-id="${f.id}">
+                    <input type="text" class="fitter-crud-input fitter-crud-code" maxlength="1" value="${escapeHtml(f.code || '')}" oninput="this.value=this.value.toUpperCase()">
+                    <input type="text" class="fitter-crud-input fitter-crud-name" value="${escapeHtml(f.name)}">
+                    <button class="fitter-action-btn fitter-action-btn--save" onclick="saveFitterCrud(${f.id}, this)" title="Save"><i class="bi bi-check-lg"></i></button>
+                    <button class="fitter-action-btn fitter-action-btn--delete" onclick="deleteFitterCrud(${f.id}, this)" title="Delete"><i class="bi bi-trash"></i></button>
+                </div>
+            `).join('');
+        })
+        .catch(() => { list.innerHTML = '<p class="cal-empty-note">Error loading fitters.</p>'; });
 }
 
-function saveFitterEdit() {
-    const fitterId = document.getElementById('editFitterOldCode').value;
-    const newCode = document.getElementById('editFitterCode').value.trim().toUpperCase();
-    const newName = document.getElementById('editFitterName').value.trim();
-    if (!newCode || !newName) { alert('Code and name are required.'); return; }
-
-    fetch(`/api/fitter/${fitterId}/update/`, {
+function addFitterCrud() {
+    const codeEl = document.getElementById('newFitterCode');
+    const nameEl = document.getElementById('newFitterName');
+    const code = codeEl.value.trim().toUpperCase();
+    const name = nameEl.value.trim();
+    if (!name) { alert('Enter a fitter name'); return; }
+    fetch('/api/add-fitter/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
-        body: JSON.stringify({ code: newCode, name: newName })
+        body: JSON.stringify({ name: name, code: code })
     })
     .then(r => r.json())
     .then(data => {
-        if (data.success) { location.reload(); }
-        else { alert('Error: ' + (data.error || 'Unknown error')); }
+        if (data.success) { codeEl.value = ''; nameEl.value = ''; loadFitterCrud(); }
+        else alert('Error: ' + (data.error || 'Unknown error'));
     })
-    .catch(err => { console.error(err); alert('Error saving fitter'); });
+    .catch(() => alert('Error adding fitter'));
+}
+
+function saveFitterCrud(id, btn) {
+    const row = btn.closest('.fitter-crud-row');
+    const code = row.querySelector('.fitter-crud-code').value.trim().toUpperCase();
+    const name = row.querySelector('.fitter-crud-name').value.trim();
+    if (!name) { alert('Name is required'); return; }
+    fetch(`/api/fitter/${id}/update/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ code: code, name: name })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const icon = btn.innerHTML;
+            btn.innerHTML = '<i class="bi bi-check2-all"></i>';
+            setTimeout(() => { btn.innerHTML = icon; }, 1200);
+        } else alert('Error: ' + (data.error || 'Unknown error'));
+    })
+    .catch(() => alert('Error saving fitter'));
+}
+
+function deleteFitterCrud(id, btn) {
+    const name = btn.closest('.fitter-crud-row').querySelector('.fitter-crud-name').value.trim();
+    if (!confirm(`Delete fitter "${name}"? Existing fits keep their assigned code.`)) return;
+    fetch(`/api/fitter/${id}/delete/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) loadFitterCrud();
+        else alert('Error: ' + (data.error || 'Unknown error'));
+    })
+    .catch(() => alert('Error deleting fitter'));
 }
 
 </script>
