@@ -1,5 +1,5 @@
 from .forms import OrderForm, BoardsPOForm, OSDoorForm, AccessoryCSVForm, Accessory, SubstitutionForm, CSVSkipItemForm, RaumplusOrderingRuleForm, SkuGroupForm, SkuGroupMemberForm
-from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, RaumplusOption, OSDoorOption, SyncLog, RaumplusOrderingRule, log_activity, Fitter, FactoryWorker
+from .models import Order, BoardsPO, PNXItem, OSDoor, StockItem, Accessory, Remedial, RemedialAccessory, FitAppointment, CalendarBlock, Customer, Designer, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderProduct, AnthillSale, PurchaseInvoiceLineItem, RaumplusDraftOrder, RaumplusOption, OSDoorOption, SyncLog, RaumplusOrderingRule, log_activity, Fitter, FactoryWorker
 
 import copy
 import csv
@@ -11989,9 +11989,12 @@ def calendar_view(request):
     }
 
     grid_start = first_day - timedelta(days=first_day.weekday())  # Monday on/before 1st
+    last_day = next_month - timedelta(days=1)
     month_weeks = []
     for _w in range(6):
         wk_start = grid_start + timedelta(days=7 * _w)
+        if wk_start > last_day:
+            break
         wk_end = wk_start + timedelta(days=6)
         days = []
         for _di in range(7):
@@ -12041,6 +12044,48 @@ def calendar_view(request):
         for c in lane_codes
     ]
 
+    # ── Side-panel data ────────────────────────────────────────────────────
+    # PFP orders: matches the sales tab PFP group exactly — orders with no
+    # order_date and no fit_date, deduplicated by sale_number.
+    _pfp_candidates = (
+        Order.objects.filter(
+            order_date__isnull=True,
+            fit_date__isnull=True,
+        )
+        .order_by('last_name', 'first_name')
+    )
+    pfp_orders = []
+    _seen_pfp_sales = set()
+    for _o in _pfp_candidates:
+        if _o.sale_number:
+            if _o.sale_number in _seen_pfp_sales:
+                continue
+            _seen_pfp_sales.add(_o.sale_number)
+        pfp_orders.append(_o)
+        if len(pfp_orders) >= 80:
+            break
+
+    # Unscheduled / outstanding remedials (incomplete, no current appointment)
+    scheduled_remedial_ids = FitAppointment.objects.filter(
+        remedial__isnull=False
+    ).values_list('remedial_id', flat=True)
+    panel_remedials = list(
+        Remedial.objects.filter(
+            is_completed=False,
+        ).exclude(id__in=scheduled_remedial_ids)
+        .distinct()
+        .order_by('-created_date')[:80]
+    )
+
+    # Calendar blocks for the current month
+    import json as _json
+    _blocks = CalendarBlock.objects.filter(date__year=current_year, date__month=current_month)
+    calendar_blocks = {}
+    for _b in _blocks:
+        _ds = _b.date.strftime('%Y-%m-%d')
+        calendar_blocks.setdefault(_ds, {})[_b.fitter_code] = _b.id
+    calendar_blocks_json = _json.dumps(calendar_blocks)
+
     context = {
         'current_year': current_year,
         'current_month': current_month,
@@ -12063,6 +12108,9 @@ def calendar_view(request):
         'total_outstanding': total_outstanding,
         'total_fits': total_fits,
         'fits_with_balance': fits_with_balance,
+        'pfp_orders': pfp_orders,
+        'panel_remedials': panel_remedials,
+        'calendar_blocks_json': calendar_blocks_json,
     }
     
     return render(request, 'stock_take/fit_board.html', context)
@@ -12962,6 +13010,84 @@ def move_fit_appointment(request, appointment_id):
             return JsonResponse({'success': False, 'error': str(e)})
     
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def create_provisional_appointment(request):
+    """Create a provisional FitAppointment by dragging a PFP order or remedial onto the calendar."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+    try:
+        import json as _json
+        from datetime import datetime as _dt
+        data = _json.loads(request.body)
+        item_type = data.get('type')
+        item_id = int(data.get('id', 0))
+        fit_date_str = data.get('fit_date', '')
+        fitter = data.get('fitter', 'R')
+        fit_date = _dt.strptime(fit_date_str, '%Y-%m-%d').date()
+
+        if item_type == 'order':
+            order = get_object_or_404(Order, id=item_id)
+            appt = FitAppointment.objects.create(
+                order=order,
+                fit_date=fit_date,
+                fitter=fitter,
+                is_provisional=True,
+            )
+            order.fit_date = fit_date
+            order.save(update_fields=['fit_date'])
+            label = f'{order.first_name} {order.last_name}'
+        elif item_type == 'remedial':
+            remedial = get_object_or_404(Remedial, id=item_id)
+            appt = FitAppointment.objects.create(
+                remedial=remedial,
+                fit_date=fit_date,
+                fitter=fitter,
+                is_provisional=True,
+            )
+            remedial.scheduled_date = fit_date
+            remedial.save(update_fields=['scheduled_date'])
+            label = remedial.remedial_number
+        else:
+            return JsonResponse({'success': False, 'error': 'Invalid type'})
+
+        return JsonResponse({'success': True, 'appointment_id': appt.id, 'label': label})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
+def create_calendar_block(request):
+    """Create a CalendarBlock to reserve a fitter slot (holiday, unavailability, etc.)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+    try:
+        import json as _json
+        from datetime import datetime as _dt
+        data = _json.loads(request.body)
+        date = _dt.strptime(data['date'], '%Y-%m-%d').date()
+        fitter_code = data.get('fitter_code', '')
+        note = data.get('note', '')
+        block, _ = CalendarBlock.objects.get_or_create(
+            date=date, fitter_code=fitter_code,
+            defaults={'note': note}
+        )
+        return JsonResponse({'success': True, 'block_id': block.id})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+
+@login_required
+def delete_calendar_block(request, block_id):
+    """Delete a CalendarBlock."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+    try:
+        CalendarBlock.objects.filter(id=block_id).delete()
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
 
 
 @login_required

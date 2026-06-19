@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
-{% load custom_filters %}
+{% load custom_filters humanize %}
 
 {% block title %}Calendar - {{ month_name }} {{ current_year }}{% endblock %}
 
@@ -197,46 +197,47 @@
             </div>
         </div>
     </div>
-    <div class="view-toggle">
-        <a href="{% url 'calendar_view' %}?year={{ today.year }}&month={{ today.month }}" class="view-toggle-btn active">Monthly</a>
-        <a href="{% url 'calendar_weekly' %}?year={{ today.year }}&month={{ today.month }}&day={{ today.day }}" class="view-toggle-btn">Weekly</a>
+    <div class="cal-toolbar-right">
+        <button class="btn btn-secondary" id="panelToggleBtn" onclick="toggleSchedulePanel()" title="Show job list">
+            <i class="bi bi-list-task"></i> Jobs
+        </button>
+        <div class="cal-summary-bar">
+            <span class="cal-summary-scope" id="calSummaryScope">{{ month_name }}</span>
+            <div class="cal-summary-item">
+                <span class="cal-summary-label">Fits</span>
+                <span class="cal-summary-val" id="summFits">{{ total_fits }}</span>
+            </div>
+            <div class="cal-summary-item">
+                <span class="cal-summary-label">Value</span>
+                <span class="cal-summary-val" id="summValue">&pound;{{ total_sale_value|floatformat:0|intcomma }}</span>
+            </div>
+            <div class="cal-summary-item">
+                <span class="cal-summary-label">Paid</span>
+                <span class="cal-summary-val cal-balance-paid" id="summPaid">&pound;{{ total_paid|floatformat:0|intcomma }}</span>
+            </div>
+            <div class="cal-summary-item">
+                <span class="cal-summary-label">Outstanding</span>
+                <span class="cal-summary-val {% if total_outstanding > 0 %}cal-balance-due{% else %}cal-balance-paid{% endif %}" id="summOutstanding">&pound;{{ total_outstanding|floatformat:0|intcomma }}</span>
+            </div>
+            <div class="cal-summary-item" id="summArrearsItem"{% if fits_with_balance == 0 %} style="display:none"{% endif %}>
+                <span class="cal-summary-label">Arrears</span>
+                <span class="cal-summary-val cal-balance-due" id="summArrears">{{ fits_with_balance }}</span>
+            </div>
+        </div>
     </div>
 </div>
 
-{% if total_fits > 0 %}
-<div class="cal-balance-bar">
-    <div class="cal-balance-item">
-        <span class="cal-balance-label">Fits</span>
-        <span class="cal-balance-val">{{ total_fits }}</span>
-    </div>
-    <div class="cal-balance-item">
-        <span class="cal-balance-label">Total Value</span>
-        <span class="cal-balance-val">&pound;{{ total_sale_value|floatformat:0 }}</span>
-    </div>
-    <div class="cal-balance-item">
-        <span class="cal-balance-label">Paid</span>
-        <span class="cal-balance-val cal-balance-paid">&pound;{{ total_paid|floatformat:0 }}</span>
-    </div>
-    <div class="cal-balance-item">
-        <span class="cal-balance-label">Outstanding</span>
-        <span class="cal-balance-val {% if total_outstanding > 0 %}cal-balance-due{% else %}cal-balance-paid{% endif %}">&pound;{{ total_outstanding|floatformat:0 }}</span>
-    </div>
-    {% if fits_with_balance > 0 %}
-    <div class="cal-balance-item">
-        <span class="cal-balance-label">In Arrears</span>
-        <span class="cal-balance-val cal-balance-due">{{ fits_with_balance }}</span>
-    </div>
-    {% endif %}
-</div>
-{% endif %}
+<div class="cal-with-panel">
 
 <div class="calendar-container">
     <div class="month-weeks" id="monthWeeks">
         {% for week in month_weeks %}
-        <div class="month-week-block">
+        <div class="month-week-block" data-week-idx="{{ week.widx }}">
             <!-- Day header row -->
             <div class="mw-header-row">
-                <div class="mw-corner"></div>
+                <div class="mw-corner" data-week-idx="{{ week.widx }}" onclick="focusWeek(this)" title="Focus week {{ week.widx }}">
+                    <span class="mw-corner-label">W{{ week.widx }}</span>
+                </div>
                 {% for day in week.days %}
                 <div class="mw-col-header {% if not day.in_month %}other-month{% endif %} {% if day.is_today %}today{% endif %}">
                     <span class="mw-col-dayname">{{ day.date|date:"D" }}</span>
@@ -265,7 +266,7 @@
                     {% for entry in lane.appts %}
                     {% with appt=entry.appt %}
                     {% if appt.order %}
-                    <div class="job-card {% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %}{% if entry.cont_left %} cont-left{% endif %}{% if entry.cont_right %} cont-right{% endif %}"
+                    <div class="job-card {% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %}{% if entry.cont_left %} cont-left{% endif %}{% if entry.cont_right %} cont-right{% endif %}{% if appt.is_provisional %} provisional{% endif %}"
                          style="grid-column: {{ entry.grid_col_start }} / {{ entry.grid_col_end }};"
                          id="appointment-{{ appt.id }}-w{{ week.widx }}"
                          draggable="true"
@@ -298,7 +299,10 @@
                          {% endif %}
                          data-pos="{{ appt.pos_json|default:'[]' }}"
                          onclick="selectAppointmentFromCard(this)">
-                        <span class="job-name">{{ appt.order.first_name }} {{ appt.order.last_name }}</span>
+                        <div class="job-card-body">
+                            <span class="job-name">{{ appt.order.first_name }} {{ appt.order.last_name }}</span>
+                            <span class="job-salenum">{{ appt.order.sale_number }}</span>
+                        </div>
                         {% if appt.fin and appt.fin.outstanding > 0 %}
                         <span class="job-balance">£{{ appt.fin.outstanding|floatformat:0 }}</span>
                         {% elif appt.fin and appt.fin.outstanding <= 0 %}
@@ -306,7 +310,7 @@
                         {% endif %}
                     </div>
                     {% elif appt.remedial %}
-                    <div class="job-card remedial{% if entry.cont_left %} cont-left{% endif %}{% if entry.cont_right %} cont-right{% endif %}"
+                    <div class="job-card remedial{% if entry.cont_left %} cont-left{% endif %}{% if entry.cont_right %} cont-right{% endif %}{% if appt.is_provisional %} provisional{% endif %}"
                          style="grid-column: {{ entry.grid_col_start }} / {{ entry.grid_col_end }};"
                          id="appointment-{{ appt.id }}-w{{ week.widx }}"
                          draggable="true"
@@ -374,7 +378,74 @@
             <span>PO Delivery</span>
         </div>
     </div>
-</div>
+</div><!-- /.calendar-container -->
+
+<div id="schedulePanel" class="schedule-panel">
+<div class="schedule-panel-inner">
+    <div class="schedule-panel-header">
+        <span class="schedule-panel-title">Job List</span>
+        <button class="schedule-panel-close" onclick="toggleSchedulePanel()" title="Close">&times;</button>
+    </div>
+
+    <div class="schedule-panel-section">
+        <div class="schedule-panel-section-title">Tools</div>
+        <div class="panel-job-item panel-block-item"
+             draggable="true"
+             data-type="block"
+             data-id="0"
+             data-name="Blocked"
+             ondragstart="handlePanelDragStart(event)"
+             ondragend="handlePanelDragEnd(event)">
+            <span class="panel-job-name">Block Slot</span>
+            <span class="panel-job-meta">Drag to reserve &mdash; click to remove</span>
+        </div>
+    </div>
+
+    <div class="schedule-panel-section">
+        <div class="schedule-panel-section-title">PFP &mdash; Ready to Schedule</div>
+        {% if pfp_orders %}
+        {% for order in pfp_orders %}
+        <div class="panel-job-item"
+             draggable="true"
+             data-type="order"
+             data-id="{{ order.id }}"
+             data-name="{{ order.first_name|escapejs }} {{ order.last_name|escapejs }}"
+             data-sale-number="{{ order.sale_number|escapejs }}"
+             ondragstart="handlePanelDragStart(event)"
+             ondragend="handlePanelDragEnd(event)">
+            <span class="panel-job-name">{{ order.first_name }} {{ order.last_name }}</span>
+            <span class="panel-job-meta">{{ order.sale_number }}</span>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="schedule-panel-empty">No jobs awaiting scheduling.</p>
+        {% endif %}
+    </div>
+
+    <div class="schedule-panel-section">
+        <div class="schedule-panel-section-title">Remedials &amp; Warranty</div>
+        {% if panel_remedials %}
+        {% for rem in panel_remedials %}
+        <div class="panel-job-item panel-job-remedial"
+             draggable="true"
+             data-type="remedial"
+             data-id="{{ rem.id }}"
+             data-name="{{ rem.first_name|escapejs }} {{ rem.last_name|escapejs }}"
+             data-sale-number="{{ rem.remedial_number|escapejs }}"
+             ondragstart="handlePanelDragStart(event)"
+             ondragend="handlePanelDragEnd(event)">
+            <span class="panel-job-name">{{ rem.first_name }} {{ rem.last_name }}</span>
+            <span class="panel-job-meta">{{ rem.remedial_number }}</span>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="schedule-panel-empty">No outstanding remedials.</p>
+        {% endif %}
+    </div>
+</div><!-- /.schedule-panel-inner -->
+</div><!-- /#schedulePanel -->
+
+</div><!-- /.cal-with-panel -->
 
 <!-- Add Appointment Modal -->
 <div id="addAppointmentModal" class="modal">
@@ -455,11 +526,32 @@
         </div>
     </div>
 </div>
+
+<!-- Block removal confirmation modal -->
+<div id="blockConfirmModal" class="modal">
+    <div class="modal-overlay" onclick="closeModal('blockConfirmModal')"></div>
+    <div class="modal-content modal--sm">
+        <div class="modal-header">
+            <h3>Remove Block?</h3>
+            <button type="button" class="modal-close" onclick="closeModal('blockConfirmModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>Remove the block from this slot? Appointments will be allowed again.</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('blockConfirmModal')">Cancel</button>
+            <button type="button" class="btn btn-danger" onclick="confirmRemoveBlock()">Remove</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
 /* ── Toolbar dropdown ─────────────────────────────────────── */
+
+const BLOCK_DELETE_URL = '{% url "delete_calendar_block" 999999 %}';
+const calendarBlockMap = {{ calendar_blocks_json|safe }};
 
 let selectedAppointmentId = null;
 let draggedAppointmentId = null;
@@ -475,6 +567,98 @@ function togglePOs() {
         : '<i class="bi bi-truck"></i> Hide POs';
     localStorage.setItem('fitBoardHidePOs', hidden ? '1' : '0');
 }
+// ── Schedule panel ───────────────────────────────────────────
+let panelDragData = null;
+
+function toggleSchedulePanel() {
+    const panel = document.getElementById('schedulePanel');
+    const btn = document.getElementById('panelToggleBtn');
+    if (!panel) { console.error('schedulePanel element not found'); return; }
+    const isOpen = panel.style.display === 'block';
+    const open = !isOpen;
+    panel.style.display = open ? 'block' : 'none';
+    panel.style.flexDirection = open ? 'column' : '';
+    if (btn) btn.classList.toggle('active', open);
+    localStorage.setItem('fitBoardPanel', open ? '1' : '0');
+}
+
+function handlePanelDragStart(event) {
+    const el = event.currentTarget;
+    panelDragData = {
+        type: el.dataset.type,
+        id: el.dataset.id,
+        name: el.dataset.name,
+    };
+    draggedAppointmentId = null;
+    el.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    try { event.dataTransfer.setData('text/plain', 'panel'); } catch (e) {}
+}
+
+function handlePanelDragEnd(event) {
+    event.currentTarget.classList.remove('dragging');
+    document.querySelectorAll('.mw-drop-zone.drag-over').forEach(z => z.classList.remove('drag-over'));
+}
+
+// ── Week focus & summary ────────────────────────────────────────
+const _monthTotals = {
+    fits: {{ total_fits }},
+    value: {{ total_sale_value|floatformat:0 }},
+    paid: {{ total_paid|floatformat:0 }},
+    outstanding: {{ total_outstanding|floatformat:0 }},
+    arrears: {{ fits_with_balance }}
+};
+let _focusedWeekIdx = null;
+
+function focusWeek(cornerEl) {
+    const weekBlock = cornerEl.closest('.month-week-block');
+    const weekIdx = cornerEl.dataset.weekIdx;
+    if (_focusedWeekIdx === weekIdx) {
+        unfocusWeek();
+        return;
+    }
+    document.querySelectorAll('.month-week-block').forEach(b => b.classList.remove('week-focused'));
+    document.querySelectorAll('.mw-corner').forEach(c => c.classList.remove('corner-active'));
+    weekBlock.classList.add('week-focused');
+    cornerEl.classList.add('corner-active');
+    _focusedWeekIdx = weekIdx;
+
+    const cards = weekBlock.querySelectorAll('.job-card:not(.cont-left)');
+    let fits = 0, value = 0, paid = 0, outstanding = 0, arrears = 0;
+    cards.forEach(card => {
+        if (card.dataset.saleValue !== undefined) {
+            fits++;
+            value += parseFloat(card.dataset.saleValue) || 0;
+            paid += parseFloat(card.dataset.paymentsTotal) || 0;
+            outstanding += parseFloat(card.dataset.outstanding) || 0;
+            if ((parseFloat(card.dataset.outstanding) || 0) > 0) arrears++;
+        }
+    });
+    updateSummary({ fits, value, paid, outstanding, arrears }, 'Week ' + weekIdx);
+}
+
+function unfocusWeek() {
+    document.querySelectorAll('.month-week-block').forEach(b => b.classList.remove('week-focused'));
+    document.querySelectorAll('.mw-corner').forEach(c => c.classList.remove('corner-active'));
+    _focusedWeekIdx = null;
+    updateSummary(_monthTotals, '{{ month_name }}');
+}
+
+function updateSummary(data, scope) {
+    document.getElementById('calSummaryScope').textContent = scope;
+    document.getElementById('summFits').textContent = data.fits.toLocaleString();
+    document.getElementById('summValue').textContent = '\u00a3' + Math.round(data.value).toLocaleString();
+    document.getElementById('summPaid').textContent = '\u00a3' + Math.round(data.paid).toLocaleString();
+    const outEl = document.getElementById('summOutstanding');
+    outEl.textContent = '\u00a3' + Math.round(data.outstanding).toLocaleString();
+    outEl.className = 'cal-summary-val ' + (data.outstanding > 0 ? 'cal-balance-due' : 'cal-balance-paid');
+    const arrearsItem = document.getElementById('summArrearsItem');
+    if (arrearsItem) {
+        document.getElementById('summArrears').textContent = data.arrears.toLocaleString();
+        arrearsItem.style.display = data.arrears > 0 ? '' : 'none';
+    }
+}
+
 // Restore saved preference
 document.addEventListener('DOMContentLoaded', function() {
     if (localStorage.getItem('fitBoardHidePOs') === '1') {
@@ -485,6 +669,22 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.innerHTML = '<i class="bi bi-truck"></i> Show POs';
         }
     }
+    if (localStorage.getItem('fitBoardPanel') === '1') {
+        const panel = document.getElementById('schedulePanel');
+        const btn = document.getElementById('panelToggleBtn');
+        if (panel) {
+            panel.style.display = 'block';
+        }
+        if (btn) btn.classList.add('active');
+    }
+    // Apply calendar blocks to drop zones
+    document.querySelectorAll('.mw-drop-zone[data-date]').forEach(zone => {
+        const dateBlocks = calendarBlockMap[zone.dataset.date];
+        if (dateBlocks && dateBlocks[zone.dataset.fitterCode] !== undefined) {
+            zone.classList.add('blocked');
+            zone.dataset.blockId = dateBlocks[zone.dataset.fitterCode];
+        }
+    });
 });
 
 function bulkImportFitDates() {
@@ -545,7 +745,52 @@ function handleDrop(event) {
 
     const newDate = zone.dataset.date;
     const fitter = zone.dataset.fitterCode;
+
+    // Panel drag: create provisional appointment or block
+    if (panelDragData) {
+        const pd = panelDragData;
+        panelDragData = null;
+        if (!newDate) return false;
+
+        if (pd.type === 'block') {
+            if (zone.classList.contains('blocked')) {
+                removeCalendarBlock(zone.dataset.blockId, zone);
+            } else {
+                fetch('{% url "create_calendar_block" %}', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+                    body: JSON.stringify({ date: newDate, fitter_code: fitter || '' })
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        zone.classList.add('blocked');
+                        zone.dataset.blockId = data.block_id;
+                    } else { alert('Error: ' + (data.error || 'Unknown')); }
+                })
+                .catch(() => alert('Error creating block'));
+            }
+            return false;
+        }
+
+        if (zone.classList.contains('blocked')) return false;
+
+        fetch('{% url "create_provisional_appointment" %}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+            body: JSON.stringify({ type: pd.type, id: pd.id, fit_date: newDate, fitter: fitter || 'R' })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) { location.reload(); }
+            else { alert('Error: ' + (data.error || 'Unknown error')); }
+        })
+        .catch(() => alert('Error creating provisional appointment'));
+        return false;
+    }
+
     if (!draggedAppointmentId || !newDate) return false;
+    if (zone.classList.contains('blocked')) return false;
 
     // Move to the target fitter lane + day
     fetch(`/fit-board/move-appointment/${draggedAppointmentId}/`, {
@@ -564,10 +809,45 @@ function handleDrop(event) {
 }
 
 // Add a sale/appointment by clicking an empty cell (fitter × day)
+let _pendingBlockId = null;
+let _pendingBlockZone = null;
+
 function openAddAppointmentCell(dateStr, fitterCode) {
+    const zone = document.querySelector(`.mw-drop-zone[data-date="${dateStr}"][data-fitter-code="${fitterCode}"]`);
+    if (zone && zone.classList.contains('blocked')) {
+        _pendingBlockId = zone.dataset.blockId;
+        _pendingBlockZone = zone;
+        openModal('blockConfirmModal');
+        return;
+    }
     const parts = (dateStr || '').split('-').map(Number);
     if (parts.length !== 3) return;
     openAddAppointment(parts[0], parts[1], parts[2], fitterCode);
+}
+
+function confirmRemoveBlock() {
+    closeModal('blockConfirmModal');
+    if (_pendingBlockId && _pendingBlockZone) {
+        removeCalendarBlock(_pendingBlockId, _pendingBlockZone);
+    }
+    _pendingBlockId = null;
+    _pendingBlockZone = null;
+}
+
+function removeCalendarBlock(blockId, zone) {
+    const url = BLOCK_DELETE_URL.replace('999999', blockId);
+    fetch(url, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && zone) {
+            zone.classList.remove('blocked');
+            delete zone.dataset.blockId;
+        }
+    })
+    .catch(() => alert('Error removing block'));
 }
 
 function openAddAppointment(year, month, day, fitterCode) {

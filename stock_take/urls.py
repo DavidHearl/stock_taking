@@ -487,7 +487,7 @@ urlpatterns = [
     path('stock-items/update-batch/', views.update_stock_items_batch, name='update_stock_items_batch'),
     
     # Calendar (renamed from Fit Board)
-    path('calendar/', views.calendar_weekly, name='calendar_weekly'),
+    path('calendar/', views.calendar_view, name='calendar_weekly'),
     path('calendar/pdf/', views.calendar_pdf_view, name='calendar_pdf'),
     path('calendar/monthly/', views.calendar_view, name='calendar_view'),
     path('calendar/gantt/', views.gantt_chart, name='gantt_chart'),
@@ -500,7 +500,10 @@ urlpatterns = [
     path('fit-board/move-appointment/<int:appointment_id>/', views.move_fit_appointment, name='move_fit_appointment'),
     path('fit-board/refresh-anthill/', views.refresh_anthill_fit_dates, name='refresh_anthill_fit_dates'),
     path('fit-board/bulk-import/', views.bulk_import_fit_dates, name='bulk_import_fit_dates'),
-    
+    path('calendar/provisional-appointment/', views.create_provisional_appointment, name='create_provisional_appointment'),
+    path('calendar/block/create/', views.create_calendar_block, name='create_calendar_block'),
+    path('calendar/block/<int:block_id>/delete/', views.delete_calendar_block, name='delete_calendar_block'),
+
     # Sales Appointments
     path('calendar/sales/add/', views.add_sales_appointment, name='add_sales_appointment'),
     path('calendar/sales/<int:appointment_id>/update/', views.update_sales_appointment, name='update_sales_appointment'),

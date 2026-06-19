@@ -1691,6 +1691,7 @@ class FitAppointment(models.Model):
     accessories_completed = models.BooleanField(default=False, help_text='Accessories fit completed')
     materials_completed = models.BooleanField(default=False, help_text='Materials delivered/ready')
     notes = models.TextField(blank=True, help_text='Additional notes about the fit')
+    is_provisional = models.BooleanField(default=False, help_text='Provisional fit date — dragged from job list, not yet confirmed')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -1717,6 +1718,21 @@ class FitAppointment(models.Model):
         elif self.remedial:
             return f"{self.remedial.remedial_number} - {self.remedial.first_name} {self.remedial.last_name}"
         return "Unknown"
+
+
+class CalendarBlock(models.Model):
+    """Reserves a fitter's slot on a specific day — used for holidays, unavailability, etc."""
+    date = models.DateField(db_index=True)
+    fitter_code = models.CharField(max_length=5, help_text='Fitter lane code (matches FitAppointment.fitter)')
+    note = models.CharField(max_length=100, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['date', 'fitter_code']
+        unique_together = [['date', 'fitter_code']]
+
+    def __str__(self):
+        return f'Block: {self.fitter_code} on {self.date}'
 
 
 class SalesAppointment(models.Model):
