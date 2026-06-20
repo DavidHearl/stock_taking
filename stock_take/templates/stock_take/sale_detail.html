@@ -24,9 +24,9 @@
 
     <!-- ===== CUSTOMER HERO CARD ===== -->
     {% if sale.customer %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer.name hero_customer_pk=sale.customer.pk hero_phone=sale.customer.phone hero_email=sale.customer.email hero_address_1=sale.customer.address_1 hero_address_2=sale.customer.address_2 hero_city=sale.customer.city hero_postcode=sale.customer.postcode hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class %}
+        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer.name hero_customer_pk=sale.customer.pk hero_phone=sale.customer.phone hero_email=sale.customer.email hero_address_1=sale.customer.address_1 hero_address_2=sale.customer.address_2 hero_city=sale.customer.city hero_postcode=sale.customer.postcode hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class hero_collapsible_details=True hero_fit_date=order.fit_date hero_value_paid=payments_total hero_value_total=sale.sale_value hero_next_step=order.workflow_progress.current_stage.name %}
     {% else %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer_name hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class %}
+        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer_name hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class hero_collapsible_details=True hero_fit_date=order.fit_date hero_value_paid=payments_total hero_value_total=sale.sale_value hero_next_step=order.workflow_progress.current_stage.name %}
     {% endif %}
 
     <div class="sale-page-layout">
@@ -72,144 +72,8 @@
                     </div>
                 </div>
 
-                <!-- Card 2: Job Info -->
-                <div class="card order-info-card">
-                    <div class="card-header card-header-job">
-                        <h3>Job Info</h3>
-                        <div class="kebab-menu" id="job-info-menu-wrapper-sale">
-                            <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Job status options">
-                                <i class="bi bi-three-dots-vertical"></i>
-                            </button>
-                            <div class="kebab-dropdown" id="job-info-dropdown-sale" data-keep-open>
-                                {% if order %}
-                                <div class="kebab-label">Job Status</div>
-                                <label class="kebab-item kebab-item-toggle" for="boardsNotRequired-sale">
-                                    <span><i class="bi bi-slash-circle icon-warning"></i> Boards Not Required</span>
-                                    <input class="job-checkbox" type="checkbox" id="boardsNotRequired-sale"
-                                           {% if order.boards_not_required %}checked{% endif %}
-                                           onchange="updateJobCheckbox({{ order.id }}, 'boards_not_required', this.checked)">
-                                </label>
-                                <label class="kebab-item kebab-item-toggle" for="accessoriesNotRequired-sale">
-                                    <span><i class="bi bi-slash-circle icon-warning"></i> Accessories Not Required</span>
-                                    <input class="job-checkbox" type="checkbox" id="accessoriesNotRequired-sale"
-                                           {% if order.accessories_not_required %}checked{% endif %}
-                                           onchange="updateJobCheckbox({{ order.id }}, 'accessories_not_required', this.checked)">
-                                </label>
-                                <label class="kebab-item kebab-item-toggle" for="allItemsOrdered-sale">
-                                    <span><i class="bi bi-box-seam"></i> All Items Ordered</span>
-                                    <input class="job-checkbox" type="checkbox" id="allItemsOrdered-sale"
-                                           {% if order.all_items_ordered %}checked{% endif %}
-                                           onchange="updateJobCheckbox({{ order.id }}, 'all_items_ordered', this.checked)">
-                                </label>
-                                <label class="kebab-item kebab-item-toggle" for="jobFinished-sale">
-                                    <span><i class="bi bi-check2-circle"></i> Job Finished</span>
-                                    <input class="job-checkbox" type="checkbox" id="jobFinished-sale"
-                                           {% if order.job_finished %}checked{% endif %}
-                                           onchange="onJobFinishedChange(this, {{ order.id }})">
-                                </label>
-                                {% if order.accessories.exists %}
-                                <label class="kebab-item kebab-item-toggle" for="materialsAllocated-sale">
-                                    <span><i class="bi bi-box-arrow-in-down"></i> Materials Allocated</span>
-                                    <input class="job-checkbox" type="checkbox" id="materialsAllocated-sale"
-                                           {% if all_allocated %}checked{% endif %}
-                                           onchange="toggleMaterialsAllocated({{ order.id }}, this.checked, this)">
-                                </label>
-                                {% endif %}
-                                <div class="kebab-divider"></div>
-                                {% endif %}
-                                {% if is_completed %}
-                                <span class="kebab-item disabled">
-                                    <i class="bi bi-check-circle-fill"></i> Sale Completed
-                                </span>
-                                {% else %}
-                                <button type="button" class="kebab-item" onclick="completeSaleManual()">
-                                    <i class="bi bi-check2-circle"></i> Complete Sale
-                                </button>
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="card-body padded">
-                        <div class="job-info-column">
-                            <div class="job-info-docs">
-
-                                <!-- Coversheet -->
-                                <div class="job-doc-coversheet">
-                                    <div class="job-doc-coversheet-left">
-                                        <div class="job-doc-coversheet-header">
-                                            <div class="job-doc-coversheet-icon">
-                                                <i class="bi bi-file-earmark-text"></i>
-                                            </div>
-                                            <div class="job-doc-coversheet-title">
-                                                <span>Coversheet</span>
-                                                {% if coversheet.is_final %}
-                                                <span class="job-doc-badge job-doc-badge-final">Final</span>
-                                                {% else %}
-                                                <span class="job-doc-badge job-doc-badge-draft">Draft</span>
-                                                {% endif %}
-                                            </div>
-                                        </div>
-                                        <div class="job-doc-coversheet-meta">
-                                            {% if coversheet.prepared_by %}<span><i class="bi bi-person"></i> {{ coversheet.prepared_by }}</span>{% endif %}
-                                            <span><i class="bi bi-clock"></i> {{ coversheet.updated_at|date:'d M Y' }}</span>
-                                        </div>
-                                    </div>
-                                    <div class="job-doc-coversheet-actions">
-                                        <a href="{% url 'sale_coversheet_pdf' sale.pk %}" target="_blank" class="btn btn-sm btn-outline-primary">
-                                            <i class="bi bi-file-earmark-pdf"></i> PDF
-                                        </a>
-                                        <button type="button" class="btn btn-sm btn-outline-success" onclick="openCoversheetModal()">
-                                            <i class="bi bi-pencil-square"></i> Edit
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <!-- Claim Service Docs -->
-                                <div class="job-doc-list-header">
-                                    <span class="job-doc-list-title">Claim Service Documents</span>
-                                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="searchAndAttachAll(this)" title="Search the Claim Service and choose which documents to attach to this job">
-                                        <i class="bi bi-search"></i> Find &amp; review
-                                    </button>
-                                </div>
-                                <div class="job-doc-list">
-                                    {% for item in important_documents %}
-                                    <div class="job-doc-item">
-                                        <div class="job-doc-item-left">
-                                            {% if item.doc %}
-                                            <i class="bi bi-file-earmark-check job-doc-item-icon job-doc-item-icon-ok"></i>
-                                            {% else %}
-                                            <i class="bi bi-file-earmark job-doc-item-icon job-doc-item-icon-empty"></i>
-                                            {% endif %}
-                                            <div>
-                                                <div class="job-doc-item-name">{{ item.doc_type }}</div>
-                                            </div>
-                                        </div>
-                                        <div class="job-doc-item-right">
-                                            <button type="button" class="claim-icon-btn" onclick="searchClaimDocs('{{ item.doc_type|escapejs }}')" title="Search Claim Service for {{ item.doc_type }}">
-                                                <i class="bi bi-search"></i>
-                                            </button>
-                                            {% if item.doc %}
-                                            <a href="{{ item.doc.file.url }}" target="_blank" class="claim-icon-btn" title="View {{ item.doc_type }}">
-                                                <i class="bi bi-eye"></i>
-                                            </a>
-                                            {% endif %}
-                                            <form method="POST" action="{% url 'sale_claim_document_upload' sale.pk %}" enctype="multipart/form-data" class="job-doc-upload-form">
-                                                {% csrf_token %}
-                                                <input type="hidden" name="doc_type" value="{{ item.doc_type }}">
-                                                <label class="claim-icon-btn{% if not item.doc %} claim-icon-btn-primary{% endif %}" title="Upload {{ item.doc_type }}">
-                                                    <i class="bi bi-upload"></i>
-                                                    <input type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" class="job-doc-file-hidden" onchange="this.closest('form').submit()">
-                                                </label>
-                                            </form>
-                                        </div>
-                                    </div>
-                                    {% endfor %}
-                                </div>
-
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <!-- Card 2: Documents -->
+                {% include "stock_take/partials/documents_card.html" with dc_id_suffix="-sale" dc_show_complete=True %}
 
             </div>
 
@@ -2127,9 +1991,6 @@
                         <i class="bi bi-three-dots-vertical"></i>
                     </button>
                     <div class="kebab-dropdown">
-                        <button type="button" class="kebab-item" onclick="openFinancialChartModal()">
-                            <i class="bi bi-bar-chart-line"></i> Cost Breakdown
-                        </button>
                         <button type="button" class="kebab-item" id="btn-financial-edit" onclick="toggleFinancialEdit()">
                             <i class="bi bi-pencil"></i> Edit Values
                         </button>
@@ -2141,55 +2002,35 @@
                 </div>
             </div>
             <div class="fin-summary-body">
-                <div class="fin-row fin-row-primary">
-                    <span class="fin-label">Total (Inc VAT)</span>
-                    <div class="fin-value-wrap">
-                        <span class="fin-value fin-value-large" id="total_value_inc_vat_display"><span class="fin-currency">£</span><span class="fin-amount">{{ order.total_value_inc_vat|default:'0.00'|floatformat:2|intcomma }}</span></span>
-                        <input type="text" inputmode="decimal" class="fin-edit-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}" style="display:none;">
+                <!-- Headline totals (above the diagram) -->
+                <div class="fin-totals fin-totals-top">
+                    <div class="fin-row fin-row-primary">
+                        <span class="fin-label">Total (Inc VAT)</span>
+                        <div class="fin-value-wrap">
+                            <span class="fin-value" id="total_value_inc_vat_display"><span class="fin-currency">£</span><span class="fin-amount">{{ order.total_value_inc_vat|default:'0.00'|floatformat:2|intcomma }}</span></span>
+                            <input type="text" inputmode="decimal" class="fin-edit-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}" style="display:none;">
+                        </div>
+                    </div>
+                    <div class="fin-row">
+                        <span class="fin-label">Total (Exc VAT)</span>
+                        <span class="fin-value" id="total_value_exc_vat_display"><span class="fin-currency">£</span><span class="fin-amount">{{ order.total_value_exc_vat|default:'0.00'|floatformat:2|intcomma }}</span></span>
                     </div>
                 </div>
-                <div class="fin-row">
-                    <span class="fin-label">Total (Exc VAT)</span>
-                    <span class="fin-value" id="total_value_exc_vat_display"><span class="fin-currency">£</span><span class="fin-amount">{{ order.total_value_exc_vat|default:'0.00'|floatformat:2|intcomma }}</span></span>
-                </div>
-                <div class="fin-row">
-                    <span class="fin-label">Materials</span>
-                    <span class="fin-value" id="materials_cost_display"><span class="fin-currency">£</span><span class="fin-amount">{{ materials_cost|default:'0.00'|floatformat:2|intcomma }}</span></span>
-                </div>
-                <div class="fin-row">
-                    <span class="fin-label">Installation</span>
-                    <span class="fin-value" id="installation_cost_display"><span class="fin-currency">£</span><span class="fin-amount">{{ calculated_installation_cost|floatformat:2|intcomma }}</span></span>
-                </div>
-                <div class="fin-row">
-                    <span class="fin-label">Manufacturing</span>
-                    <span class="fin-value" id="manufacturing_cost_display"><span class="fin-currency">£</span><span class="fin-amount">{{ calculated_manufacturing_cost|floatformat:2|intcomma }}</span></span>
-                </div>
-                <div class="fin-row fin-row-profit">
-                    <span class="fin-label">Profit</span>
-                    <span class="fin-value" id="profit_display"><span class="fin-currency">£</span><span class="fin-amount">{{ order.profit|default:'0.00'|floatformat:2|intcomma }}</span></span>
+
+                <!-- Cost-breakdown waffle (integrated) -->
+                <div class="fin-waffle-section"
+                    data-boards="{{ boards_cost|default:'0'|floatformat:2 }}"
+                    data-accessories="{{ accessories_cost|default:'0'|floatformat:2 }}"
+                    data-os-doors="{{ os_doors_cost|default:'0'|floatformat:2 }}"
+                    data-installation="{{ calculated_installation_cost|default:'0'|floatformat:2 }}"
+                    data-manufacturing="{{ calculated_manufacturing_cost|default:'0'|floatformat:2 }}"
+                    data-profit="{{ order.profit|default:'0'|floatformat:2 }}"
+                    data-total-exc="{{ order.total_value_exc_vat|default:'0'|floatformat:2 }}">
+                    <div class="fin-waffle fin-waffle-inline" id="financialChartCanvas"></div>
+                    <div id="financialChartLegend" class="fin-waffle-legend"></div>
                 </div>
             </div>
         </div>
-
-        <!-- Financial Chart Modal -->
-        <dialog id="financialChartModal"
-            data-boards="{{ boards_cost|default:'0'|floatformat:2 }}"
-            data-accessories="{{ accessories_cost|default:'0'|floatformat:2 }}"
-            data-os-doors="{{ os_doors_cost|default:'0'|floatformat:2 }}"
-            data-installation="{{ calculated_installation_cost|default:'0'|floatformat:2 }}"
-            data-manufacturing="{{ calculated_manufacturing_cost|default:'0'|floatformat:2 }}"
-            data-profit="{{ order.profit|default:'0'|floatformat:2 }}">
-            <div class="manual-modal-header">
-                <div class="manual-modal-title"><span>Cost Breakdown</span></div>
-                <button class="manual-modal-close" onclick="document.getElementById('financialChartModal').close()"><i class="bi bi-x-lg"></i></button>
-            </div>
-            <div class="manual-modal-body">
-                <div class="fin-waffle-wrap">
-                    <div class="fin-waffle" id="financialChartCanvas"></div>
-                </div>
-                <div id="financialChartLegend" class="fin-waffle-legend"></div>
-            </div>
-        </dialog>
         {% else %}
         <!-- Sale-based financial summary (no order linked yet) -->
         <div class="card">
@@ -2502,25 +2343,33 @@ function toggleFinancialEdit() {
     }
 }
 
-function openFinancialChartModal() {
-    const modal = document.getElementById('financialChartModal');
-    document.body.appendChild(modal);
+function buildFinancialWaffle() {
+    const section = document.querySelector('.fin-waffle-section');
+    if (!section) return;
 
-    const d = modal.dataset;
+    const d = section.dataset;
     const boards       = parseFloat(d.boards)       || 0;
     const accessories  = parseFloat(d.accessories)  || 0;
     const osDoors      = parseFloat(d.osDoors)      || 0;
-    const installation = parseFloat(d.installation) || 0;
-    const manufacturing= parseFloat(d.manufacturing)|| 0;
-    const profit       = parseFloat(d.profit)       || 0;
+    let installation   = parseFloat(d.installation) || 0;
+    let manufacturing  = parseFloat(d.manufacturing)|| 0;
+    let profit         = parseFloat(d.profit)       || 0;
+    const totalExc     = parseFloat(d.totalExc)     || 0;
+
+    // Provisional estimates when no actual cost recorded: fitting 10%, manufacturing 5%
+    // of net (exc-VAT) value. The estimate is taken out of profit so totals still add up.
+    let installationEst = false, manufacturingEst = false;
+    if (installation <= 0 && totalExc > 0) { installation = totalExc * 0.10; profit -= installation; installationEst = true; }
+    if (manufacturing <= 0 && totalExc > 0) { manufacturing = totalExc * 0.05; profit -= manufacturing; manufacturingEst = true; }
+    if (profit < 0) profit = 0;
 
     const entries = [
-        { label: 'Boards',        value: boards,        color: '#3b82f6' },
-        { label: 'Accessories',   value: accessories,   color: '#60a5fa' },
-        { label: 'OS Doors',      value: osDoors,       color: '#93c5fd' },
-        { label: 'Installation',  value: installation,  color: '#f59e0b' },
-        { label: 'Manufacturing', value: manufacturing, color: '#8b5cf6' },
-        { label: 'Profit',        value: profit,        color: '#10b981' },
+        { label: 'Boards',        value: boards,        color: '#3b82f6', est: false },
+        { label: 'Accessories',   value: accessories,   color: '#60a5fa', est: false },
+        { label: 'OS Doors',      value: osDoors,       color: '#93c5fd', est: false },
+        { label: 'Installation',  value: installation,  color: '#f59e0b', est: installationEst },
+        { label: 'Manufacturing', value: manufacturing, color: '#8b5cf6', est: manufacturingEst },
+        { label: 'Profit',        value: profit,        color: '#10b981', est: false },
     ].filter(e => e.value > 0).sort((a, b) => b.value - a.value);
 
     const total = entries.reduce((a, e) => a + e.value, 0);
@@ -2530,32 +2379,29 @@ function openFinancialChartModal() {
     let filled = 0;
     entries.forEach((e, i) => {
         const n = i === entries.length - 1 ? (100 - filled) : Math.round((e.value / total) * 100);
-        for (let j = 0; j < n; j++) cells.push(e.color);
+        for (let j = 0; j < n; j++) cells.push(e);
         filled += n;
     });
-    while (cells.length < 100 && entries.length) cells.push(entries[0].color);
+    while (cells.length < 100 && entries.length) cells.push(entries[0]);
 
     const waffle = document.getElementById('financialChartCanvas');
     waffle.innerHTML = '';
-    cells.forEach(color => {
+    cells.forEach(e => {
         const cell = document.createElement('div');
-        cell.className = 'fin-waffle-cell';
-        cell.style.background = color;
+        cell.className = 'fin-waffle-cell' + (e.est ? ' fin-waffle-cell-est' : '');
+        cell.style.background = e.color;
         waffle.appendChild(cell);
     });
 
     document.getElementById('financialChartLegend').innerHTML = entries.map(e => {
-        const pct = total > 0 ? ((e.value / total) * 100).toFixed(1) : '0.0';
         return `<div class="fin-waffle-legend-item">
-            <span class="fin-waffle-swatch" style="background:${e.color};"></span>
-            <span class="fin-waffle-cat">${e.label}</span>
-            <span class="fin-waffle-pct">${pct}%</span>
+            <span class="fin-waffle-swatch${e.est ? ' fin-waffle-swatch-est' : ''}" style="background:${e.color};"></span>
+            <span class="fin-waffle-cat">${e.label}${e.est ? ' <span class="fin-waffle-est-tag">est</span>' : ''}</span>
             <span class="fin-waffle-val">£${e.value.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
         </div>`;
     }).join('');
-
-    modal.showModal();
 }
+document.addEventListener('DOMContentLoaded', buildFinancialWaffle);
 </script>
 
 <script>

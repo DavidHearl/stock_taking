@@ -1,0 +1,152 @@
+{% comment %}
+Shared "Documents" card used on both the Sale tab and the Order tab of the
+sale/order detail page.
+
+Parameters:
+  dc_id_suffix   - string appended to element IDs to keep them unique when the
+                   card is rendered more than once on the same page (e.g. '-sale').
+                   Defaults to '' (empty).
+  dc_show_complete - when True, renders the "Complete Sale" / "Sale Completed"
+                   kebab section. Defaults to False.
+{% endcomment %}
+<div class="card order-info-card">
+    <div class="card-header card-header-job">
+        <h3>Documents</h3>
+        <div class="kebab-menu" id="job-info-menu-wrapper{{ dc_id_suffix }}">
+            <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Job status options">
+                <i class="bi bi-three-dots-vertical"></i>
+            </button>
+            <div class="kebab-dropdown" id="job-info-dropdown{{ dc_id_suffix }}" data-keep-open>
+                {% if order %}
+                <div class="kebab-label">Job Status</div>
+                <label class="kebab-item kebab-item-toggle" for="boardsNotRequired{{ dc_id_suffix }}">
+                    <span><i class="bi bi-slash-circle icon-warning"></i> Boards Not Required</span>
+                    <input class="job-checkbox" type="checkbox" id="boardsNotRequired{{ dc_id_suffix }}"
+                           {% if order.boards_not_required %}checked{% endif %}
+                           onchange="updateJobCheckbox({{ order.id }}, 'boards_not_required', this.checked)">
+                </label>
+                <label class="kebab-item kebab-item-toggle" for="accessoriesNotRequired{{ dc_id_suffix }}">
+                    <span><i class="bi bi-slash-circle icon-warning"></i> Accessories Not Required</span>
+                    <input class="job-checkbox" type="checkbox" id="accessoriesNotRequired{{ dc_id_suffix }}"
+                           {% if order.accessories_not_required %}checked{% endif %}
+                           onchange="updateJobCheckbox({{ order.id }}, 'accessories_not_required', this.checked)">
+                </label>
+                <label class="kebab-item kebab-item-toggle" for="allItemsOrdered{{ dc_id_suffix }}">
+                    <span><i class="bi bi-box-seam"></i> All Items Ordered</span>
+                    <input class="job-checkbox" type="checkbox" id="allItemsOrdered{{ dc_id_suffix }}"
+                           {% if order.all_items_ordered %}checked{% endif %}
+                           onchange="updateJobCheckbox({{ order.id }}, 'all_items_ordered', this.checked)">
+                </label>
+                <label class="kebab-item kebab-item-toggle" for="jobFinished{{ dc_id_suffix }}">
+                    <span><i class="bi bi-check2-circle"></i> Job Finished</span>
+                    <input class="job-checkbox" type="checkbox" id="jobFinished{{ dc_id_suffix }}"
+                           {% if order.job_finished %}checked{% endif %}
+                           onchange="onJobFinishedChange(this, {{ order.id }})">
+                </label>
+                {% if order.accessories.exists %}
+                <label class="kebab-item kebab-item-toggle" for="materialsAllocated{{ dc_id_suffix }}">
+                    <span><i class="bi bi-box-arrow-in-down"></i> Materials Allocated</span>
+                    <input class="job-checkbox" type="checkbox" id="materialsAllocated{{ dc_id_suffix }}"
+                           {% if all_allocated %}checked{% endif %}
+                           onchange="toggleMaterialsAllocated({{ order.id }}, this.checked, this)">
+                </label>
+                {% endif %}
+                {% if dc_show_complete %}
+                <div class="kebab-divider"></div>
+                {% endif %}
+                {% endif %}
+                {% if dc_show_complete %}
+                {% if is_completed %}
+                <span class="kebab-item disabled">
+                    <i class="bi bi-check-circle-fill"></i> Sale Completed
+                </span>
+                {% else %}
+                <button type="button" class="kebab-item" onclick="completeSaleManual()">
+                    <i class="bi bi-check2-circle"></i> Complete Sale
+                </button>
+                {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="card-body padded">
+        <div class="job-info-column">
+            <div class="job-info-docs">
+
+                <!-- Coversheet -->
+                <div class="job-doc-coversheet">
+                    <div class="job-doc-coversheet-left">
+                        <div class="job-doc-coversheet-header">
+                            <div class="job-doc-coversheet-icon">
+                                <i class="bi bi-file-earmark-text"></i>
+                            </div>
+                            <div class="job-doc-coversheet-title">
+                                <span>Coversheet</span>
+                                {% if coversheet.is_final %}
+                                <span class="job-doc-badge job-doc-badge-final">Final</span>
+                                {% else %}
+                                <span class="job-doc-badge job-doc-badge-draft">Draft</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="job-doc-coversheet-meta">
+                            {% if coversheet.prepared_by %}<span><i class="bi bi-person"></i> {{ coversheet.prepared_by }}</span>{% endif %}
+                            <span><i class="bi bi-clock"></i> {{ coversheet.updated_at|date:'d M Y' }}</span>
+                        </div>
+                    </div>
+                    <div class="job-doc-coversheet-actions">
+                        <a href="{% url 'sale_coversheet_pdf' sale.pk %}" target="_blank" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-file-earmark-pdf"></i> PDF
+                        </a>
+                        <button type="button" class="btn btn-sm btn-outline-success" onclick="openCoversheetModal()">
+                            <i class="bi bi-pencil-square"></i> Edit
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Claim Service Docs -->
+                <div class="job-doc-list-header">
+                    <span class="job-doc-list-title">Claim Service Documents</span>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="searchAndAttachAll(this)" title="Search the Claim Service and choose which documents to attach to this job">
+                        <i class="bi bi-search"></i> Find &amp; review
+                    </button>
+                </div>
+                <div class="job-doc-list">
+                    {% for item in important_documents %}
+                    <div class="job-doc-item">
+                        <div class="job-doc-item-left">
+                            {% if item.doc %}
+                            <i class="bi bi-file-earmark-check job-doc-item-icon job-doc-item-icon-ok"></i>
+                            {% else %}
+                            <i class="bi bi-file-earmark job-doc-item-icon job-doc-item-icon-empty"></i>
+                            {% endif %}
+                            <div>
+                                <div class="job-doc-item-name">{{ item.doc_type }}</div>
+                            </div>
+                        </div>
+                        <div class="job-doc-item-right">
+                            <button type="button" class="claim-icon-btn" onclick="searchClaimDocs('{{ item.doc_type|escapejs }}')" title="Search Claim Service for {{ item.doc_type }}">
+                                <i class="bi bi-search"></i>
+                            </button>
+                            {% if item.doc %}
+                            <a href="{{ item.doc.file.url }}" target="_blank" class="claim-icon-btn" title="View {{ item.doc_type }}">
+                                <i class="bi bi-eye"></i>
+                            </a>
+                            {% endif %}
+                            <form method="POST" action="{% url 'sale_claim_document_upload' sale.pk %}" enctype="multipart/form-data" class="job-doc-upload-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="doc_type" value="{{ item.doc_type }}">
+                                <label class="claim-icon-btn{% if not item.doc %} claim-icon-btn-primary{% endif %}" title="Upload {{ item.doc_type }}">
+                                    <i class="bi bi-upload"></i>
+                                    <input type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" class="job-doc-file-hidden" onchange="this.closest('form').submit()">
+                                </label>
+                            </form>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>

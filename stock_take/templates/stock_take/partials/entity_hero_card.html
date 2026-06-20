@@ -17,7 +17,15 @@
 {#   hero_badge_text    – optional badge text shown in right section (e.g. "OPEN") #}
 {#   hero_badge_class   – CSS modifier for badge (e.g. "active", "inactive")       #}
 {#   hero_save_fn       – JS call for Save button; omit to hide actions entirely    #}
+{#   hero_collapsible_details – if truthy, replace the "Customer Since" line with a  #}
+{#                        "Show Details" toggle and move Phone/Email/Address into a   #}
+{#                        collapsible panel (multi-line address)                      #}
+{#   hero_fit_date      – optional fit date; shown in the status block               #}
+{#   hero_value_paid    – optional amount paid; shown as "£paid/£total" Value row    #}
+{#   hero_value_total   – optional total sale value; shown in the Value row          #}
+{#   hero_next_step     – optional current workflow stage; shown as "Next Step"      #}
 {# ─────────────────────────────────────────────────────────────────────────────── #}
+{% load humanize %}
 
 <div class="card entity-hero-card">
     <div class="entity-hero-header">
@@ -35,13 +43,49 @@
                     {{ hero_name|default:"Unknown" }}
                     {% endif %}
                 </h3>
-                {% if hero_created_at %}
+                {% if hero_collapsible_details %}
+                <div class="kebab-menu entity-hero-details-menu">
+                    <button type="button" class="entity-hero-toggle" aria-expanded="false" onclick="toggleKebab(this, event)">
+                        Show Details <i class="bi bi-chevron-down"></i>
+                    </button>
+                    <div class="kebab-dropdown entity-hero-details-dropdown" data-keep-open>
+                        {% if hero_phone %}
+                        <div class="entity-hero-detail-item">
+                            <span class="entity-hero-col-label">Phone</span>
+                            <div class="entity-hero-col-value-row">
+                                <span class="entity-hero-col-value">{{ hero_phone }}</span>
+                                <button type="button" class="entity-hero-copy-btn" data-copy-text="{{ hero_phone }}" onclick="copyEntityHeroField(this)" title="Copy phone number" aria-label="Copy phone number"><i class="bi bi-copy"></i></button>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if hero_email %}
+                        <div class="entity-hero-detail-item">
+                            <span class="entity-hero-col-label">Email</span>
+                            <div class="entity-hero-col-value-row">
+                                <span class="entity-hero-col-value entity-hero-col-email">{{ hero_email }}</span>
+                                <button type="button" class="entity-hero-copy-btn" data-copy-text="{{ hero_email }}" onclick="copyEntityHeroField(this)" title="Copy email address" aria-label="Copy email address"><i class="bi bi-copy"></i></button>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% if hero_address_1 or hero_city %}
+                        <div class="entity-hero-detail-item">
+                            <span class="entity-hero-col-label">Address</span>
+                            <div class="entity-hero-col-value-row">
+                                <span class="entity-hero-col-value entity-hero-col-address entity-hero-col-address-multiline">{% if hero_address_1 %}{{ hero_address_1 }}<br>{% endif %}{% if hero_address_2 %}{{ hero_address_2 }}<br>{% endif %}{% if hero_city %}{{ hero_city }}<br>{% endif %}{% if hero_postcode %}{{ hero_postcode }}{% endif %}</span>
+                                <button type="button" class="entity-hero-copy-btn" data-copy-text="{{ hero_address_1 }}{% if hero_address_2 %}, {{ hero_address_2 }}{% endif %}{% if hero_city %}, {{ hero_city }}{% endif %}{% if hero_postcode %}, {{ hero_postcode }}{% endif %}" onclick="copyEntityHeroField(this)" title="Copy address" aria-label="Copy address"><i class="bi bi-copy"></i></button>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% elif hero_created_at %}
                 <div class="entity-hero-since">{{ hero_created_label|default:"Customer Since" }}: {{ hero_created_at|date:"d M Y" }}</div>
                 {% endif %}
             </div>
         </div>
 
         <!-- Info columns: Phone | Email | Address -->
+        {% if not hero_collapsible_details %}
         {% if hero_phone or hero_email or hero_address_1 or hero_city %}
         <div class="entity-hero-cols">
             {% if hero_phone %}
@@ -73,9 +117,10 @@
             {% endif %}
         </div>
         {% endif %}
+        {% endif %}
 
         <!-- Status block -->
-        {% if hero_badge_text or hero_updated_at %}
+        {% if hero_badge_text or hero_updated_at or hero_fit_date or hero_value_total or hero_next_step %}
         <div class="entity-hero-status-block">
             {% if hero_badge_text %}
             <div class="entity-hero-status-row">
@@ -83,7 +128,25 @@
                 <span class="customer-active-badge {{ hero_badge_class }}">{{ hero_badge_text }}</span>
             </div>
             {% endif %}
-            {% if hero_updated_at %}
+            {% if hero_fit_date %}
+            <div class="entity-hero-status-row">
+                <span class="entity-hero-col-label">Fit Date</span>
+                <span class="entity-hero-status-val">{{ hero_fit_date|date:"d M Y" }}</span>
+            </div>
+            {% endif %}
+            {% if hero_value_total %}
+            <div class="entity-hero-status-row">
+                <span class="entity-hero-col-label">Value</span>
+                <span class="entity-hero-status-val">£{{ hero_value_paid|default:0|floatformat:0|intcomma }}/£{{ hero_value_total|floatformat:0|intcomma }}</span>
+            </div>
+            {% endif %}
+            {% if hero_next_step %}
+            <div class="entity-hero-status-row">
+                <span class="entity-hero-col-label">Next Step</span>
+                <span class="entity-hero-status-val">{{ hero_next_step }}</span>
+            </div>
+            {% endif %}
+            {% if hero_updated_at and not hero_collapsible_details %}
             <span class="entity-hero-updated"><i class="bi bi-arrow-repeat"></i> Updated: {{ hero_updated_at|date:"d M Y" }}</span>
             {% endif %}
         </div>
@@ -92,8 +155,8 @@
         <!-- Action buttons (far right) -->
         {% if hero_save_fn %}
         <div class="entity-hero-actions">
-            <button class="btn btn-sm btn-edit-understated" id="btn-edit" onclick="toggleEditMode()" title="Edit">
-                <i class="bi bi-pencil"></i>
+            <button class="btn btn-sm btn-edit-understated" id="btn-edit" onclick="toggleEditMode()" title="Edit Details">
+                <i class="bi bi-pencil"></i> Edit Details
             </button>
             <button class="btn btn-md btn-outline-success" id="btn-save" onclick="{{ hero_save_fn }}">
                 <i class="bi bi-check-lg"></i> Save
