@@ -310,11 +310,27 @@ def ordering(request):
     # Split the already-evaluated list in Python — avoids 2 extra DB queries.
     # Keep display unique by sale_number so the same sale cannot show in both
     # the PFP block and the dated block.
-    pfp_candidates = [o for o in orders_list if o.order_date is None and o.fit_date is None]
+    # Also exclude orders that already have a FitAppointment — those should
+    # show in the dated block (or disappear from PFP) even if Order.fit_date
+    # was never backfilled from historical appointment data.
+    _appointed_ids_for_ordering = set(
+        FitAppointment.objects.filter(order__isnull=False)
+        .values_list('order_id', flat=True)
+    )
+    pfp_candidates = [
+        o for o in orders_list
+        if o.order_date is None
+        and o.fit_date is None
+        and o.id not in _appointed_ids_for_ordering
+    ]
     pfp_sale_numbers = {o.sale_number for o in pfp_candidates if o.sale_number}
     regular_candidates = [
         o for o in orders_list
-        if (o.order_date is not None or o.fit_date is not None)
+        if (
+            o.order_date is not None
+            or o.fit_date is not None
+            or o.id in _appointed_ids_for_ordering
+        )
         and (not o.sale_number or o.sale_number not in pfp_sale_numbers)
     ]
 
@@ -12047,11 +12063,18 @@ def calendar_view(request):
     # ── Side-panel data ────────────────────────────────────────────────────
     # PFP orders: matches the sales tab PFP group exactly — orders with no
     # order_date and no fit_date, deduplicated by sale_number.
+    # Also exclude any order that already has a FitAppointment (belt-and-braces
+    # guard for historical records whose Order.fit_date was never backfilled).
+    _appointed_order_ids = set(
+        FitAppointment.objects.filter(order__isnull=False)
+        .values_list('order_id', flat=True)
+    )
     _pfp_candidates = (
         Order.objects.filter(
             order_date__isnull=True,
             fit_date__isnull=True,
         )
+        .exclude(id__in=_appointed_order_ids)
         .order_by('last_name', 'first_name')
     )
     pfp_orders = []
@@ -12901,6 +12924,11 @@ def add_fit_appointment(request):
                 if order.fit_date != parsed_date:
                     order.fit_date = parsed_date
                     order.save(update_fields=['fit_date'])
+                # Also keep the linked AnthillSale in sync
+                _anthill_sale = order.anthill_sale.first()
+                if _anthill_sale and _anthill_sale.fit_date != parsed_date:
+                    _anthill_sale.fit_date = parsed_date
+                    _anthill_sale.save(update_fields=['fit_date'])
                 customer_name = f"{order.first_name} {order.last_name}"
             elif entity_type == 'remedial':
                 remedial = Remedial.objects.get(id=entity_id)
@@ -12993,6 +13021,11 @@ def move_fit_appointment(request, appointment_id):
                 if appointment.order:
                     appointment.order.fit_date = new_date
                     appointment.order.save(update_fields=['fit_date'])
+                    # And the linked AnthillSale
+                    _anthill_sale = appointment.order.anthill_sale.first()
+                    if _anthill_sale and _anthill_sale.fit_date != new_date:
+                        _anthill_sale.fit_date = new_date
+                        _anthill_sale.save(update_fields=['fit_date'])
             
             # Update fit duration if provided
             if 'fit_duration' in data:
@@ -13037,6 +13070,11 @@ def create_provisional_appointment(request):
             )
             order.fit_date = fit_date
             order.save(update_fields=['fit_date'])
+            # Also keep the linked AnthillSale in sync
+            _anthill_sale = order.anthill_sale.first()
+            if _anthill_sale and _anthill_sale.fit_date != fit_date:
+                _anthill_sale.fit_date = fit_date
+                _anthill_sale.save(update_fields=['fit_date'])
             label = f'{order.first_name} {order.last_name}'
         elif item_type == 'remedial':
             remedial = get_object_or_404(Remedial, id=item_id)

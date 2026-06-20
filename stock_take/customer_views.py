@@ -742,7 +742,7 @@ def sales_list(request):
     location_filter = profile.selected_location if profile else ''
 
     # Only Category 3 = actual sales (Room Sale + Historic Sale), exclude Cancelled
-    sales_base = AnthillSale.objects.select_related('customer', 'order').filter(
+    sales_base = AnthillSale.objects.select_related('customer', 'order', 'order__designer').filter(
         category='3'
     ).exclude(
         status__iexact='cancelled'
