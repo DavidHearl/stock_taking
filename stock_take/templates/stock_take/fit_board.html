@@ -183,6 +183,9 @@
         <button class="btn btn-success" onclick="bulkImportFitDates()" title="Import All Fit Dates">
             <i class="bi bi-arrow-repeat"></i> Sync
         </button>
+        <button class="btn btn-secondary" id="checkPaymentsBtn" onclick="checkCalendarPayments()" title="Check Xero payments for every sale this month">
+            <i class="bi bi-cash-coin"></i> Check Payments
+        </button>
         <div class="kebab-menu">
             <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="More options">
                 <i class="bi bi-three-dots-vertical"></i>
@@ -248,7 +251,7 @@
 
             <!-- One swim-lane per fitter -->
             {% for lane in week.fitter_lanes %}
-            <div class="mw-lane" style="--fitter-color: {{ lane.color }}; --fitter-rgb: {{ lane.rgb }};">
+            <div class="mw-lane">
                 <div class="mw-lane-label">{{ lane.name }}</div>
                 <div class="mw-lane-grid">
                     {# Background drop zones — full-height clickable day columns #}
@@ -266,7 +269,7 @@
                     {% for entry in lane.appts %}
                     {% with appt=entry.appt %}
                     {% if appt.order %}
-                    <div class="job-card {% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %}{% if entry.cont_left %} cont-left{% endif %}{% if entry.cont_right %} cont-right{% endif %}{% if appt.is_provisional %} provisional{% endif %}"
+                    <div class="job-card {% if appt.order.interior_completed and appt.order.door_completed and appt.order.accessories_completed and appt.order.materials_completed %}completed{% endif %}{% if entry.cont_left %} cont-left{% endif %}{% if entry.cont_right %} cont-right{% endif %}{% if appt.is_provisional %} provisional{% endif %}{% if appt.fin %}{% if appt.fin.outstanding > 0 %} job-pay-due{% else %} job-pay-paid{% endif %}{% endif %}"
                          style="grid-column: {{ entry.grid_col_start }} / {{ entry.grid_col_end }};"
                          id="appointment-{{ appt.id }}-w{{ week.widx }}"
                          draggable="true"
@@ -712,7 +715,146 @@ function bulkImportFitDates() {
     });
 }
 
-// ── Drag and Drop (swim-lane: drop zone carries fitter + date) ──
+// ── Calendar toast helper ──────────────────────────────────
+function showCalendarToast(message, type) {
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'toast-container';
+        container.id = 'toastContainer';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = 'toast toast-' + (type || 'info');
+    toast.setAttribute('role', 'alert');
+    toast.innerHTML = '<span class="toast-text"></span>' +
+        '<button type="button" class="toast-close" onclick="this.parentElement.remove()">&times;</button>';
+    toast.querySelector('.toast-text').textContent = message;
+    container.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('toast-visible'));
+    setTimeout(() => {
+        toast.classList.add('toast-hiding');
+        setTimeout(() => toast.remove(), 400);
+    }, 5000);
+}
+
+// ── Check Xero payments for every sale fitting this month ──
+function checkCalendarPayments() {
+    const btn = document.getElementById('checkPaymentsBtn');
+    if (btn) { btn.disabled = true; }
+    showPaymentProgress(0, 0, 'Starting…');
+    fetch('{% url "calendar_check_payments" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: 'year={{ current_year }}&month={{ current_month }}',
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (!data.success) {
+            hidePaymentProgress();
+            showCalendarToast(data.error || 'Could not start payment check', 'error');
+            if (btn) { btn.disabled = false; }
+        } else if (!data.started) {
+            hidePaymentProgress();
+            showCalendarToast('No sales with a fit date this month to check.', 'info');
+            if (btn) { btn.disabled = false; }
+        } else {
+            pollPaymentProgress(data.job_id, data.count);
+        }
+    })
+    .catch(() => {
+        hidePaymentProgress();
+        showCalendarToast('Error starting payment check', 'error');
+        if (btn) { btn.disabled = false; }
+    });
+}
+
+function pollPaymentProgress(jobId, total) {
+    const url = '{% url "calendar_check_payments_progress" %}?job_id=' + encodeURIComponent(jobId);
+    let netErrors = 0;
+    const tick = () => {
+        fetch(url)
+        .then(r => r.json())
+        .then(data => {
+            netErrors = 0;
+            if (!data.success || data.status === 'unknown') {
+                finishPaymentProgress(true);
+                return;
+            }
+            const tot = data.total || total || 0;
+            const done = data.done || 0;
+            if (data.status === 'done') {
+                showPaymentProgress(tot, tot, 'Complete');
+                finishPaymentProgress(false, data.created || 0);
+            } else if (data.status === 'error') {
+                hidePaymentProgress();
+                showCalendarToast('Payment check failed — see server logs.', 'error');
+                const btn = document.getElementById('checkPaymentsBtn');
+                if (btn) { btn.disabled = false; }
+            } else {
+                showPaymentProgress(done, tot, done + ' of ' + tot + ' sales checked');
+                setTimeout(tick, 1000);
+            }
+        })
+        .catch(() => {
+            netErrors += 1;
+            if (netErrors < 5) { setTimeout(tick, 1500); }
+            else { finishPaymentProgress(true); }
+        });
+    };
+    tick();
+}
+
+function finishPaymentProgress(quiet, created) {
+    // Hold the full bar briefly so completion is visible, then reload to pick
+    // up the refreshed outstanding balances and card colours.
+    setTimeout(() => {
+        hidePaymentProgress();
+        if (!quiet) {
+            const extra = created ? ' — ' + created + ' new payment' + (created === 1 ? '' : 's') + ' linked' : '';
+            showCalendarToast('Payment check complete' + extra + '. Refreshing…', 'success');
+        }
+        setTimeout(() => location.reload(), 900);
+    }, 600);
+}
+
+function showPaymentProgress(done, total, label) {
+    let el = document.getElementById('paymentProgress');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'paymentProgress';
+        el.className = 'payment-progress';
+        el.innerHTML =
+            '<div class="payment-progress-head">' +
+                '<i class="bi bi-cash-coin"></i>' +
+                '<span class="payment-progress-title">Checking payments</span>' +
+                '<span class="payment-progress-count" id="paymentProgressCount"></span>' +
+            '</div>' +
+            '<div class="payment-progress-track"><div class="payment-progress-fill" id="paymentProgressFill"></div></div>' +
+            '<div class="payment-progress-label" id="paymentProgressLabel"></div>';
+        document.body.appendChild(el);
+        requestAnimationFrame(() => el.classList.add('visible'));
+    }
+    const fill = document.getElementById('paymentProgressFill');
+    const count = document.getElementById('paymentProgressCount');
+    const lbl = document.getElementById('paymentProgressLabel');
+    const pct = total > 0 ? Math.round((done / total) * 100) : (label === 'Complete' ? 100 : 6);
+    fill.style.width = pct + '%';
+    fill.classList.toggle('indeterminate', total <= 0 && label !== 'Complete');
+    count.textContent = total > 0 ? pct + '%' : '';
+    lbl.textContent = label || '';
+}
+
+function hidePaymentProgress() {
+    const el = document.getElementById('paymentProgress');
+    if (!el) { return; }
+    el.classList.remove('visible');
+    setTimeout(() => el.remove(), 300);
+}
+
 function handleDragStart(event) {
     draggedAppointmentId = event.currentTarget.dataset.appointmentId;
     event.currentTarget.classList.add('dragging');

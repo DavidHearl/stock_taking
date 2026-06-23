@@ -155,6 +155,36 @@
                     </span>
                 </span>
             </div>
+            <div class="pinv-meta-item">
+                <span class="meta-label">Discount</span>
+                <span class="meta-value" style="display:flex;align-items:center;gap:6px;">
+                    <span id="view-discount">{% if invoice.discount and invoice.discount > 0 %}<span class="pinv-cur">£</span>{{ invoice.discount|floatformat:2 }} <small style="color:var(--text-secondary);">({% if invoice.discount_pre_vat %}pre-VAT{% else %}post-VAT{% endif %})</small>{% else %}&mdash;{% endif %}</span>
+                    <span id="discount-display-btns">
+                        <button class="pinv-btn-icon" onclick="openDiscountEdit()" title="{% if invoice.discount and invoice.discount > 0 %}Edit discount{% else %}Add discount{% endif %}" style="font-size:0.78rem;padding:2px 6px;">
+                            {% if invoice.discount and invoice.discount > 0 %}<i class="bi bi-pencil"></i>{% else %}<i class="bi bi-plus-lg"></i> Discount{% endif %}
+                        </button>
+                        {% if invoice.discount and invoice.discount > 0 %}
+                        <button class="pinv-btn-icon" onclick="flattenDiscountToLine()" title="Convert discount to a line item (so Xero picks it up)" style="font-size:0.78rem;padding:2px 6px;">
+                            <i class="bi bi-list-check"></i> &rarr; line
+                        </button>
+                        <button class="pinv-btn-icon danger" onclick="clearDiscount()" title="Remove discount" style="font-size:0.78rem;padding:2px 6px;">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                        {% endif %}
+                    </span>
+                    <span id="discount-inline-form" style="display:none;align-items:center;gap:6px;">
+                        <span class="pinv-cur" style="font-size:0.82rem;color:var(--text-secondary);">£</span>
+                        <input type="number" id="inline-discount-input" value="{{ invoice.discount|floatformat:2|default:'' }}"
+                               min="0" step="0.01" placeholder="0.00"
+                               style="width:80px;padding:2px 6px;font-size:0.82rem;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:5px;color:var(--text-primary);">
+                        <label style="display:inline-flex;align-items:center;gap:4px;font-size:0.78rem;color:var(--text-secondary);cursor:pointer;">
+                            <input type="checkbox" id="inline-discount-pre-vat" {% if invoice.discount_pre_vat %}checked{% endif %}> pre-VAT
+                        </label>
+                        <button class="pinv-btn-icon success" onclick="saveDiscount()" title="Save"><i class="bi bi-check-lg"></i></button>
+                        <button class="pinv-btn-icon" onclick="closeDiscountEdit()" title="Cancel"><i class="bi bi-x-lg"></i></button>
+                    </span>
+                </span>
+            </div>
         </div>
         <div class="pinv-meta-group">
             <div class="pinv-meta-item">
@@ -214,6 +244,18 @@
                 <label class="pinv-label">VAT Rate (%)</label>
                 <input type="number" id="edit-vat-rate" class="pinv-input" step="0.01" min="0" max="100"
                        value="{{ invoice.vat_rate|floatformat:2|default:'' }}" placeholder="e.g. 20 (leave blank for no VAT)">
+            </div>
+            <div class="pinv-form-row">
+                <label class="pinv-label">Discount (<span class="pinv-cur">£</span>)</label>
+                <input type="number" id="edit-discount" class="pinv-input" step="0.01" min="0"
+                       value="{{ invoice.discount|floatformat:2 }}" placeholder="0.00">
+            </div>
+            <div class="pinv-form-row">
+                <label class="pinv-label">Discount pre-VAT</label>
+                <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:var(--text-secondary);">
+                    <input type="checkbox" id="edit-discount-pre-vat" {% if invoice.discount_pre_vat %}checked{% endif %}>
+                    Apply the discount to the net before VAT is calculated
+                </label>
             </div>
             <div class="pinv-form-row">
                 <label class="pinv-label">Currency</label>
@@ -317,7 +359,7 @@
                     </td>
                     <td>
                         <input type="number" class="pinv-cell-input line-rate no-pnx-spinner"
-                               value="{{ line.rate|floatformat:2 }}" step="0.01" min="0"
+                               value="{{ line.rate|floatformat:4 }}" step="0.0001" min="0"
                                style="text-align:right;"
                                oninput="markLineDirty({{ line.id }})">
                     </td>
@@ -384,7 +426,7 @@
                             <button type="button" class="qty-step-btn" tabindex="-1" onclick="pinvStepNew(this,1)"><i class="bi bi-plus-lg" aria-hidden="true"></i></button>
                         </div>
                     </td>
-                    <td><input type="number" class="pinv-cell-input no-pnx-spinner" id="new-rate" value="" step="0.01" style="text-align:right;" placeholder="Rate"></td>
+                    <td><input type="number" class="pinv-cell-input no-pnx-spinner" id="new-rate" value="" step="0.0001" style="text-align:right;" placeholder="Rate"></td>
                     <td class="number-cell">—</td>
                     <td>
                         <div class="order-search-wrap">
@@ -412,9 +454,13 @@
 
     <!-- Totals summary -->
     <div class="pinv-detail-summary">
-        <div id="summary-net-row" class="pinv-summary-row" {% if not invoice.vat_rate %}style="display:none;"{% endif %}>
+        <div id="summary-net-row" class="pinv-summary-row" {% if not invoice.vat_rate and not invoice.discount %}style="display:none;"{% endif %}>
             <span class="summary-label">Net</span>
             <span class="summary-value" id="invoice-net"><span class="pinv-cur">£</span>{{ net_total|default:"0.00"|floatformat:2 }}</span>
+        </div>
+        <div id="summary-discount-row" class="pinv-summary-row" {% if not invoice.discount or invoice.discount <= 0 %}style="display:none;"{% endif %}>
+            <span class="summary-label" id="summary-discount-label">Discount{% if invoice.discount_pre_vat %} (pre-VAT){% else %} (post-VAT){% endif %}</span>
+            <span class="summary-value" id="invoice-discount">&minus;<span class="pinv-cur">£</span>{{ invoice.discount|default:"0.00"|floatformat:2 }}</span>
         </div>
         <div id="summary-vat-row" class="pinv-summary-row" {% if not invoice.vat_rate %}style="display:none;"{% endif %}>
             <span class="summary-label" id="summary-vat-label">VAT{% if invoice.vat_rate %} ({{ invoice.vat_rate|floatformat:2 }}%){% endif %}</span>
@@ -656,6 +702,24 @@
     </div>
 </div>
 
+<div id="flatten-discount-modal" style="display:none; position:fixed; inset:0; z-index:1050; background:var(--overlay-bg); align-items:center; justify-content:center;">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px; padding:28px; width:100%; max-width:460px; box-shadow:var(--shadow-lg);">
+        <h4 style="margin:0 0 6px; font-size:1rem; font-weight:600;"><i class="bi bi-list-check" style="margin-right:6px;"></i>Convert discount to a line item</h4>
+        <p style="margin:12px 0 6px; font-size:0.85rem; color:var(--text-secondary);">
+            This will add a negative line item for the discount amount and clear the discount field. The invoice total stays the same.
+        </p>
+        <p style="margin:0 0 20px; font-size:0.85rem; color:var(--text-secondary);">
+            Use this before pushing to Xero &mdash; Xero only picks up amounts that exist as line items, so a stored discount would otherwise be ignored. For a post-VAT discount the VAT is converted to its own line too so the discount is not taxed.
+        </p>
+        <div style="display:flex; gap:10px; justify-content:flex-end;">
+            <button type="button" class="pinv-btn-sm" onclick="document.getElementById('flatten-discount-modal').style.display='none'">Cancel</button>
+            <button type="button" class="pinv-btn-sm primary" onclick="confirmFlattenDiscount()">
+                <i class="bi bi-list-check"></i> Convert
+            </button>
+        </div>
+    </div>
+</div>
+
 <div id="amendment-modal" style="display:none; position:fixed; inset:0; z-index:1050; background:var(--overlay-bg); align-items:center; justify-content:center;">
     <div style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:12px; padding:28px; width:100%; max-width:480px; box-shadow:var(--shadow-lg);">
         <h4 style="margin:0 0 6px; font-size:1rem; font-weight:600;">Create Amendment Invoice</h4>
@@ -708,6 +772,8 @@ function saveHeader() {
         total:          document.getElementById('edit-total').value,
         notes:          document.getElementById('edit-notes').value,
         vat_rate:       document.getElementById('edit-vat-rate').value,
+        discount:       document.getElementById('edit-discount').value,
+        discount_pre_vat: document.getElementById('edit-discount-pre-vat').checked,
         currency:       document.getElementById('edit-currency').value,
     };
     fetch(`/purchase-invoices/${INVOICE_ID}/update/`, {
@@ -753,6 +819,7 @@ function saveHeader() {
             }
             // Sync currency buttons
             _syncCurrencyBtns(data.currency || 'GBP');
+            _updateDiscountUI(data);
             updatePaymentBadge(data.payment_status);
             toggleHeaderEdit();
         } else {
@@ -860,8 +927,94 @@ function _applyVatRate(vatRate) {
                     <i class="bi bi-plus-lg"></i> VAT
                 </button>`;
         }
+        _updateDiscountUI(data);
     })
     .catch(() => alert('Network error saving VAT rate'));
+}
+
+// ── Discount ───────────────────────────────────────────────────
+function _updateDiscountUI(data) {
+    const disc   = parseFloat(data.discount) || 0;
+    const preVat = !!data.discount_pre_vat;
+    const viewEl = document.getElementById('view-discount');
+    const row    = document.getElementById('summary-discount-row');
+    const amtEl  = document.getElementById('invoice-discount');
+    const lblEl  = document.getElementById('summary-discount-label');
+    const btns   = document.getElementById('discount-display-btns');
+    const tag    = preVat ? 'pre-VAT' : 'post-VAT';
+    if (disc > 0) {
+        if (viewEl) viewEl.innerHTML = _curSpan() + disc.toFixed(2) + ' <small style="color:var(--text-secondary);">(' + tag + ')</small>';
+        if (row) row.style.display = '';
+        if (amtEl) amtEl.innerHTML = '\u2212' + _curSpan() + disc.toFixed(2);
+        if (lblEl) lblEl.textContent = 'Discount (' + tag + ')';
+        if (btns) btns.innerHTML =
+            '<button class="pinv-btn-icon" onclick="openDiscountEdit()" title="Edit discount" style="font-size:0.78rem;padding:2px 6px;"><i class="bi bi-pencil"></i></button>' +
+            '<button class="pinv-btn-icon" onclick="flattenDiscountToLine()" title="Convert discount to a line item (so Xero picks it up)" style="font-size:0.78rem;padding:2px 6px;"><i class="bi bi-list-check"></i> \u2192 line</button>' +
+            '<button class="pinv-btn-icon danger" onclick="clearDiscount()" title="Remove discount" style="font-size:0.78rem;padding:2px 6px;"><i class="bi bi-x-lg"></i></button>';
+    } else {
+        if (viewEl) viewEl.innerHTML = '\u2014';
+        if (row) row.style.display = 'none';
+        if (btns) btns.innerHTML =
+            '<button class="pinv-btn-icon" onclick="openDiscountEdit()" title="Add discount" style="font-size:0.78rem;padding:2px 6px;"><i class="bi bi-plus-lg"></i> Discount</button>';
+    }
+    const inInput = document.getElementById('inline-discount-input');
+    if (inInput) inInput.value = disc > 0 ? disc.toFixed(2) : '';
+    const inChk = document.getElementById('inline-discount-pre-vat');
+    if (inChk) inChk.checked = preVat;
+    const eDisc = document.getElementById('edit-discount');
+    if (eDisc) eDisc.value = disc.toFixed(2);
+    const eChk = document.getElementById('edit-discount-pre-vat');
+    if (eChk) eChk.checked = preVat;
+    // Net row should be visible whenever there's VAT or a discount.
+    const vatRate = parseFloat(data.vat_rate) || 0;
+    const lineNet = parseFloat(data.line_net);
+    const netRow  = document.getElementById('summary-net-row');
+    const netEl   = document.getElementById('invoice-net');
+    if (netRow) netRow.style.display = (vatRate > 0 || disc > 0) ? '' : 'none';
+    if (netEl && Number.isFinite(lineNet)) netEl.innerHTML = _curSpan() + lineNet.toFixed(2);
+}
+
+function openDiscountEdit() {
+    document.getElementById('discount-display-btns').style.display = 'none';
+    const form = document.getElementById('discount-inline-form');
+    form.style.display = 'inline-flex';
+    const inp = document.getElementById('inline-discount-input');
+    inp.focus();
+    inp.select();
+}
+
+function closeDiscountEdit() {
+    document.getElementById('discount-inline-form').style.display = 'none';
+    document.getElementById('discount-display-btns').style.display = '';
+}
+
+function saveDiscount() {
+    const val    = document.getElementById('inline-discount-input').value.trim() || '0';
+    const preVat = document.getElementById('inline-discount-pre-vat').checked;
+    _applyDiscount(val, preVat);
+}
+
+function clearDiscount() {
+    const chk = document.getElementById('inline-discount-pre-vat');
+    _applyDiscount('0', chk ? chk.checked : true);
+}
+
+function _applyDiscount(discount, preVat) {
+    fetch(`/purchase-invoices/${INVOICE_ID}/update/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discount: discount, discount_pre_vat: preVat })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) { alert(data.error || 'Failed to save discount'); return; }
+        closeDiscountEdit();
+        document.getElementById('invoice-total').innerHTML       = _curSpan() + parseFloat(data.total).toFixed(2);
+        document.getElementById('invoice-outstanding').innerHTML = _curSpan() + parseFloat(data.amount_outstanding).toFixed(2);
+        _updateDiscountUI(data);
+        updatePaymentBadge(data.payment_status);
+    })
+    .catch(() => alert('Network error saving discount'));
 }
 
 // ── Add / save new line ────────────────────────────────────────
@@ -952,6 +1105,47 @@ function confirmFlattenVat() {
     .catch(err => alert('Network error: ' + err.message));
 }
 
+function flattenDiscountToLine() {
+    document.getElementById('flatten-discount-modal').style.display = 'flex';
+}
+
+function confirmFlattenDiscount() {
+    document.getElementById('flatten-discount-modal').style.display = 'none';
+    fetch(`/purchase-invoices/${INVOICE_ID}/flatten-discount/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) { alert(data.error || 'Failed to convert discount'); return; }
+        (data.lines || []).forEach(insertLineRow);
+        refreshTotals(data.invoice_total, data.amount_paid, data.amount_outstanding);
+        // Discount now lives as a line item — reset the discount meta + summary.
+        const viewEl = document.getElementById('view-discount');
+        if (viewEl) viewEl.innerHTML = '\u2014';
+        const dRow = document.getElementById('summary-discount-row');
+        if (dRow) dRow.style.display = 'none';
+        const dBtns = document.getElementById('discount-display-btns');
+        if (dBtns) dBtns.innerHTML =
+            '<button class="pinv-btn-icon" onclick="openDiscountEdit()" title="Add discount" style="font-size:0.78rem;padding:2px 6px;"><i class="bi bi-plus-lg"></i> Discount</button>';
+        const inInput = document.getElementById('inline-discount-input');
+        if (inInput) inInput.value = '';
+        // If the VAT was flattened too (post-VAT discount), clear the VAT display.
+        if (data.vat_cleared) {
+            const vatView = document.getElementById('view-vat-rate');
+            if (vatView) vatView.textContent = '\u2014';
+            const vBtns = document.getElementById('vat-rate-display-btns');
+            if (vBtns) vBtns.innerHTML = '<button class="pinv-btn-icon" onclick="openVatEdit()" title="Add VAT" style="font-size:0.78rem;padding:2px 6px;"><i class="bi bi-plus-lg"></i> VAT</button>';
+            const netRow = document.getElementById('summary-net-row');
+            const vatRow = document.getElementById('summary-vat-row');
+            if (netRow) netRow.style.display = 'none';
+            if (vatRow) vatRow.style.display = 'none';
+        }
+    })
+    .catch(err => alert('Network error: ' + err.message));
+}
+
 function recalculateTotals() {
     fetch(`/purchase-invoices/${INVOICE_ID}/update/`, {
         method: 'POST',
@@ -979,6 +1173,7 @@ function recalculateTotals() {
                 if (netEl)  netEl.innerHTML = _curSpan() + lineNet.toFixed(2);
                 if (vatEl)  vatEl.innerHTML = _curSpan() + vatAmt.toFixed(2);
             }
+            _updateDiscountUI(data);
         }
     });
 }
@@ -1042,7 +1237,7 @@ function buildLineHTML(line) {
         <td><input type="text" class="pinv-cell-input line-desc" value="${escHtml(line.description)}" oninput="markLineDirty(${line.id})"></td>
         <td><input type="date" class="pinv-cell-input line-date" value="${line.line_date || ''}" oninput="markLineDirty(${line.id})"></td>
         <td><div class="qty-stepper-input pinv-qty-stepper"><button type="button" class="qty-step-btn" tabindex="-1" onclick="pinvStep(this,-1,${line.id})"><i class="bi bi-dash-lg" aria-hidden="true"></i></button><input type="number" class="pinv-cell-input line-qty qty-step-value no-pnx-spinner" value="${line.quantity}" step="1" min="0" oninput="markLineDirty(${line.id})"><button type="button" class="qty-step-btn" tabindex="-1" onclick="pinvStep(this,1,${line.id})"><i class="bi bi-plus-lg" aria-hidden="true"></i></button></div></td>
-        <td><input type="number" class="pinv-cell-input line-rate no-pnx-spinner" value="${line.rate}" step="0.01" min="0" style="text-align:right;" oninput="markLineDirty(${line.id})"></td>
+        <td><input type="number" class="pinv-cell-input line-rate no-pnx-spinner" value="${line.rate}" step="0.0001" min="0" style="text-align:right;" oninput="markLineDirty(${line.id})"></td>
         <td class="number-cell line-total-cell" id="line-total-${line.id}">${_curSpan()}${parseFloat(line.line_total).toFixed(2)}</td>
         <td>
             <div class="order-search-wrap">

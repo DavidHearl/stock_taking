@@ -1,0 +1,284 @@
+{% extends 'base.html' %}
+{% load static humanize %}
+
+{% block title %}Payments{% endblock %}
+{% block page_title %}Payments ({{ total_payments|intcomma }}){% endblock %}
+
+{% block nav_payments_active %}active{% endblock %}
+
+{% block extra_css %}
+<style>
+.pay-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+.pay-search {
+    position: relative;
+    flex: 1 1 280px;
+    max-width: 420px;
+}
+.pay-search i {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+}
+.pay-search input {
+    width: 100%;
+    padding: 8px 12px 8px 34px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border-color);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+}
+.pay-stats {
+    margin-left: auto;
+    display: flex;
+    gap: 18px;
+    align-items: center;
+}
+.pay-stat {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1;
+}
+.pay-stat .lbl {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+.pay-stat .val {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+.pay-filter-pills {
+    display: flex;
+    gap: 6px;
+}
+.pay-pill {
+    padding: 5px 14px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.pay-pill.active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: var(--text-on-color);
+    font-weight: 600;
+}
+.pay-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+}
+table.pay-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+.pay-table thead th {
+    text-align: left;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.pay-table tbody td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.pay-table tbody tr:hover { background: var(--bg-hover); }
+.pay-table .num { text-align: right; }
+.pay-amount { font-weight: 600; }
+.pay-split-tag {
+    margin-left: 6px;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--warning-color, #e8a317);
+    border: 1px dashed var(--warning-color, #e8a317);
+    border-radius: 4px;
+    padding: 0 5px;
+}
+.pay-source {
+    display: inline-block;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 1px 8px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+.pay-source.xero { color: var(--info-color, #13B5EA); border-color: var(--info-color, #13B5EA); }
+.pay-status {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 1px 8px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+.pay-status.ok { background: var(--success-subtle); color: var(--success-color); }
+.pay-link { color: var(--primary-color); text-decoration: none; }
+.pay-link:hover { text-decoration: underline; }
+.pay-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+}
+.pay-empty i { font-size: 2.2rem; display: block; margin-bottom: 10px; }
+.pay-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 16px;
+}
+.pay-page-btn {
+    padding: 5px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    text-decoration: none;
+}
+.pay-page-btn.active {
+    background: var(--primary-color);
+    color: var(--text-on-color);
+    border-color: var(--primary-color);
+    font-weight: 600;
+}
+.pay-loc-note {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+.pay-loc-note i { margin-right: 4px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if location_filter %}
+<div class="pay-loc-note"><i class="bi bi-geo-alt"></i> Showing payments for <strong>{{ location_filter }}</strong>.</div>
+{% else %}
+<div class="pay-loc-note"><i class="bi bi-globe"></i> Showing payments for all locations. Select a location in the top bar to filter.</div>
+{% endif %}
+
+<form method="get" class="pay-toolbar">
+    <div class="pay-search">
+        <i class="bi bi-search"></i>
+        <input type="text" name="q" value="{{ search_query }}" placeholder="Search customer, contract, type, status…" autocomplete="off">
+    </div>
+    {% if source_filter and source_filter != 'all' %}<input type="hidden" name="source" value="{{ source_filter }}">{% endif %}
+
+    <div class="pay-filter-pills">
+        <a href="?source=all{% if search_query %}&q={{ search_query }}{% endif %}" class="pay-pill {% if source_filter == 'all' %}active{% endif %}">All</a>
+        <a href="?source=xero{% if search_query %}&q={{ search_query }}{% endif %}" class="pay-pill {% if source_filter == 'xero' %}active{% endif %}">Xero</a>
+        <a href="?source=manual{% if search_query %}&q={{ search_query }}{% endif %}" class="pay-pill {% if source_filter == 'manual' %}active{% endif %}">Manual</a>
+    </div>
+
+    <div class="pay-stats">
+        <div class="pay-stat">
+            <span class="lbl">Payments</span>
+            <span class="val">{{ total_payments|intcomma }}</span>
+        </div>
+        <div class="pay-stat">
+            <span class="lbl">Total Paid</span>
+            <span class="val">£{{ total_amount|floatformat:2|intcomma }}</span>
+        </div>
+    </div>
+</form>
+
+<div class="pay-table-wrap">
+    <table class="pay-table">
+        <thead>
+            <tr>
+                <th>Showroom</th>
+                <th>Year Month</th>
+                <th>Payment Date</th>
+                <th>Customer</th>
+                <th>Payment Type</th>
+                <th class="num">Amount Paid</th>
+                <th>Created By</th>
+                <th>Last Updated</th>
+                <th>Status</th>
+                <th>Contract Number</th>
+                <th>Source</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in payments %}
+            <tr>
+                <td>{{ p.showroom_display|default:"-" }}</td>
+                <td>{% if p.date %}{{ p.date|date:"Y M" }}{% else %}-{% endif %}</td>
+                <td>{% if p.date %}{{ p.date|date:"d M Y" }}{% else %}-{% endif %}</td>
+                <td>
+                    {% if p.sale %}
+                    <a class="pay-link" href="{% url 'sale_detail' p.sale.pk %}">{{ p.sale.customer_name|default:"-" }}</a>
+                    {% else %}{{ p.sale.customer_name|default:"-" }}{% endif %}
+                </td>
+                <td>{{ p.payment_type|default:"-" }}</td>
+                <td class="num">
+                    <span class="pay-amount">{% if p.amount is not None %}£{{ p.amount|floatformat:2|intcomma }}{% else %}-{% endif %}</span>
+                    {% if p.is_split %}<span class="pay-split-tag" title="Split share of £{{ p.full_amount|floatformat:2 }}">split</span>{% endif %}
+                </td>
+                <td>{{ p.user_name|default:"-" }}</td>
+                <td>{{ p.updated_at|date:"d M Y" }}</td>
+                <td>
+                    {% if p.status %}<span class="pay-status {% if p.status|lower == 'confirmed' or p.status|lower == 'paid' %}ok{% endif %}">{{ p.status }}</span>{% else %}-{% endif %}
+                </td>
+                <td>{{ p.sale.contract_number|default:"-" }}</td>
+                <td><span class="pay-source {% if p.source == 'xero' %}xero{% endif %}">{{ p.source|default:"manual" }}</span></td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="11">
+                    <div class="pay-empty">
+                        <i class="bi bi-cash-stack"></i>
+                        <p>No payments found{% if location_filter %} for {{ location_filter }}{% endif %}.</p>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="pay-pagination">
+    {% if page_obj.has_previous %}
+    <a class="pay-page-btn" href="?page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if source_filter != 'all' %}&source={{ source_filter }}{% endif %}"><i class="bi bi-chevron-left"></i></a>
+    {% endif %}
+    <span class="pay-page-btn active">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span>
+    {% if page_obj.has_next %}
+    <a class="pay-page-btn" href="?page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if source_filter != 'all' %}&source={{ source_filter }}{% endif %}"><i class="bi bi-chevron-right"></i></a>
+    {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

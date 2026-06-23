@@ -119,7 +119,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
             <span>Sync Mailbox</span>
         </button>
         {% if last_synced %}
-        <span class="apay-last-synced">Last synced {{ last_synced|date:"d M Y H:i" }}</span>
+        <span class="apay-last-synced">Last synced {{ last_synced|date:"l, d M Y H:i" }}</span>
         {% endif %}
 
         <!-- 3-dot settings menu -->
@@ -1196,6 +1196,12 @@ function resetCreateModalBase() {
     document.getElementById('new-pinv-status').value = 'Draft';
     document.getElementById('new-pinv-notes').value = '';
     setModalCurrency('GBP');
+    const _discEl = document.getElementById('modal-discount');
+    if (_discEl) _discEl.value = '';
+    const _discChk = document.getElementById('modal-discount-pre-vat');
+    if (_discChk) _discChk.checked = true;
+    const _discRow = document.getElementById('modal-discount-row');
+    if (_discRow) _discRow.style.display = 'none';
     fetch('/api/next-invoice-number/', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
         .then(r => r.json())
         .then(d => {
@@ -1540,6 +1546,9 @@ function gatherModalInvoiceData() {
     const poInput = document.getElementById('new-pinv-po-search');
     const vatEnabled = document.getElementById('modal-vat-enabled')?.checked;
     const vatRate    = parseFloat(document.getElementById('modal-vat-rate')?.value) || 0;
+    let discount     = parseFloat(document.getElementById('modal-discount')?.value) || 0;
+    if (discount < 0) discount = 0;
+    const discountPreVat = document.getElementById('modal-discount-pre-vat')?.checked;
     return {
         invoice_number: document.getElementById('new-pinv-number').value.trim(),
         supplier_name: document.getElementById('new-pinv-supplier').value.trim(),
@@ -1555,6 +1564,8 @@ function gatherModalInvoiceData() {
         currency: typeof _modalCurrency !== 'undefined' ? _modalCurrency : 'GBP',
         vat_enabled: !!vatEnabled,
         vat_rate: vatRate,
+        discount: discount,
+        discount_pre_vat: discountPreVat !== false,
         line_items: lineItems,
     };
 }
@@ -1574,6 +1585,8 @@ function buildInvoiceFormData(data, file) {
     if (data.purchase_order_id) fd.append('purchase_order_id', data.purchase_order_id);
     fd.append('currency', data.currency);
     if (data.vat_enabled && data.vat_rate > 0) fd.append('vat_rate', data.vat_rate);
+    if (data.discount && data.discount > 0) fd.append('discount', data.discount);
+    fd.append('discount_pre_vat', data.discount_pre_vat !== false ? 'true' : 'false');
     const carriageLine = data.line_items.find(li => li.is_carriage);
     if (carriageLine) fd.append('freight_cost', (carriageLine.quantity || 1) * carriageLine.rate);
     const surchargeLine = data.line_items.find(li => li.is_surcharge);
@@ -1682,6 +1695,11 @@ function applyQueuedDataToModal(data) {
     if (vatChk) vatChk.checked = !!data.vat_enabled;
     const vatRateEl = document.getElementById('modal-vat-rate');
     if (vatRateEl && data.vat_rate) vatRateEl.value = data.vat_rate;
+
+    const discEl = document.getElementById('modal-discount');
+    if (discEl) discEl.value = (data.discount && data.discount > 0) ? data.discount : '';
+    const discChk = document.getElementById('modal-discount-pre-vat');
+    if (discChk) discChk.checked = data.discount_pre_vat !== false;
 
     const linesEl = document.getElementById('modal-lines');
     linesEl.innerHTML = '';

@@ -554,23 +554,51 @@ function recalcModalTotal() {
     const sym = (_modalCurrency === 'EUR') ? '\u20ac' : '\u00a3';
     const vatEnabled = document.getElementById('modal-vat-enabled')?.checked;
     const vatRate    = parseFloat(document.getElementById('modal-vat-rate')?.value) || 0;
+    let discount     = parseFloat(document.getElementById('modal-discount')?.value) || 0;
+    if (discount < 0) discount = 0;
+    const preVat     = document.getElementById('modal-discount-pre-vat')?.checked;
     const netRow = document.getElementById('modal-net-row');
     const vatRow = document.getElementById('modal-vat-row');
     const vatLbl = document.getElementById('modal-vat-label');
-    if (vatEnabled && vatRate > 0) {
-        const vatAmt = net * vatRate / 100;
-        const gross  = net + vatAmt;
+    const discRow = document.getElementById('modal-discount-row');
+    const discLbl = document.getElementById('modal-discount-label');
+    const discAmt = document.getElementById('modal-discount-amount');
+
+    const discCur = document.querySelector('.pinv-discount-cur');
+    if (discCur) discCur.textContent = sym;
+
+    if (discount > 0) {
+        if (discRow) discRow.style.display = 'flex';
+        if (discLbl) discLbl.textContent = 'Discount (' + (preVat ? 'pre-VAT' : 'post-VAT') + ')';
+        if (discAmt) discAmt.textContent = '\u2212' + sym + discount.toFixed(2);
+    } else if (discRow) {
+        discRow.style.display = 'none';
+    }
+
+    const applyVat = !!(vatEnabled && vatRate > 0);
+    let vatAmt = 0, total = 0;
+    if (preVat) {
+        const taxable = net - discount;
+        vatAmt = applyVat ? taxable * vatRate / 100 : 0;
+        total  = taxable + vatAmt;
+    } else {
+        vatAmt = applyVat ? net * vatRate / 100 : 0;
+        total  = net + vatAmt - discount;
+    }
+    if (total < 0) total = 0;
+
+    if (applyVat) {
         if (netRow) netRow.style.display = 'flex';
         if (vatRow) vatRow.style.display = 'flex';
         if (vatLbl) vatLbl.textContent = `VAT (${vatRate}%)`;
         document.getElementById('modal-net-total').textContent  = sym + net.toFixed(2);
         document.getElementById('modal-vat-amount').textContent = sym + vatAmt.toFixed(2);
-        document.getElementById('modal-total').textContent      = sym + gross.toFixed(2);
     } else {
-        if (netRow) netRow.style.display = 'none';
+        if (netRow) netRow.style.display = (discount > 0) ? 'flex' : 'none';
         if (vatRow) vatRow.style.display = 'none';
-        document.getElementById('modal-total').textContent = sym + net.toFixed(2);
+        document.getElementById('modal-net-total').textContent = sym + net.toFixed(2);
     }
+    document.getElementById('modal-total').textContent = sym + total.toFixed(2);
 }
 
 function splitModalLine(row) {

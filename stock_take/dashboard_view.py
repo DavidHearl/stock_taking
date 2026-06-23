@@ -933,14 +933,29 @@ def _write_xero_payments_for_sale(sale, invoice_data, seen_fallback_base_pids=No
     return created, updated, skipped
 
 
-def _sync_xero_payments_for_sales(sales):
+def _sync_xero_payments_for_sales(sales, progress_callback=None):
     """Link Xero payments for the given AnthillSale objects.
 
     Used by the weekly report to keep payment data correct. Silently no-ops if
     Xero is not connected, and tolerates per-sale Xero/API errors so the report
     always renders. Returns the total number of payments created.
+
+    ``progress_callback(done, total, created)`` — when supplied, is invoked once
+    per sale (after each is processed) so callers can report progress. Any
+    exception it raises is swallowed so it can never break the sync.
     """
     from .services import xero_api
+
+    total = len(sales)
+
+    def _report(done, created):
+        if progress_callback:
+            try:
+                progress_callback(done, total, created)
+            except Exception:
+                pass
+
+    _report(0, 0)
 
     try:
         access_token, _ = xero_api.get_valid_access_token()
@@ -951,24 +966,46 @@ def _sync_xero_payments_for_sales(sales):
 
     seen_fallback_base_pids = set()
     created_total = 0
-    for sale in sales:
-        if not sale.contract_number:
-            continue
+    for idx, sale in enumerate(sales, start=1):
         try:
-            invoice_data = xero_api.get_sale_payments_from_xero(
-                contract_number=sale.contract_number,
-                contact_name=sale.customer_name or None,
-            )
-        except Exception:
-            continue
-        if not invoice_data:
-            continue
-        try:
-            created, _updated, _skipped = _write_xero_payments_for_sale(
-                sale, invoice_data, seen_fallback_base_pids)
-            created_total += created
-        except Exception:
-            continue
+            if not sale.contract_number:
+                continue
+            try:
+                invoice_data = xero_api.get_sale_payments_from_xero(
+                    contract_number=sale.contract_number,
+                    contact_name=sale.customer_name or None,
+                )
+            except Exception:
+                continue
+            if not invoice_data:
+                continue
+            try:
+                created, _updated, _skipped = _write_xero_payments_for_sale(
+                    sale, invoice_data, seen_fallback_base_pids)
+                created_total += created
+            except Exception:
+                continue
+        finally:
+            _report(idx, created_total)
+
+    # Refresh the stored pooled balances (balance_payable / paid_in_full) for
+    # every affected customer so the figures surfaced elsewhere (e.g. the fit
+    # calendar) reflect the newly synced payments. The sale-detail pool logic is
+    # the single source of truth — we just persist its result here rather than
+    # re-deriving paid/outstanding wherever the values are displayed.
+    try:
+        from .customer_views import _recalculate_customer_financials
+        _seen_customers = set()
+        for sale in sales:
+            cid = sale.customer_id
+            if cid and cid not in _seen_customers:
+                _seen_customers.add(cid)
+                try:
+                    _recalculate_customer_financials(sale.customer)
+                except Exception:
+                    continue
+    except Exception:
+        pass
     return created_total
 
 

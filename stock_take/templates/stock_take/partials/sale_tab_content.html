@@ -174,14 +174,17 @@
 
             </div>
 
-            <!-- Payment History Card -->
+            <!-- Payments Card -->
             <div class="card">
                 <div class="card-header">
-                    <h3>Payment History</h3>
+                    <h3>Payments</h3>
                     <div class="sale-payment-header-actions">
                         {% if payments %}<span class="tab-count">{{ payments|length }}</span>{% endif %}
-                        <button type="button" class="btn btn-sm btn-outline-info" onclick="openSearchPaymentsModal()">
-                            <i class="bi bi-search"></i> Search Payments
+                        <button type="button" class="btn btn-sm btn-outline-info" onclick="openSearchPaymentsModal('xero')">
+                            <i class="bi bi-cloud"></i> Search Xero
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-info" onclick="openSearchPaymentsModal('anthill')">
+                            <i class="bi bi-building"></i> Search Anthill
                         </button>
                         <button type="button" class="btn btn-sm btn-outline-primary" onclick="openAddManualModal()">
                             <i class="bi bi-plus-lg"></i> Add Manual Payment
@@ -534,18 +537,18 @@
                 </div>
             </dialog>
 
-            <!-- Combined Search Payments Modal -->
+            <!-- Search Payments Modal (Xero or Anthill, toggled by mode) -->
             <dialog id="searchPaymentsModal">
                 <div class="manual-modal-header">
                     <div class="manual-modal-title">
                         <i class="bi bi-search sale-modal-icon-blue"></i>
-                        <span>Search Payments</span>
+                        <span id="searchPaymentsTitle">Search Payments</span>
                     </div>
                     <button class="manual-modal-close" onclick="document.getElementById('searchPaymentsModal').close()"><i class="bi bi-x-lg"></i></button>
                 </div>
                 <div class="manual-modal-body">
                     <!-- Xero Section -->
-                    <div class="search-payments-section">
+                    <div class="search-payments-section" id="xeroSection">
                         <div class="search-payments-section-header">
                             <i class="bi bi-cloud"></i> Xero Invoices
                             <span id="xeroSectionStatus" class="search-section-status"><i class="bi bi-arrow-repeat spin"></i> Searching&hellip;</span>
@@ -554,7 +557,7 @@
                     </div>
 
                     <!-- Anthill Section -->
-                    <div class="search-payments-section">
+                    <div class="search-payments-section" id="anthillSection">
                         <div class="search-payments-section-header">
                             <i class="bi bi-building"></i> Anthill CRM
                             <span id="anthillSectionStatus" class="search-section-status"><i class="bi bi-arrow-repeat spin"></i> Scraping&hellip;</span>
@@ -655,29 +658,35 @@
                 });
             }
 
-            // ── Combined Search Payments modal ─────────────────────────────
-            function openSearchPaymentsModal() {
+            // ── Search Payments modal (Xero or Anthill, by mode) ───────────
+            function openSearchPaymentsModal(mode) {
+                mode = mode || 'xero';
                 const modal = document.getElementById('searchPaymentsModal');
+                const xeroSection = document.getElementById('xeroSection');
+                const anthillSection = document.getElementById('anthillSection');
                 const xeroBody = document.getElementById('xeroSectionBody');
                 const xeroStatus = document.getElementById('xeroSectionStatus');
                 const anthillBody = document.getElementById('anthillSectionBody');
                 const anthillStatus = document.getElementById('anthillSectionStatus');
                 const importBtn = document.getElementById('anthillImportBtn');
                 const msg = document.getElementById('searchPaymentsMsg');
+                const title = document.getElementById('searchPaymentsTitle');
 
+                const showXero = mode === 'xero';
                 xeroBody.innerHTML = '';
                 anthillBody.innerHTML = '';
-                xeroStatus.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Searching&hellip;';
-                xeroStatus.className = 'search-section-status';
-                anthillStatus.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Scraping&hellip;';
-                anthillStatus.className = 'search-section-status';
                 importBtn.style.display = 'none';
                 msg.textContent = '';
                 msg.className = 'sale-modal-msg';
+                xeroSection.style.display = showXero ? '' : 'none';
+                anthillSection.style.display = showXero ? 'none' : '';
+                title.textContent = showXero ? 'Search Xero' : 'Search Anthill';
                 modal.showModal();
 
-                // Fire both requests in parallel
+                if (showXero) {
                 // ── Xero search ──
+                xeroStatus.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Searching&hellip;';
+                xeroStatus.className = 'search-section-status';
                 fetch(XERO_SEARCH_URL)
                 .then(r => r.json())
                 .then(data => {
@@ -703,7 +712,7 @@
                         const statusClass = inv.status.toUpperCase() === 'PAID' ? 'sale-badge-paid' : inv.status.toUpperCase() === 'AUTHORISED' ? 'active' : 'inactive';
                         const linked = inv.already_linked;
                         const otherSale = inv.linked_to_other || '';
-                        html += '<tr class="' + (linked ? 'xero-row-linked' : otherSale ? 'xero-row-other' : '') + '">';
+                        html += '<tr class="' + (linked ? 'xero-row-linked' : otherSale ? 'xero-row-other' : 'xero-row-draft') + '">';
                         html += '<td>' + escHtml(inv.invoice_number) + '</td>';
                         html += '<td>' + escHtml(inv.reference || '-') + '</td>';
                         html += '<td>' + escHtml(inv.date || '-') + '</td>';
@@ -717,6 +726,7 @@
                         } else if (otherSale) {
                             html += '<span class="xero-other-badge" title="Linked to ' + escHtml(otherSale) + '"><i class="bi bi-link-45deg"></i> ' + escHtml(otherSale) + '</span>';
                         } else {
+                            html += '<span class="xero-draft-badge"><i class="bi bi-file-earmark-text"></i> Draft</span> ';
                             html += '<button class="btn btn-sm btn-outline-success" onclick="linkXeroInvoice(\'' + inv.invoice_id + '\', this)"><i class="bi bi-link-45deg"></i> Link</button>';
                         }
                         html += '</td></tr>';
@@ -730,7 +740,10 @@
                     xeroStatus.className = 'search-section-status search-section-err';
                 });
 
+                } else {
                 // ── Anthill scrape ──
+                anthillStatus.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Scraping&hellip;';
+                anthillStatus.className = 'search-section-status';
                 fetch(SCRAPE_ANTHILL_URL, {
                     method: 'POST',
                     headers: {'X-CSRFToken': CSRF_TOKEN},
@@ -761,6 +774,7 @@
                     anthillStatus.innerHTML = '<i class="bi bi-x-circle"></i> Error';
                     anthillStatus.className = 'search-section-status search-section-err';
                 });
+                }
             }
 
             function renderScrapeResults(payments) {

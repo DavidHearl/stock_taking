@@ -24,9 +24,9 @@
 
     <!-- ===== CUSTOMER HERO CARD ===== -->
     {% if sale.customer %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer.name hero_customer_pk=sale.customer.pk hero_phone=sale.customer.phone hero_email=sale.customer.email hero_address_1=sale.customer.address_1 hero_address_2=sale.customer.address_2 hero_city=sale.customer.city hero_postcode=sale.customer.postcode hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class hero_collapsible_details=True hero_fit_date=order.fit_date hero_value_paid=payments_total hero_value_total=sale.sale_value hero_next_step=order.workflow_progress.current_stage.name %}
+        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer.name hero_customer_pk=sale.customer.pk hero_phone=sale.customer.phone hero_email=sale.customer.email hero_address_1=sale.customer.address_1 hero_address_2=sale.customer.address_2 hero_city=sale.customer.city hero_postcode=sale.customer.postcode hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class hero_collapsible_details=True hero_fit_date=order.fit_date hero_value_paid=hero_value_paid hero_value_total=hero_value_total hero_next_step=order.workflow_progress.current_stage.name %}
     {% else %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer_name hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class hero_collapsible_details=True hero_fit_date=order.fit_date hero_value_paid=payments_total hero_value_total=sale.sale_value hero_next_step=order.workflow_progress.current_stage.name %}
+        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer_name hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class hero_collapsible_details=True hero_fit_date=order.fit_date hero_value_paid=hero_value_paid hero_value_total=hero_value_total hero_next_step=order.workflow_progress.current_stage.name %}
     {% endif %}
 
     <div class="sale-page-layout">
@@ -77,14 +77,102 @@
 
             </div>
 
-            <!-- Payment History Card -->
+            <!-- Customer Payment Pool Card -->
+            {% if payment_pool and payment_pool.current %}
+            <div class="card pool-card">
+                <div class="card-header">
+                    <h3>{% if payment_pool.multi %}Customer Payment Pool{% else %}Payment Breakdown{% endif %}</h3>
+                    <span class="tab-count">{{ payment_pool.sale_count }} sale{{ payment_pool.sale_count|pluralize }}</span>
+                </div>
+                <div class="card-body padded">
+                    <p class="pool-intro">
+                        <i class="bi bi-info-circle"></i>
+                        {% if payment_pool.multi %}
+                        Payments are pooled across all of this customer's active sales and split by fit date — sales within six months of each other share proportionally (by value), while groups more than six months apart are filled oldest-first.
+                        {% else %}
+                        How this sale's payments are divided across the deposit, stock, pre-fit and final-balance milestones.
+                        {% endif %}
+                    </p>
+
+                    <!-- Summary tiles -->
+                    <div class="pool-stats">
+                        <div class="pool-stat pool-stat--total">
+                            <span class="pool-stat-label">Total Value</span>
+                            <span class="pool-stat-value">£{{ payment_pool.pool_value|floatformat:2|intcomma }}</span>
+                        </div>
+                        <div class="pool-stat pool-stat--paid">
+                            <span class="pool-stat-label">Pooled Paid</span>
+                            <span class="pool-stat-value pool-paid">£{{ payment_pool.pool_paid|floatformat:2|intcomma }}</span>
+                        </div>
+                        {% if payment_pool.net_credit > 0 %}
+                        <div class="pool-stat pool-stat--credit">
+                            <span class="pool-stat-label">Account Credit</span>
+                            <span class="pool-stat-value pool-credit">+£{{ payment_pool.net_credit|floatformat:2|intcomma }}</span>
+                        </div>
+                        {% else %}
+                        <div class="pool-stat {% if payment_pool.net_outstanding > 0 %}pool-stat--out{% else %}pool-stat--paid{% endif %}">
+                            <span class="pool-stat-label">Outstanding</span>
+                            <span class="pool-stat-value {% if payment_pool.net_outstanding > 0 %}pool-outstanding{% else %}pool-paid{% endif %}">£{{ payment_pool.net_outstanding|floatformat:2|intcomma }}</span>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Overall pool progress -->
+                    <div class="pool-progress-wrap">
+                        <div class="pool-progress-track">
+                            <div class="pool-progress-fill {% if payment_pool.net_credit > 0 %}pool-progress-credit{% endif %}" style="width: {{ payment_pool.pool_pct }}%;"></div>
+                        </div>
+                        <span class="pool-progress-pct">{{ payment_pool.pool_pct }}%</span>
+                    </div>
+
+                    <!-- Payment milestone legend (breakpoints marked on each sale's bar) -->
+                    <div class="pool-bp-legend">
+                        <span class="pool-bp-legend-title">Payment milestones:</span>
+                        <span class="pool-bp-item"><span class="pool-bp-dot"></span>Deposit 20%</span>
+                        <span class="pool-bp-item"><span class="pool-bp-dot"></span>Stock 35%</span>
+                        <span class="pool-bp-item"><span class="pool-bp-dot"></span>Pre-fit 35%</span>
+                        <span class="pool-bp-item"><span class="pool-bp-dot"></span>Final 10%</span>
+                    </div>
+
+                    <!-- Per-sale allocation breakdown -->
+                    <div class="pool-alloc-list">
+                        {% for e in payment_pool.entries %}
+                        <div class="pool-alloc-row {% if e.is_current %}pool-alloc-current{% endif %}">
+                            <a href="{% url 'sale_detail' e.sale.pk %}" class="pool-alloc-name">
+                                {{ e.sale.contract_number|default:e.sale.anthill_activity_id|default:"Sale" }}
+                                {% if e.is_current %}<span class="pool-this-tag">this sale</span>{% endif %}
+                            </a>
+                            <div class="pool-alloc-track">
+                                <div class="pool-alloc-fill {% if e.credit > 0 %}pool-alloc-fill-credit{% elif e.outstanding > 0 %}pool-alloc-fill-partial{% endif %}" style="width: {{ e.pct }}%;"></div>
+                                <span class="pay-bp" style="left:20%;" title="Deposit 20%"></span>
+                                <span class="pay-bp" style="left:55%;" title="Stock payment 35%"></span>
+                                <span class="pay-bp" style="left:90%;" title="Pre-fit 35%"></span>
+                            </div>
+                            <span class="pool-alloc-figs">£{{ e.allocated|floatformat:0|intcomma }} / £{{ e.effective_value|floatformat:0|intcomma }}</span>
+                            <span class="pool-alloc-status">
+                                {% if e.credit > 0 %}
+                                <span class="pool-tag pool-tag-credit">+£{{ e.credit|floatformat:2|intcomma }} credit</span>
+                                {% elif e.outstanding > 0 %}
+                                <span class="pool-tag pool-tag-out">£{{ e.outstanding|floatformat:2|intcomma }} due</span>
+                                {% else %}
+                                <span class="pool-tag pool-tag-paid"><i class="bi bi-check-lg"></i> Paid</span>
+                                {% endif %}
+                            </span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Payments Card -->
             <div class="card">
                 <div class="card-header">
-                    <h3>Payment History</h3>
+                    <h3>Payments</h3>
                     <div class="sale-payment-header-actions">
                         {% if payments %}<span class="tab-count">{{ payments|length }}</span>{% endif %}
-                        <button type="button" class="btn btn-sm btn-outline-info" onclick="openSearchPaymentsModal()">
-                            <i class="bi bi-search"></i> Search Payments
+                        <button type="button" class="btn btn-sm btn-outline-info" onclick="openSearchPaymentsModal('xero')">
+                            <i class="bi bi-cloud"></i> Search Xero
                         </button>
                         <button type="button" class="btn btn-sm btn-outline-primary" onclick="openAddManualModal()">
                             <i class="bi bi-plus-lg"></i> Add Manual Payment
@@ -93,12 +181,13 @@
                 </div>
 
                 {% if xero_payments %}
-                <div class="payment-source-label"><i class="bi bi-cloud"></i> Xero Payments</div>
+                <div class="payment-source-label"><i class="bi bi-cloud"></i> Xero Payments <span class="text-muted">(all of this customer's sales)</span></div>
                 <table class="table orders-table">
                     <thead>
                         <tr>
                             <th>Invoice #</th>
                             <th>Reference</th>
+                            <th>Sale</th>
                             <th>Date</th>
                             <th>Amount Paid</th>
                             <th>Outstanding</th>
@@ -108,11 +197,18 @@
                     </thead>
                     <tbody>
                         {% for p in xero_payments %}
-                        <tr id="xero-row-{{ p.pk }}" {% if p.ignored %}class="payment-ignored"{% endif %}>
+                        <tr id="xero-row-{{ p.pk }}" {% if p.ignored %}class="payment-ignored"{% endif %}{% if not p.belongs_to_current %} class="payment-other-sale"{% endif %}>
                             <td>{{ p.xero_invoice_number|default:"-" }}</td>
                             <td>{{ p.payment_type|default:"-" }}</td>
+                            <td>
+                                {% if p.belongs_to_current %}
+                                <span class="pool-this-tag">this sale</span>
+                                {% else %}
+                                <a href="{% url 'sale_detail' p.sale_id %}" class="customer-name-link">{{ p.sale.contract_number|default:p.sale.anthill_activity_id|default:"Sale" }}</a>
+                                {% endif %}
+                            </td>
                             <td>{{ p.date|date:"d/m/Y"|default:"-" }}</td>
-                            <td>{% if p.amount %}£{{ p.amount|floatformat:2 }}{% else %}-{% endif %}</td>
+                            <td>{% if p.display_amount %}£{{ p.display_amount|floatformat:2 }}{% else %}-{% endif %}</td>
                             <td>{% if p.invoice_amount_due is not None %}£{{ p.invoice_amount_due|floatformat:2 }}{% else %}-{% endif %}</td>
                             <td>
                                 {% if p.status|lower == 'authorised' %}
@@ -126,7 +222,13 @@
                                 {% endif %}
                             </td>
                             <td class="sale-actions-cell">
-                                <button class="btn btn-sm btn-outline-warning" onclick="openSplitModal({{ p.pk }}, '{{ p.xero_invoice_number|default:"" }}', {{ p.amount|default:0 }})" title="Split payment to another sale">
+                                {% if p.xero_invoice_id %}
+                                <a class="btn btn-sm btn-outline-secondary" href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID={{ p.xero_invoice_id }}" target="_blank" rel="noopener" title="Open invoice in Xero">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                                {% endif %}
+                                {% if p.belongs_to_current %}
+                                <button class="btn btn-sm btn-outline-warning" onclick="openSplitModal({{ p.pk }}, '{{ p.xero_invoice_number|default:"" }}', {{ p.display_amount|default:0 }})" title="Split payment to another sale">
                                     <i class="bi bi-scissors"></i>
                                 </button>
                                 <button class="btn btn-sm {% if p.ignored %}btn-outline-success{% else %}btn-outline-secondary{% endif %}" onclick="toggleIgnorePayment({{ p.pk }}, this)" title="{% if p.ignored %}Include in calculations{% else %}Exclude from calculations{% endif %}">
@@ -135,13 +237,18 @@
                                 <button class="btn btn-sm btn-outline-danger" onclick="deleteXeroPayment({{ p.pk }})" title="Delete this payment record">
                                     <i class="bi bi-trash"></i>
                                 </button>
+                                {% else %}
+                                <a class="btn btn-sm btn-outline-secondary" href="{% url 'sale_detail' p.sale_id %}" title="Manage on the owning sale">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                {% endif %}
                             </td>
                         </tr>
                         {% endfor %}
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="3" class="sale-tfoot-label">Total</td>
+                            <td colspan="4" class="sale-tfoot-label">Total</td>
                             <td class="sale-tfoot-value">
                                 {% if xero_payments_total %}£{{ xero_payments_total|floatformat:2 }}{% else %}-{% endif %}
                             </td>
@@ -152,11 +259,12 @@
                 {% endif %}
 
                 {% if manual_payments %}
-                <div class="payment-source-label"><i class="bi bi-pencil"></i> Manual Payments</div>
+                <div class="payment-source-label"><i class="bi bi-pencil"></i> Manual Payments <span class="text-muted">(all of this customer's sales)</span></div>
                 <table class="table orders-table" id="manualPaymentsTable">
                     <thead>
                         <tr>
                             <th>Type</th>
+                            <th>Sale</th>
                             <th>Date</th>
                             <th>Location</th>
                             <th>User</th>
@@ -167,8 +275,15 @@
                     </thead>
                     <tbody>
                         {% for p in manual_payments %}
-                        <tr id="manual-row-{{ p.pk }}" {% if p.ignored %}class="payment-ignored"{% endif %}>
+                        <tr id="manual-row-{{ p.pk }}" {% if p.ignored %}class="payment-ignored"{% endif %}{% if not p.belongs_to_current %} class="payment-other-sale"{% endif %}>
                             <td>{{ p.payment_type|default:"-" }}</td>
+                            <td>
+                                {% if p.belongs_to_current %}
+                                <span class="pool-this-tag">this sale</span>
+                                {% else %}
+                                <a href="{% url 'sale_detail' p.sale_id %}" class="customer-name-link">{{ p.sale.contract_number|default:p.sale.anthill_activity_id|default:"Sale" }}</a>
+                                {% endif %}
+                            </td>
                             <td>{{ p.date|date:"d/m/Y H:i"|default:"-" }}</td>
                             <td>{{ p.location|default:"-" }}</td>
                             <td>{{ p.user_name|default:"-" }}</td>
@@ -179,19 +294,25 @@
                                 {% else %}<span class="text-muted">-</span>{% endif %}
                             </td>
                             <td class="sale-actions-cell">
+                                {% if p.belongs_to_current %}
                                 <button class="btn btn-sm {% if p.ignored %}btn-outline-success{% else %}btn-outline-secondary{% endif %}" onclick="toggleIgnorePayment({{ p.pk }}, this)" title="{% if p.ignored %}Include in calculations{% else %}Exclude from calculations{% endif %}">
                                     <i class="bi {% if p.ignored %}bi-eye{% else %}bi-eye-slash{% endif %}"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-danger" onclick="deleteManualPayment({{ p.pk }})" title="Delete">
                                     <i class="bi bi-trash"></i>
                                 </button>
+                                {% else %}
+                                <a class="btn btn-sm btn-outline-secondary" href="{% url 'sale_detail' p.sale_id %}" title="Manage on the owning sale">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                {% endif %}
                             </td>
                         </tr>
                         {% endfor %}
                     </tbody>
                     <tfoot>
                         <tr>
-                            <td colspan="4" class="sale-tfoot-label">Total</td>
+                            <td colspan="5" class="sale-tfoot-label">Total</td>
                             <td class="sale-tfoot-value">
                                 {% if manual_payments_total %}£{{ manual_payments_total|floatformat:2 }}{% else %}-{% endif %}
                             </td>
@@ -391,10 +512,10 @@
                 <div class="manual-modal-body">
                     <div class="sale-modal-section">
                         <label class="sale-modal-label">
-                            <i class="bi bi-clipboard"></i> Paste from Anthill (optional)
+                            <i class="bi bi-clipboard"></i> Paste from Atlas (optional)
                         </label>
                         <textarea id="anthillPasteArea" rows="4"
-                            placeholder="Paste the payment table from Anthill CRM here and click Parse..."
+                            placeholder="Paste the payment table from Atlas here and click Parse..."
                             class="sale-paste-textarea"></textarea>
                         <div class="sale-modal-btn-row">
                             <button type="button" class="btn btn-sm btn-outline-primary" onclick="parseAnthillPaste()">
@@ -437,18 +558,18 @@
                 </div>
             </dialog>
 
-            <!-- Combined Search Payments Modal -->
+            <!-- Search Payments Modal (Xero or Anthill, toggled by mode) -->
             <dialog id="searchPaymentsModal">
                 <div class="manual-modal-header">
                     <div class="manual-modal-title">
                         <i class="bi bi-search sale-modal-icon-blue"></i>
-                        <span>Search Payments</span>
+                        <span id="searchPaymentsTitle">Search Payments</span>
                     </div>
                     <button class="manual-modal-close" onclick="document.getElementById('searchPaymentsModal').close()"><i class="bi bi-x-lg"></i></button>
                 </div>
                 <div class="manual-modal-body">
                     <!-- Xero Section -->
-                    <div class="search-payments-section">
+                    <div class="search-payments-section" id="xeroSection">
                         <div class="search-payments-section-header">
                             <i class="bi bi-cloud"></i> Xero Invoices
                             <span id="xeroSectionStatus" class="search-section-status"><i class="bi bi-arrow-repeat spin"></i> Searching&hellip;</span>
@@ -456,17 +577,20 @@
                         <div id="xeroSectionBody" class="search-payments-section-body"></div>
                     </div>
 
-                    <!-- Anthill Section -->
-                    <div class="search-payments-section">
+                    <!-- Atlas Section -->
+                    <div class="search-payments-section" id="anthillSection">
                         <div class="search-payments-section-header">
-                            <i class="bi bi-building"></i> Anthill CRM
-                            <span id="anthillSectionStatus" class="search-section-status"><i class="bi bi-arrow-repeat spin"></i> Scraping&hellip;</span>
+                            <i class="bi bi-building"></i> Atlas
+                            <span id="anthillSectionStatus" class="search-section-status"><i class="bi bi-arrow-repeat spin"></i> Loading&hellip;</span>
                         </div>
                         <div id="anthillSectionBody" class="search-payments-section-body"></div>
                     </div>
 
                     <div class="sale-scrape-footer">
                         <span id="searchPaymentsMsg" class="sale-modal-msg"></span>
+                        <button type="button" class="btn btn-sm btn-success" id="xeroLinkAllBtn" onclick="linkAllAvailableXero(this)" style="display:none;">
+                            <i class="bi bi-link-45deg"></i> Link All Available
+                        </button>
                         <button type="button" class="btn btn-sm btn-success" id="anthillImportBtn" onclick="importScrapeSelected()" style="display:none;">
                             <i class="bi bi-check-lg"></i> Import
                         </button>
@@ -525,6 +649,7 @@
             const SCRAPE_ANTHILL_URL = "{% url 'scrape_anthill_payments' sale.pk %}";
             const XERO_SEARCH_URL = "{% url 'xero_search_invoices' sale.pk %}";
             const XERO_LINK_URL = "{% url 'xero_link_invoice' sale.pk %}";
+            const CUSTOMER_XERO_LINK_URL = {% if sale.customer %}"{% url 'customer_xero_link' sale.customer.pk %}"{% else %}null{% endif %};
             const SALE_MERGE_URL = "{% url 'sale_merge' sale.pk %}";
             const DELETE_MANUAL_BASE = "/sale/{{ sale.pk }}/payments/";
             const CSRF_TOKEN = '{{ csrf_token }}';
@@ -557,113 +682,205 @@
                 });
             }
 
-            // ── Combined Search Payments modal ─────────────────────────────
-            function openSearchPaymentsModal() {
+            // ── Search Payments modal (Xero or Anthill, by mode) ───────────
+            function openSearchPaymentsModal(mode) {
+                mode = mode || 'xero';
                 const modal = document.getElementById('searchPaymentsModal');
+                const xeroSection = document.getElementById('xeroSection');
+                const anthillSection = document.getElementById('anthillSection');
                 const xeroBody = document.getElementById('xeroSectionBody');
                 const xeroStatus = document.getElementById('xeroSectionStatus');
                 const anthillBody = document.getElementById('anthillSectionBody');
                 const anthillStatus = document.getElementById('anthillSectionStatus');
                 const importBtn = document.getElementById('anthillImportBtn');
+                const linkAllBtn = document.getElementById('xeroLinkAllBtn');
                 const msg = document.getElementById('searchPaymentsMsg');
+                const title = document.getElementById('searchPaymentsTitle');
 
+                const showXero = mode === 'xero';
                 xeroBody.innerHTML = '';
                 anthillBody.innerHTML = '';
-                xeroStatus.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Searching&hellip;';
-                xeroStatus.className = 'search-section-status';
-                anthillStatus.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Scraping&hellip;';
-                anthillStatus.className = 'search-section-status';
                 importBtn.style.display = 'none';
+                linkAllBtn.style.display = 'none';
                 msg.textContent = '';
                 msg.className = 'sale-modal-msg';
+                xeroSection.style.display = showXero ? '' : 'none';
+                anthillSection.style.display = showXero ? 'none' : '';
+                title.textContent = showXero ? 'Search Xero' : 'Search Atlas';
+
                 document.body.appendChild(modal);
                 modal.showModal();
 
-                // Fire both requests in parallel
-                // ── Xero search ──
-                fetch(XERO_SEARCH_URL)
-                .then(r => r.json())
-                .then(data => {
-                    if (!data.success) {
-                        xeroBody.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> ' + escHtml(data.error) + '</p>';
+                if (showXero) {
+                    // ── Xero search ──
+                    xeroStatus.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Searching&hellip;';
+                    xeroStatus.className = 'search-section-status';
+                    fetch(XERO_SEARCH_URL)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (!data.success) {
+                            xeroBody.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> ' + escHtml(data.error) + '</p>';
+                            xeroStatus.innerHTML = '<i class="bi bi-x-circle"></i> Error';
+                            xeroStatus.className = 'search-section-status search-section-err';
+                            return;
+                        }
+                        const invoices = data.invoices || [];
+                        if (invoices.length === 0) {
+                            xeroBody.innerHTML = '<p class="xero-search-empty"><i class="bi bi-inbox"></i> ' + escHtml(data.message || 'No invoices found') + '</p>';
+                            xeroStatus.innerHTML = '<i class="bi bi-check-circle"></i> 0 invoices';
+                            xeroStatus.className = 'search-section-status search-section-ok';
+                            return;
+                        }
+                        xeroStatus.innerHTML = '<i class="bi bi-check-circle"></i> ' + invoices.length + ' invoice(s)';
+                        xeroStatus.className = 'search-section-status search-section-ok';
+                        XERO_INVOICES = invoices;
+                        buildXeroToolbar(invoices);
+                        renderXeroInvoices();
+                    })
+                    .catch(() => {
+                        xeroBody.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> Network error — could not reach Xero</p>';
                         xeroStatus.innerHTML = '<i class="bi bi-x-circle"></i> Error';
                         xeroStatus.className = 'search-section-status search-section-err';
-                        return;
-                    }
-                    const invoices = data.invoices || [];
-                    if (invoices.length === 0) {
-                        xeroBody.innerHTML = '<p class="xero-search-empty"><i class="bi bi-inbox"></i> ' + escHtml(data.message || 'No invoices found') + '</p>';
-                        xeroStatus.innerHTML = '<i class="bi bi-check-circle"></i> 0 invoices';
-                        xeroStatus.className = 'search-section-status search-section-ok';
-                        return;
-                    }
-                    xeroStatus.innerHTML = '<i class="bi bi-check-circle"></i> ' + invoices.length + ' invoice(s)';
-                    xeroStatus.className = 'search-section-status search-section-ok';
-                    let html = '<div class="sale-modal-table-wrap"><table class="manual-entry-table xero-search-table"><thead><tr>';
-                    html += '<th>Invoice #</th><th>Reference</th><th>Date</th><th>Total</th><th>Paid</th><th>Due</th><th>Status</th><th></th>';
-                    html += '</tr></thead><tbody>';
-                    invoices.forEach(inv => {
-                        const statusClass = inv.status.toUpperCase() === 'PAID' ? 'sale-badge-paid' : inv.status.toUpperCase() === 'AUTHORISED' ? 'active' : 'inactive';
-                        const linked = inv.already_linked;
-                        const otherSale = inv.linked_to_other || '';
-                        html += '<tr class="' + (linked ? 'xero-row-linked' : otherSale ? 'xero-row-other' : '') + '">';
-                        html += '<td>' + escHtml(inv.invoice_number) + '</td>';
-                        html += '<td>' + escHtml(inv.reference || '-') + '</td>';
-                        html += '<td>' + escHtml(inv.date || '-') + '</td>';
-                        html += '<td>£' + parseFloat(inv.total).toFixed(2) + '</td>';
-                        html += '<td>£' + parseFloat(inv.amount_paid).toFixed(2) + '</td>';
-                        html += '<td>£' + parseFloat(inv.amount_due).toFixed(2) + '</td>';
-                        html += '<td><span class="customer-active-badge ' + statusClass + '">' + escHtml(inv.status) + '</span></td>';
-                        html += '<td>';
-                        if (linked) {
-                            html += '<span class="xero-linked-badge"><i class="bi bi-link-45deg"></i> Linked</span>';
-                        } else if (otherSale) {
-                            html += '<span class="xero-other-badge" title="Linked to ' + escHtml(otherSale) + '"><i class="bi bi-link-45deg"></i> ' + escHtml(otherSale) + '</span>';
-                        } else {
-                            html += '<button class="btn btn-sm btn-outline-success" onclick="linkXeroInvoice(\'' + inv.invoice_id + '\', this)"><i class="bi bi-link-45deg"></i> Link</button>';
-                        }
-                        html += '</td></tr>';
                     });
-                    html += '</tbody></table></div>';
-                    xeroBody.innerHTML = html;
-                })
-                .catch(() => {
-                    xeroBody.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> Network error — could not reach Xero</p>';
-                    xeroStatus.innerHTML = '<i class="bi bi-x-circle"></i> Error';
-                    xeroStatus.className = 'search-section-status search-section-err';
-                });
-
-                // ── Anthill scrape ──
-                fetch(SCRAPE_ANTHILL_URL, {
-                    method: 'POST',
-                    headers: {'X-CSRFToken': CSRF_TOKEN},
-                })
-                .then(r => r.json())
-                .then(data => {
-                    if (!data.success) {
-                        anthillBody.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> ' + escHtml(data.error) + '</p>';
+                } else {
+                    // ── Anthill scrape ──
+                    anthillStatus.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Scraping&hellip;';
+                    anthillStatus.className = 'search-section-status';
+                    fetch(SCRAPE_ANTHILL_URL, {
+                        method: 'POST',
+                        headers: {'X-CSRFToken': CSRF_TOKEN},
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (!data.success) {
+                            anthillBody.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> ' + escHtml(data.error) + '</p>';
+                            anthillStatus.innerHTML = '<i class="bi bi-x-circle"></i> Error';
+                            anthillStatus.className = 'search-section-status search-section-err';
+                            return;
+                        }
+                        if (!data.payments.length) {
+                            anthillBody.innerHTML = '<p class="xero-search-empty"><i class="bi bi-inbox"></i> No payments found on Anthill</p>';
+                            anthillStatus.innerHTML = '<i class="bi bi-check-circle"></i> 0 payments';
+                            anthillStatus.className = 'search-section-status search-section-ok';
+                            return;
+                        }
+                        anthillStatus.innerHTML = '<i class="bi bi-check-circle"></i> ' + data.payments.length + ' payment(s)';
+                        anthillStatus.className = 'search-section-status search-section-ok';
+                        renderScrapeResults(data.payments);
+                        if (SALE_OUTSTANDING > 0) {
+                            importBtn.style.display = '';
+                        }
+                    })
+                    .catch(() => {
+                        anthillBody.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> Network error — could not reach Anthill</p>';
                         anthillStatus.innerHTML = '<i class="bi bi-x-circle"></i> Error';
                         anthillStatus.className = 'search-section-status search-section-err';
-                        return;
+                    });
+                }
+            }
+
+            // ── Xero invoice search: filtering, sorting & rendering ─────────
+            let XERO_INVOICES = [];
+            let xeroFilters = { q: '', statuses: new Set(), from: '', to: '' };
+            let xeroSort = { key: 'date', dir: 'desc' };
+
+            function buildXeroToolbar(invoices) {
+                const body = document.getElementById('xeroSectionBody');
+                xeroFilters = { q: '', statuses: new Set(), from: '', to: '' };
+                xeroSort = { key: 'date', dir: 'desc' };
+
+                const availableCount = invoices.filter(i => !i.already_linked && !i.linked_to_other).length;
+                const linkAllBtn = document.getElementById('xeroLinkAllBtn');
+                if (linkAllBtn) {
+                    if (availableCount) {
+                        linkAllBtn.style.display = '';
+                        linkAllBtn.disabled = false;
+                        linkAllBtn.innerHTML = '<i class="bi bi-link-45deg"></i> Link All Available (' + availableCount + ')';
+                    } else {
+                        linkAllBtn.style.display = 'none';
                     }
-                    if (!data.payments.length) {
-                        anthillBody.innerHTML = '<p class="xero-search-empty"><i class="bi bi-inbox"></i> No payments found on Anthill</p>';
-                        anthillStatus.innerHTML = '<i class="bi bi-check-circle"></i> 0 payments';
-                        anthillStatus.className = 'search-section-status search-section-ok';
-                        return;
+                }
+
+                body.innerHTML =
+                    '<div class="xero-results-header">' +
+                        '<div class="xero-result-count" id="xeroResultCount"></div>' +
+                    '</div>' +
+                    '<div id="xeroTableContainer" class="sale-modal-table-wrap"></div>';
+            }
+
+            function sortXero(key) {
+                if (xeroSort.key === key) xeroSort.dir = xeroSort.dir === 'asc' ? 'desc' : 'asc';
+                else { xeroSort.key = key; xeroSort.dir = 'asc'; }
+                renderXeroInvoices();
+            }
+
+            function renderXeroInvoices() {
+                const container = document.getElementById('xeroTableContainer');
+                const countEl = document.getElementById('xeroResultCount');
+                if (!container) return;
+
+                const q = xeroFilters.q;
+                const numKeys = { total: 1 };
+                let rows = XERO_INVOICES.filter(inv => {
+                    if (xeroFilters.statuses.size && !xeroFilters.statuses.has((inv.status || '').toUpperCase())) return false;
+                    if (xeroFilters.from && (inv.date || '') < xeroFilters.from) return false;
+                    if (xeroFilters.to && (inv.date || '') > xeroFilters.to) return false;
+                    if (q) {
+                        const hay = (inv.invoice_number + ' ' + (inv.reference || '') + ' ' + inv.total).toLowerCase();
+                        if (!hay.includes(q)) return false;
                     }
-                    anthillStatus.innerHTML = '<i class="bi bi-check-circle"></i> ' + data.payments.length + ' payment(s)';
-                    anthillStatus.className = 'search-section-status search-section-ok';
-                    renderScrapeResults(data.payments);
-                    if (SALE_OUTSTANDING > 0) {
-                        importBtn.style.display = '';
-                    }
-                })
-                .catch(() => {
-                    anthillBody.innerHTML = '<p class="sale-scrape-error"><i class="bi bi-exclamation-triangle"></i> Network error — could not reach Anthill</p>';
-                    anthillStatus.innerHTML = '<i class="bi bi-x-circle"></i> Error';
-                    anthillStatus.className = 'search-section-status search-section-err';
+                    return true;
                 });
+
+                const dir = xeroSort.dir === 'asc' ? 1 : -1;
+                const key = xeroSort.key;
+                rows.sort((a, b) => {
+                    let av = a[key], bv = b[key];
+                    if (numKeys[key]) { return ((parseFloat(av) || 0) - (parseFloat(bv) || 0)) * dir; }
+                    av = (av || '').toString().toLowerCase(); bv = (bv || '').toString().toLowerCase();
+                    return av < bv ? -dir : av > bv ? dir : 0;
+                });
+
+                if (countEl) countEl.textContent = 'Showing ' + rows.length + ' of ' + XERO_INVOICES.length + ' invoice' + (XERO_INVOICES.length !== 1 ? 's' : '');
+
+                if (rows.length === 0) {
+                    container.innerHTML = '<p class="xero-search-empty"><i class="bi bi-inbox"></i> No invoices found</p>';
+                    return;
+                }
+
+                const arrow = (k) => xeroSort.key === k ? (xeroSort.dir === 'asc' ? ' <i class="bi bi-caret-up-fill"></i>' : ' <i class="bi bi-caret-down-fill"></i>') : '';
+                let html = '<table class="manual-entry-table xero-search-table"><thead><tr>';
+                html += '<th class="xero-th" onclick="sortXero(\'invoice_number\')">Invoice #' + arrow('invoice_number') + '</th>';
+                html += '<th class="xero-th" onclick="sortXero(\'reference\')">Reference' + arrow('reference') + '</th>';
+                html += '<th class="xero-th" onclick="sortXero(\'date\')">Date' + arrow('date') + '</th>';
+                html += '<th class="xero-th xero-num" onclick="sortXero(\'total\')">Total' + arrow('total') + '</th>';
+                html += '<th class="xero-th" onclick="sortXero(\'status\')">Status' + arrow('status') + '</th>';
+                html += '<th></th></tr></thead><tbody>';
+                rows.forEach(inv => {
+                    const st = (inv.status || '').toUpperCase();
+                    const statusClass = st === 'PAID' ? 'sale-badge-paid' : st === 'AUTHORISED' ? 'active' : 'inactive';
+                    const linked = inv.already_linked;
+                    const otherSale = inv.linked_to_other || '';
+                    html += '<tr class="' + (linked ? 'xero-row-linked' : otherSale ? 'xero-row-other' : 'xero-row-draft') + '">';
+                    html += '<td>' + escHtml(inv.invoice_number) + '</td>';
+                    html += '<td>' + escHtml(inv.reference || '-') + '</td>';
+                    html += '<td>' + escHtml(inv.date || '-') + '</td>';
+                    html += '<td class="xero-num">£' + parseFloat(inv.total).toFixed(2) + '</td>';
+                    html += '<td><span class="customer-active-badge ' + statusClass + '">' + escHtml(inv.status) + '</span></td>';
+                    html += '<td class="xero-actions-cell">';
+                    html += '<a class="btn btn-sm btn-outline-secondary xero-open-btn" href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=' + encodeURIComponent(inv.invoice_id) + '" target="_blank" rel="noopener" title="Open in Xero"><i class="bi bi-box-arrow-up-right"></i></a>';
+                    if (linked) {
+                        html += '<span class="xero-linked-badge"><i class="bi bi-link-45deg"></i> Linked</span>';
+                    } else if (otherSale) {
+                        html += '<span class="xero-other-badge" title="Linked to ' + escHtml(otherSale) + '"><i class="bi bi-link-45deg"></i> ' + escHtml(otherSale) + '</span>';
+                    } else {
+                        html += '<span class="xero-draft-badge"><i class="bi bi-file-earmark-text"></i> Draft</span> ';
+                        html += '<button class="btn btn-sm btn-outline-success" onclick="linkXeroInvoice(\'' + inv.invoice_id + '\', this)"><i class="bi bi-link-45deg"></i> Link</button>';
+                    }
+                    html += '</td></tr>';
+                });
+                html += '</tbody></table>';
+                container.innerHTML = html;
             }
 
             function renderScrapeResults(payments) {
@@ -1344,17 +1561,31 @@
             }
 
             // ── Xero Link (used inside combined modal) ─────────────────────
+            function _xeroLinkRequest(inv) {
+                // Link each invoice to the sale matching its reference (customer-wide),
+                // falling back to the current sale's endpoint when no match is known.
+                if (CUSTOMER_XERO_LINK_URL && inv && inv.match_sale_pk) {
+                    return fetch(CUSTOMER_XERO_LINK_URL, {
+                        method: 'POST',
+                        headers: {'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json'},
+                        body: JSON.stringify({invoice_id: inv.invoice_id, sale_pk: inv.match_sale_pk}),
+                    });
+                }
+                return fetch(XERO_LINK_URL, {
+                    method: 'POST',
+                    headers: {'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json'},
+                    body: JSON.stringify({invoice_id: inv ? inv.invoice_id : ''}),
+                });
+            }
+
             function linkXeroInvoice(invoiceId, btn) {
                 btn.disabled = true;
                 btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i>';
                 const msg = document.getElementById('searchPaymentsMsg');
                 const row = btn.closest('tr');
+                const inv = XERO_INVOICES.find(i => i.invoice_id === invoiceId) || {invoice_id: invoiceId};
 
-                fetch(XERO_LINK_URL, {
-                    method: 'POST',
-                    headers: {'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json'},
-                    body: JSON.stringify({invoice_id: invoiceId}),
-                })
+                _xeroLinkRequest(inv)
                 .then(r => {
                     if (!r.ok) throw new Error('HTTP ' + r.status);
                     return r.json();
@@ -1362,6 +1593,8 @@
                 .then(result => {
                     if (result.success) {
                         row.classList.add('xero-row-linked');
+                        const _ci = XERO_INVOICES.find(i => i.invoice_id === invoiceId);
+                        if (_ci) _ci.already_linked = true;
                         btn.outerHTML = '<span class="xero-linked-badge"><i class="bi bi-check-circle"></i> Linked</span>';
                         msg.textContent = result.message || 'Linked successfully';
                         msg.className = 'sale-modal-msg sale-modal-msg-ok';
@@ -1379,168 +1612,34 @@
                     msg.className = 'sale-modal-msg sale-modal-msg-err';
                 });
             }
+
+            function linkAllAvailableXero(btn) {
+                const available = XERO_INVOICES.filter(i => !i.already_linked && !i.linked_to_other);
+                if (!available.length) return;
+                btn.disabled = true;
+                btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Linking…';
+                const msg = document.getElementById('searchPaymentsMsg');
+                let done = 0, failed = 0;
+                (async () => {
+                    for (const inv of available) {
+                        try {
+                            const r = await _xeroLinkRequest(inv);
+                            const result = await r.json();
+                            if (r.ok && result.success) { done++; } else { failed++; }
+                        } catch (e) { failed++; }
+                        if (msg) {
+                            msg.textContent = 'Linked ' + done + ' of ' + available.length + (failed ? ' (' + failed + ' failed)' : '') + '…';
+                            msg.className = 'sale-modal-msg sale-modal-msg-ok';
+                        }
+                    }
+                    if (msg) {
+                        msg.textContent = 'Linked ' + done + ' invoice' + (done !== 1 ? 's' : '') + (failed ? ', ' + failed + ' failed' : '') + '. Reloading…';
+                        msg.className = failed ? 'sale-modal-msg sale-modal-msg-err' : 'sale-modal-msg sale-modal-msg-ok';
+                    }
+                    setTimeout(() => window.location.reload(), 800);
+                })();
+            }
             </script>
-
-            <!-- Invoices Card -->
-            {% if sale_invoices %}
-            <div class="card" id="invoices-section">
-                <div class="card-header">
-                    <h3><i class="bi bi-receipt"></i> Invoices</h3>
-                    <span class="tab-count">{{ sale_invoices|length }}</span>
-                </div>
-                {% for inv in sale_invoices %}
-                <div class="sale-invoice-item {% if not forloop.last %}sale-invoice-border{% endif %}">
-                    <div class="sale-invoice-header" onclick="toggleInvoiceDetail({{ inv.id }})">
-                        <div class="sale-invoice-header-left">
-                            <span class="sale-invoice-number">{{ inv.invoice_number }}</span>
-                            <span class="inv-status {{ inv.status|lower }}">{{ inv.status }}</span>
-                            {% if inv.payment_status == 'paid' %}
-                            <span class="inv-payment paid">Paid</span>
-                            {% elif inv.payment_status == 'partial' %}
-                            <span class="inv-payment partial">Partial</span>
-                            {% elif inv.is_overdue %}
-                            <span class="inv-payment overdue">Overdue</span>
-                            {% else %}
-                            <span class="inv-payment unpaid">Unpaid</span>
-                            {% endif %}
-                        </div>
-                        <div class="sale-invoice-header-right">
-                            <span class="sale-invoice-amount">£{{ inv.total|floatformat:2|intcomma }}</span>
-                            <span class="sale-invoice-date">{{ inv.date|date:"d M Y"|default:"No date" }}</span>
-                            <i class="bi bi-chevron-down sale-invoice-chevron" id="chevron-{{ inv.id }}"></i>
-                        </div>
-                    </div>
-                    <div class="sale-invoice-detail" id="invoice-detail-{{ inv.id }}" style="display:none;">
-                        <div class="sale-invoice-meta">
-                            {% if inv.payment_type %}<span><strong>Type:</strong> {{ inv.payment_type }}</span>{% endif %}
-                            {% if inv.payment_method %}<span><strong>Method:</strong> {{ inv.payment_method }}</span>{% endif %}
-                            {% if inv.showroom %}<span><strong>Showroom:</strong> {{ inv.showroom }}</span>{% endif %}
-                            {% if inv.description %}<span><strong>Description:</strong> {{ inv.description }}</span>{% endif %}
-                            {% if inv.due_date %}<span><strong>Due:</strong> {{ inv.due_date|date:"d M Y" }}</span>{% endif %}
-                        </div>
-
-                        {% if inv.line_items.all %}
-                        <table class="table orders-table sale-invoice-table">
-                            <thead>
-                                <tr>
-                                    <th>Item</th>
-                                    <th>Description</th>
-                                    <th>Rate</th>
-                                    <th>Qty</th>
-                                    <th>Total</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for item in inv.line_items.all %}
-                                <tr>
-                                    <td>{{ item.name|default:"—" }}</td>
-                                    <td class="text-muted">{{ item.description|default:"" }}</td>
-                                    <td class="number-cell">£{{ item.rate|floatformat:2|intcomma }}</td>
-                                    <td class="number-cell">{{ item.quantity|floatformat:0 }}</td>
-                                    <td class="number-cell">£{{ item.line_total|floatformat:2|intcomma }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                        {% endif %}
-
-                        <div class="sale-invoice-summary">
-                            <div class="sale-invoice-summary-row">
-                                <span>Subtotal</span>
-                                <span>£{{ inv.subtotal|floatformat:2|intcomma }}</span>
-                            </div>
-                            {% if inv.total_tax %}
-                            <div class="sale-invoice-summary-row">
-                                <span>Tax</span>
-                                <span>£{{ inv.total_tax|floatformat:2|intcomma }}</span>
-                            </div>
-                            {% endif %}
-                            <div class="sale-invoice-summary-row sale-invoice-summary-total">
-                                <span>Total</span>
-                                <span>£{{ inv.total|floatformat:2|intcomma }}</span>
-                            </div>
-                            {% if inv.amount_paid > 0 %}
-                            <div class="sale-invoice-summary-row sale-invoice-summary-paid">
-                                <span>Paid</span>
-                                <span>£{{ inv.amount_paid|floatformat:2|intcomma }}</span>
-                            </div>
-                            {% endif %}
-                            {% if inv.amount_outstanding > 0 %}
-                            <div class="sale-invoice-summary-row sale-invoice-summary-outstanding">
-                                <span>Outstanding</span>
-                                <span>£{{ inv.amount_outstanding|floatformat:2|intcomma }}</span>
-                            </div>
-                            {% endif %}
-                        </div>
-
-                        {% if inv.xero_id %}
-                        <div class="sale-invoice-actions">
-                            <a href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID={{ inv.xero_id }}" target="_blank" class="btn btn-sm btn-outline-success">
-                                <i class="bi bi-box-arrow-up-right"></i> View in Xero
-                            </a>
-                        </div>
-                        {% endif %}
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-            {% endif %}
-
-            <!-- Related Sales Card -->
-            {% if related_sales %}
-            <div class="card">
-                <div class="card-header">
-                    <h3>Other Sales for this Customer</h3>
-                    <span class="tab-count sale-related-count">{{ related_sales|length }}</span>
-                </div>
-                <table class="table orders-table">
-                    <thead>
-                        <tr>
-                            <th>Activity ID</th>
-                            <th>Contract</th>
-                            <th>Type</th>
-                            <th>Status</th>
-                            <th>Date</th>
-                            <th>Linked Order</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for related in related_sales %}
-                        <tr>
-                            <td>
-                                <a href="{% url 'sale_detail' related.pk %}" class="customer-name-link">
-                                    {{ related.anthill_activity_id }}
-                                </a>
-                            </td>
-                            <td><span class="customer-mono sale-contract-mono">{{ related.contract_number|default:"-" }}</span></td>
-                            <td>{{ related.activity_type|default:"-" }}</td>
-                            <td>
-                                <span class="customer-active-badge {% if related.status|lower == 'complete' or related.status|lower == 'completed' %}active{% elif related.status|lower == 'dead' %}danger{% else %}inactive{% endif %}">
-                                    {{ related.status|default:"-" }}
-                                </span>
-                            </td>
-                            <td>{{ related.activity_date|date:"d/m/Y"|default:"-" }}</td>
-                            <td>
-                                {% if related.order %}
-                                <a href="{% url 'order_details' related.order.id %}" class="customer-order-badge">
-                                    {{ related.order.sale_number }}
-                                </a>
-                                {% else %}
-                                <span class="text-muted">-</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                <button type="button" class="btn btn-sm btn-outline-warning" onclick="mergeRelatedSale({{ related.pk }})">
-                                    <i class="bi bi-intersect"></i> Merge
-                                </button>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% endif %}
 
         </div>
 
@@ -2202,6 +2301,11 @@
                     <a href="{% url 'customer_detail' sale.customer.pk %}" class="btn btn-sm btn-outline-primary sale-sidebar-btn">
                         <i class="bi bi-person"></i> Customer Profile
                     </a>
+                    {% if sale.customer.xero_id %}
+                    <a href="https://go.xero.com/Contacts/View/{{ sale.customer.xero_id }}" target="_blank" class="btn btn-sm btn-outline-success sale-sidebar-btn">
+                        <i class="bi bi-box-arrow-up-right"></i> Customer in Xero
+                    </a>
+                    {% endif %}
                     {% endif %}
                     {% endif %}
 
@@ -2384,24 +2488,79 @@ function buildFinancialWaffle() {
     });
     while (cells.length < 100 && entries.length) cells.push(entries[0]);
 
+    const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
     const waffle = document.getElementById('financialChartCanvas');
     waffle.innerHTML = '';
     cells.forEach(e => {
         const cell = document.createElement('div');
         cell.className = 'fin-waffle-cell' + (e.est ? ' fin-waffle-cell-est' : '');
-        cell.style.background = e.color;
+        cell.style.setProperty('--cell-color', e.color);
+        cell.dataset.cat = slug(e.label);
         waffle.appendChild(cell);
     });
 
     document.getElementById('financialChartLegend').innerHTML = entries.map(e => {
-        return `<div class="fin-waffle-legend-item">
+        return `<div class="fin-waffle-legend-item" data-cat="${slug(e.label)}">
             <span class="fin-waffle-swatch${e.est ? ' fin-waffle-swatch-est' : ''}" style="background:${e.color};"></span>
             <span class="fin-waffle-cat">${e.label}${e.est ? ' <span class="fin-waffle-est-tag">est</span>' : ''}</span>
             <span class="fin-waffle-val">£${e.value.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
         </div>`;
     }).join('');
+
+    wireFinancialWaffleHover(section);
 }
-document.addEventListener('DOMContentLoaded', buildFinancialWaffle);
+
+function wireFinancialWaffleHover(section) {
+    const cells = section.querySelectorAll('.fin-waffle-cell');
+    const items = section.querySelectorAll('.fin-waffle-legend-item');
+
+    function setActive(cat) {
+        section.classList.toggle('fin-waffle-hovering', !!cat);
+        cells.forEach(c => c.classList.toggle('is-active', !!cat && c.dataset.cat === cat));
+        items.forEach(i => i.classList.toggle('is-active', !!cat && i.dataset.cat === cat));
+    }
+
+    [...cells, ...items].forEach(el => {
+        el.addEventListener('mouseenter', () => setActive(el.dataset.cat));
+        el.addEventListener('mouseleave', () => setActive(null));
+    });
+}
+
+// If the Total (Exc VAT) value is missing/zero but a Total (Inc VAT) value
+// exists, derive the Exc VAT amount from it (standard 20% VAT, Inc / 1.2).
+// If there is no Inc VAT value, leave everything untouched.
+function ensureExcVatCalculated() {
+    const parseAmount = el => parseFloat((el.textContent || '').replace(/[£,]/g, '')) || 0;
+
+    const incDisplay = document.getElementById('total_value_inc_vat_display');
+    const excDisplay = document.getElementById('total_value_exc_vat_display');
+    if (!incDisplay || !excDisplay) return;
+
+    const incAmountEl = incDisplay.querySelector('.fin-amount');
+    const excAmountEl = excDisplay.querySelector('.fin-amount');
+    if (!incAmountEl || !excAmountEl) return;
+
+    const incValue = parseAmount(incAmountEl);
+    const excValue = parseAmount(excAmountEl);
+
+    if (excValue > 0 || incValue <= 0) return;
+
+    const calculatedExc = incValue / 1.2;
+    excAmountEl.textContent = calculatedExc.toLocaleString('en-GB', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+
+    // Keep the waffle chart in sync so cost estimates render correctly.
+    const section = document.querySelector('.fin-waffle-section');
+    if (section) section.dataset.totalExc = calculatedExc.toFixed(2);
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    ensureExcVatCalculated();
+    buildFinancialWaffle();
+});
 </script>
 
 <script>
@@ -2725,6 +2884,15 @@ function toggleInvoiceDetail(invoiceId) {
         chevron.classList.remove('bi-chevron-up');
         chevron.classList.add('bi-chevron-down');
     }
+}
+
+// ── Client-side filter for the Invoices card ───────────────────────
+function filterSaleInvoices(query) {
+    const q = (query || '').trim().toLowerCase();
+    document.querySelectorAll('#invoices-section .sale-invoice-item').forEach(item => {
+        const hay = item.getAttribute('data-inv-search') || '';
+        item.style.display = (!q || hay.indexOf(q) !== -1) ? '' : 'none';
+    });
 }
 </script>
 

@@ -809,19 +809,20 @@ def purchase_invoice_detail(request, invoice_id):
     # Pre-compute VAT breakdown: net = sum of line items, VAT added on top.
     # Only apply vat_rate when there is no explicit VAT line item already in the list
     # (to avoid double-counting when the user has flattened/added VAT as a line).
-    if invoice.vat_rate and invoice.vat_rate > 0:
-        line_net = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
+    if invoice.line_items.exists():
+        line_net, vat_amount, computed_total = _invoice_financials(invoice)
         has_vat_line = invoice.line_items.filter(description__iregex=r'^VAT\s').exists()
-        if not has_vat_line:
-            vat_amount  = (line_net * invoice.vat_rate / Decimal('100')).quantize(Decimal('0.01'))
-            gross_total = (line_net + vat_amount).quantize(Decimal('0.01'))
-            # Auto-correct stored total if it doesn't match the gross (e.g. VAT was set after creation)
-            if invoice.total != gross_total:
-                invoice.total = gross_total
-                invoice.save(update_fields=['total'])
-            context['net_total']  = line_net
+        # Auto-correct stored total if it doesn't match the computed gross
+        # (e.g. VAT or discount was set after creation).
+        if invoice.total != computed_total:
+            invoice.total = computed_total
+            invoice.save(update_fields=['total'])
+        context['net_total'] = line_net
+        if invoice.vat_rate and invoice.vat_rate > 0 and not has_vat_line:
             context['vat_amount'] = vat_amount
-        # else: VAT is already a line item – omit the Net/VAT breakdown rows
+        # else: VAT is already a line item – omit the VAT breakdown row
+    context['discount']         = invoice.discount or Decimal('0')
+    context['discount_pre_vat'] = invoice.discount_pre_vat
     return render(request, 'stock_take/purchase_invoice_detail.html', context)
 
 
@@ -915,6 +916,10 @@ def create_purchase_invoice(request):
     total_val = _parse_decimal(data.get('total', '0'))
     _vr = (data.get('vat_rate') or '').strip()
     vat_rate_val = _parse_decimal(_vr) if _vr else None
+    discount_val = _parse_decimal(data.get('discount', '0'))
+    if discount_val < 0:
+        discount_val = Decimal('0')
+    discount_pre_vat = str(data.get('discount_pre_vat', 'true')).strip().lower() in ('true', '1', 'yes', 'on')
 
     invoice = PurchaseInvoice.objects.create(
         invoice_number     = invoice_number,
@@ -928,6 +933,8 @@ def create_purchase_invoice(request):
         notes              = (data.get('notes') or '').strip(),
         currency           = (data.get('currency') or 'GBP').strip().upper() or 'GBP',
         vat_rate           = vat_rate_val,
+        discount           = discount_val,
+        discount_pre_vat   = discount_pre_vat,
         created_by         = request.user.get_full_name() or request.user.username,
     )
 
@@ -996,13 +1003,10 @@ def create_purchase_invoice(request):
             # Auto-create installation timesheet if allocated to an order
             _sync_timesheet_for_pi_line(line)
 
-    # Recalculate total from lines if no total provided, applying VAT if set
+    # Recalculate total from lines if no total provided, applying VAT/discount if set
     if total_val == 0 and line_items_raw:
-        net = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
-        if vat_rate_val and vat_rate_val > 0:
-            invoice.total = net * (1 + vat_rate_val / Decimal('100'))
-        else:
-            invoice.total = net
+        _net, _vat, total = _invoice_financials(invoice)
+        invoice.total = total
         invoice.save(update_fields=['total'])
 
     if uploaded_file:
@@ -1088,32 +1092,29 @@ def update_purchase_invoice(request, invoice_id):
         invoice.notes = data['notes'].strip()
     if 'currency' in data:
         invoice.currency = (data['currency'] or 'GBP').strip().upper()[:3]
+    if 'discount' in data:
+        _disc = _parse_decimal(str(data.get('discount') or '0'))
+        invoice.discount = _disc if _disc > 0 else Decimal('0')
+    if 'discount_pre_vat' in data:
+        invoice.discount_pre_vat = str(data.get('discount_pre_vat')).strip().lower() in ('true', '1', 'yes', 'on')
     if 'vat_rate' in data:
         _vr = str(data.get('vat_rate') or '').strip()
         invoice.vat_rate = _parse_decimal(_vr) if _vr else None
-        # Recompute gross total from line items whenever VAT rate changes.
-        # Don't apply the rate when VAT is already a line item.
-        line_net = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
-        _has_vat_line = invoice.line_items.filter(description__iregex=r'^VAT\s').exists()
-        if invoice.vat_rate and invoice.vat_rate > 0 and not _has_vat_line:
-            invoice.total = (line_net * (1 + invoice.vat_rate / Decimal('100'))).quantize(Decimal('0.01'))
-        else:
-            invoice.total = line_net
+    # Recompute the gross total from line items whenever VAT or discount changes.
+    if any(k in data for k in ('vat_rate', 'discount', 'discount_pre_vat')):
+        _net, _vat, _total = _invoice_financials(invoice)
+        invoice.total = _total
 
     invoice.save()
     # If no specific field was updated this is a pure recalculate call – recompute from lines.
     _update_keys = ('invoice_number', 'supplier_name', 'date', 'due_date', 'status',
                     'payment_status', 'total', 'amount_paid', 'notes', 'currency', 'vat_rate',
-                    'supplier_reference')
+                    'supplier_reference', 'discount', 'discount_pre_vat')
     if not any(k in data for k in _update_keys):
         _recalc_invoice_total(invoice)
         invoice.refresh_from_db()
     # Compute VAT breakdown for response
-    line_net = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
-    vat_amount = Decimal('0')
-    has_vat_line = invoice.line_items.filter(description__iregex=r'^VAT\s').exists()
-    if invoice.vat_rate and invoice.vat_rate > 0 and not has_vat_line:
-        vat_amount = (line_net * invoice.vat_rate / Decimal('100')).quantize(Decimal('0.01'))
+    line_net, vat_amount, _total = _invoice_financials(invoice)
     return JsonResponse({
         'success':           True,
         'invoice_number':    invoice.invoice_number,
@@ -1128,6 +1129,8 @@ def update_purchase_invoice(request, invoice_id):
         'payment_status':    invoice.payment_status,
         'notes':             invoice.notes or '',
         'vat_rate':          str(invoice.vat_rate) if invoice.vat_rate is not None else '',
+        'discount':          str(invoice.discount or Decimal('0')),
+        'discount_pre_vat':  invoice.discount_pre_vat,
         'line_net':          str(line_net),
         'vat_amount':        str(vat_amount),
         'currency':          invoice.currency or 'GBP',
@@ -1328,8 +1331,8 @@ def split_purchase_invoice_line(request, invoice_id, line_id):
     if parts < 2 or parts > 100:
         return JsonResponse({'error': 'Parts must be between 2 and 100'}, status=400)
 
-    # Divide rate evenly; any penny rounding goes on the first line
-    split_rate    = (line.rate / parts).quantize(Decimal('0.01'))
+    # Divide rate evenly; any rounding goes on the first line
+    split_rate    = (line.rate / parts).quantize(Decimal('0.0001'))
     first_rate    = line.rate - split_rate * (parts - 1)  # absorbs rounding
 
     # Update original line
@@ -1491,15 +1494,109 @@ def flatten_vat_to_line_item(request, invoice_id):
     })
 
 
-def _recalc_invoice_total(invoice):
-    line_sum = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
-    # Apply vat_rate only when there is no explicit VAT line item (avoids double-counting).
+@login_required
+def flatten_discount_to_line_item(request, invoice_id):
+    """Convert the invoice's discount into an explicit negative line item.
+
+    Xero only picks up amounts that exist as line items, so this turns the
+    stored discount into a real (negative) line and clears the discount field.
+
+    Tax handling preserves the invoice total:
+      * Pre-VAT discount  → the negative line keeps the invoice's VAT treatment
+        (it is taxed at the same rate, correctly reducing the taxable base).
+      * Post-VAT discount → if a VAT rate is set it is first flattened to its own
+        line item so the (after-tax) discount line is not taxed.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+
+    discount = invoice.discount or Decimal('0')
+    if discount <= 0:
+        return JsonResponse({'error': 'This invoice has no discount set.'}, status=400)
+
+    created_lines = []
+
+    # Post-VAT discount with a VAT rate: flatten the VAT first so the discount
+    # (which applies after tax) is not itself taxed.
+    if not invoice.discount_pre_vat and invoice.vat_rate and invoice.vat_rate > 0:
+        line_net = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
+        vat_amount = (line_net * invoice.vat_rate / Decimal('100')).quantize(Decimal('0.01'))
+        vat_line = PurchaseInvoiceLineItem.objects.create(
+            invoice=invoice,
+            description=f'VAT {invoice.vat_rate:g}% on {invoice.currency or "GBP"} {line_net:.2f}',
+            quantity=Decimal('1'),
+            rate=vat_amount,
+            line_total=vat_amount,
+            sort_order=invoice.line_items.count(),
+        )
+        invoice.vat_rate = None
+        invoice.save(update_fields=['vat_rate'])
+        created_lines.append(vat_line)
+
+    # Add the discount as a negative line item.
+    label = 'Discount (pre-VAT)' if invoice.discount_pre_vat else 'Discount'
+    discount_line = PurchaseInvoiceLineItem.objects.create(
+        invoice=invoice,
+        description=label,
+        quantity=Decimal('1'),
+        rate=-discount,
+        line_total=-discount,
+        sort_order=invoice.line_items.count(),
+    )
+    created_lines.append(discount_line)
+
+    # Clear the discount field now it lives as a line item.
+    invoice.discount = Decimal('0')
+    invoice.save(update_fields=['discount'])
+    _recalc_invoice_total(invoice)
+    invoice.refresh_from_db()
+
+    return JsonResponse({
+        'success': True,
+        'lines': [_line_to_dict(li) for li in created_lines],
+        'vat_cleared': not (invoice.vat_rate and invoice.vat_rate > 0),
+        'invoice_total': str(invoice.total),
+        'amount_paid': str(invoice.amount_paid),
+        'amount_outstanding': str(invoice.amount_outstanding),
+    })
+
+
+def _invoice_financials(invoice):
+    """Return (net, vat_amount, total) for a purchase invoice.
+
+    net      = sum of line items
+    discount = invoice.discount (clamped to >= 0)
+    VAT is only applied when vat_rate > 0 and there is no explicit VAT line item
+    (avoids double-counting when VAT has been flattened/added as a line).
+
+    When ``discount_pre_vat`` is True the discount is deducted from the net
+    before VAT is calculated; otherwise it is deducted from the gross total.
+    All values are quantized to 2 decimal places and ``total`` is never negative.
+    """
+    line_net = invoice.line_items.aggregate(t=Sum('line_total'))['t'] or Decimal('0')
+    discount = invoice.discount or Decimal('0')
+    if discount < 0:
+        discount = Decimal('0')
     has_vat_line = invoice.line_items.filter(description__iregex=r'^VAT\s').exists()
-    if invoice.vat_rate and invoice.vat_rate > 0 and not has_vat_line:
-        vat = (line_sum * invoice.vat_rate / Decimal('100')).quantize(Decimal('0.01'))
-        total = line_sum + vat
+    apply_vat = bool(invoice.vat_rate and invoice.vat_rate > 0 and not has_vat_line)
+    rate = (invoice.vat_rate or Decimal('0')) / Decimal('100')
+    if invoice.discount_pre_vat:
+        taxable = line_net - discount
+        vat = (taxable * rate).quantize(Decimal('0.01')) if apply_vat else Decimal('0')
+        total = taxable + vat
     else:
-        total = line_sum
+        vat = (line_net * rate).quantize(Decimal('0.01')) if apply_vat else Decimal('0')
+        total = line_net + vat - discount
+    total = total.quantize(Decimal('0.01'))
+    if total < 0:
+        total = Decimal('0.00')
+    return line_net.quantize(Decimal('0.01')), vat, total
+
+
+def _recalc_invoice_total(invoice):
+    _net, _vat, total = _invoice_financials(invoice)
     invoice.total = total
     # Clamp amount_paid — never let it go negative
     if invoice.amount_paid > total:
@@ -1959,10 +2056,14 @@ def push_purchase_invoice_to_xero(request, invoice_id):
     if line_items_qs.exists():
         xero_lines = []
         for li in line_items_qs:
+            # Send the full line total as the unit amount with quantity 1.
+            # Xero rounds UnitAmount to 2 dp, so pushing a 4-dp unit price ×
+            # quantity would round the cost incorrectly — using the already
+            # computed line total keeps the amount exact.
             line = {
                 'Description': li.description or 'Item',
-                'Quantity': str(li.quantity),
-                'UnitAmount': str(li.rate),
+                'Quantity': '1',
+                'UnitAmount': str(li.line_total),
             }
             if gl_code:
                 line['AccountCode'] = gl_code

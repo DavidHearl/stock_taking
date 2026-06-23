@@ -38,7 +38,7 @@ from .purchase_invoice_views import (
     create_opo_from_invoice, link_opo_to_invoice, unlink_opo_from_invoice,
     search_opos_for_invoice, create_po_from_invoice, create_po_standalone,
     manual_link_xero, sync_xero_payment_statuses, next_invoice_number, supplier_search,
-    resync_invoice_timesheets, flatten_vat_to_line_item,
+    resync_invoice_timesheets, flatten_vat_to_line_item, flatten_discount_to_line_item,
 )
 from .accounts_payable_views import (
     accounts_payable_inbox,
@@ -58,6 +58,7 @@ from .accounts_payable_views import (
     manage_supplier_rules,
     bulk_email_action,
 )
+from .payments_views import payments_list
 from .overhead_po_views import (
     overhead_po_list, overhead_po_create, overhead_po_detail,
     overhead_po_update, overhead_po_delete,
@@ -133,6 +134,7 @@ urlpatterns = [
     path('purchase-invoices/<int:invoice_id>/push-to-xero/', push_purchase_invoice_to_xero, name='push_purchase_invoice_to_xero'),
     path('purchase-invoices/<int:invoice_id>/sync-xero-reference/', sync_xero_purchase_invoice_reference, name='sync_xero_purchase_invoice_reference'),
     path('purchase-invoices/<int:invoice_id>/flatten-vat/', flatten_vat_to_line_item, name='flatten_vat_to_line_item'),
+    path('purchase-invoices/<int:invoice_id>/flatten-discount/', flatten_discount_to_line_item, name='flatten_discount_to_line_item'),
     path('purchase-invoices/<int:invoice_id>/void-xero/', void_xero_purchase_invoice, name='void_xero_purchase_invoice'),
     path('purchase-invoices/<int:invoice_id>/search-in-xero/', search_purchase_invoice_in_xero, name='search_purchase_invoice_in_xero'),
     path('purchase-invoices/sync-xero-payments/', sync_xero_payment_statuses, name='sync_xero_payment_statuses'),
@@ -150,6 +152,9 @@ urlpatterns = [
     path('api/next-invoice-number/', next_invoice_number, name='next_invoice_number'),
     path('api/supplier-search/', supplier_search, name='supplier_search'),
     path('api/xero-gl-codes/', xero_gl_codes, name='xero_gl_codes'),
+
+    # Payments
+    path('payments/', payments_list, name='payments_list'),
 
     # Accounts Payable
     path('accounts-payable/', accounts_payable_inbox, name='accounts_payable_inbox'),
@@ -490,6 +495,8 @@ urlpatterns = [
     path('calendar/', views.calendar_view, name='calendar_weekly'),
     path('calendar/pdf/', views.calendar_pdf_view, name='calendar_pdf'),
     path('calendar/monthly/', views.calendar_view, name='calendar_view'),
+    path('calendar/check-payments/', views.calendar_check_payments, name='calendar_check_payments'),
+    path('calendar/check-payments/progress/', views.calendar_check_payments_progress, name='calendar_check_payments_progress'),
     path('calendar/gantt/', views.gantt_chart, name='gantt_chart'),
     path('calendar/gantt/sync-anthill/<int:order_id>/', views.sync_anthill_workflow, name='sync_anthill_workflow'),
     path('fit-board/', views.calendar_view, name='fit_board'),  # backwards compat

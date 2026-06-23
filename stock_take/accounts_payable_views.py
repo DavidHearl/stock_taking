@@ -677,6 +677,10 @@ def create_invoice_from_email(request, email_id):
     # Create the invoice with all form fields
     total_val = _parse_decimal(data.get('total', '0'))
     vat_rate  = _parse_decimal(data.get('vat_rate', '0'))
+    discount_val = _parse_decimal(data.get('discount', '0'))
+    if discount_val < 0:
+        discount_val = Decimal('0')
+    discount_pre_vat = str(data.get('discount_pre_vat', 'true')).strip().lower() in ('true', '1', 'yes', 'on')
     invoice = PurchaseInvoice.objects.create(
         invoice_number=invoice_number,
         reference=(data.get('reference') or '').strip(),
@@ -687,6 +691,8 @@ def create_invoice_from_email(request, email_id):
         status=data.get('status', 'Draft'),
         total=total_val,
         vat_rate=vat_rate if vat_rate > 0 else None,
+        discount=discount_val,
+        discount_pre_vat=discount_pre_vat,
         notes=(data.get('notes') or '').strip(),
         currency=(data.get('currency') or 'GBP').strip().upper() or 'GBP',
         created_by=request.user.get_full_name() or request.user.username,
@@ -732,7 +738,15 @@ def create_invoice_from_email(request, email_id):
     if total_val == 0:
         line_total = invoice.line_items.aggregate(t=db_models.Sum('line_total'))['t'] or 0
         if line_total:
-            gross = line_total * (1 + vat_rate / 100) if vat_rate and vat_rate > 0 else line_total
+            line_total = Decimal(str(line_total))
+            if discount_pre_vat:
+                taxable = line_total - discount_val
+                gross = taxable * (1 + vat_rate / 100) if vat_rate and vat_rate > 0 else taxable
+            else:
+                gross = line_total * (1 + vat_rate / 100) if vat_rate and vat_rate > 0 else line_total
+                gross = gross - discount_val
+            if gross < 0:
+                gross = Decimal('0')
             invoice.total = gross
             invoice.save(update_fields=['total'])
 

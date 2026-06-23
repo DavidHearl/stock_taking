@@ -1197,6 +1197,39 @@
     opacity: 0.6;
 }
 
+/* Unlinked Xero invoices show as "draft" rows until they are linked. */
+.xero-row-draft td {
+    background-image: repeating-linear-gradient(
+        45deg,
+        transparent,
+        transparent 9px,
+        rgba(125, 125, 125, 0.06) 9px,
+        rgba(125, 125, 125, 0.06) 10px
+    );
+}
+
+.xero-row-draft td:first-child {
+    box-shadow: inset 3px 0 0 var(--warning-color, #e8a317);
+}
+
+.xero-draft-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--warning-color, #e8a317);
+    border: 1px dashed var(--warning-color, #e8a317);
+    border-radius: 4px;
+    padding: 1px 6px;
+    margin-right: 4px;
+    white-space: nowrap;
+}
+
+.xero-draft-badge i {
+    margin-right: 2px;
+}
+
 .xero-other-badge {
     font-size: 0.78rem;
     color: var(--text-secondary);
@@ -1236,7 +1269,23 @@
 }
 
 #searchPaymentsModal {
-    max-width: 900px;
+    width: min(1320px, 98vw);
+    max-width: 98vw;
+    position: fixed;
+    inset: auto;
+    top: calc(var(--topbar-height, 52px) + 12px);
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    transform: translateX(-50%);
+    margin: 0;
+    max-height: calc(100vh - var(--topbar-height, 52px) - 24px);
+}
+
+#searchPaymentsModal::backdrop {
+    background: rgba(0, 0, 0, 0.40);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
 }
 
 .search-payments-section {
@@ -1251,8 +1300,6 @@
     font-size: 0.85rem;
     font-weight: 600;
     color: var(--text-primary);
-    padding: 8px 0 6px;
-    border-bottom: 1px solid var(--border-color);
     margin-bottom: 8px;
     display: flex;
     align-items: center;
@@ -1261,6 +1308,182 @@
 
 .search-payments-section-body {
     min-height: 24px;
+}
+
+/* ── Xero search toolbar (controlled filtering UI) ───────────────────────── */
+.xero-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 8px 0 10px;
+}
+
+.xero-search-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 220px;
+    min-width: 180px;
+    padding: 5px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+}
+
+.xero-search-box .bi {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.xero-search-box input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    outline: none;
+}
+
+.xero-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.xero-chip {
+    padding: 3px 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.xero-chip:hover {
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+}
+
+.xero-chip.active {
+    color: var(--text-on-color);
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.xero-date-range {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.xero-date-range label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+}
+
+.xero-date-range input[type="date"] {
+    padding: 3px 6px;
+    font-size: 0.75rem;
+    color: var(--text-primary);
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color-scheme: dark;
+}
+
+.xero-clear-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+}
+
+.xero-clear-btn:hover {
+    color: var(--danger-color);
+    border-color: var(--danger-color);
+}
+
+.xero-result-count {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    padding: 0 2px 8px;
+}
+
+.xero-results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.xero-results-header .xero-result-count {
+    padding: 0;
+}
+
+/* Sortable headers + numeric alignment for the Xero results table */
+.xero-search-table th.xero-th {
+    cursor: pointer;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.xero-search-table th.xero-th:hover {
+    color: var(--primary-color);
+}
+
+.xero-search-table .xero-num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.xero-actions-cell {
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.xero-open-btn {
+    padding: 2px 7px;
+}
+
+/* ── Invoices card inline filter ─────────────────────────────────────────── */
+.inv-filter-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+}
+
+.inv-filter-box .bi {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+}
+
+.inv-filter-box input {
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    outline: none;
+    width: 150px;
 }
 
 .search-section-status {
@@ -2449,8 +2672,9 @@
 }
 
 .fin-waffle-cell {
-    border-radius: 2px;
-    opacity: 0.9;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--cell-color, #3b82f6) 18%, transparent);
+    border: 1px solid var(--cell-color, #3b82f6);
 }
 
 .fin-waffle-legend {
@@ -2533,14 +2757,37 @@
 
 /* Softer cells so the diagram doesn't overpower the card */
 .fin-waffle-inline .fin-waffle-cell {
-    opacity: 0.55;
+    opacity: 0.85;
 }
 
-/* Provisional (estimated) cells get a dashed outline */
+/* Provisional (estimated) cells keep the same weak fill but a dashed border */
 .fin-waffle-cell-est {
-    outline: 1px dashed rgba(255, 255, 255, 0.55);
-    outline-offset: -2px;
+    border-style: dashed;
+}
+
+/* ── Hover highlight: light up the hovered category, dim the rest ── */
+.fin-waffle-section.fin-waffle-hovering .fin-waffle-cell {
+    opacity: 0.25;
+}
+
+.fin-waffle-section.fin-waffle-hovering .fin-waffle-cell.is-active {
+    opacity: 1;
+    background: var(--cell-color);
+}
+
+.fin-waffle-section.fin-waffle-hovering .fin-waffle-legend-item {
     opacity: 0.4;
+}
+
+.fin-waffle-section.fin-waffle-hovering .fin-waffle-legend-item.is-active {
+    opacity: 1;
+}
+
+.fin-waffle-legend-item {
+    cursor: default;
+    border-radius: 4px;
+    padding: 1px 3px;
+    transition: opacity .15s ease;
 }
 
 .fin-waffle-swatch-est {
@@ -2576,4 +2823,271 @@
 
 .fin-value.fin-provisional .fin-amount {
     flex: 0 0 auto;
+}
+
+/* ── Customer Payment Pool card ───────────────────────────────────────────── */
+.pool-intro {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 0 0 16px;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+
+.pool-intro .bi {
+    color: var(--info-color);
+    margin-top: 1px;
+}
+
+.pool-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-bottom: 18px;
+}
+
+.pool-stat {
+    --stat-accent: var(--text-secondary);
+    --stat-tint: var(--bg-tertiary);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 14px;
+    background: var(--stat-tint);
+    border: 1px solid var(--border-color);
+    border-left: 3px solid var(--stat-accent);
+    border-radius: var(--radius-sm);
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pool-stat--total  { --stat-accent: var(--primary-color); --stat-tint: var(--primary-subtle); }
+.pool-stat--paid   { --stat-accent: var(--success-color); --stat-tint: var(--success-subtle); }
+.pool-stat--out    { --stat-accent: var(--danger-color);  --stat-tint: var(--danger-subtle); }
+.pool-stat--credit { --stat-accent: var(--warning-color); --stat-tint: var(--warning-subtle); }
+
+.pool-stat:hover {
+    border-color: var(--stat-accent);
+    border-left-color: var(--stat-accent);
+    box-shadow: 0 0 0 1px var(--stat-accent);
+}
+
+.pool-stat-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    transition: color 0.15s ease;
+}
+
+.pool-stat:hover .pool-stat-label {
+    color: var(--stat-accent);
+}
+
+.pool-stat-value {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.pool-stat-value.pool-paid { color: var(--success-color); }
+.pool-stat-value.pool-outstanding { color: var(--danger-color); }
+.pool-stat-value.pool-credit { color: var(--warning-color); }
+
+/* Overall pool progress */
+.pool-progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.pool-progress-track {
+    flex: 1;
+    height: 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+}
+
+.pool-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--success-color), var(--success-hover));
+    border-radius: var(--radius-pill);
+    transition: width 0.4s ease;
+}
+
+.pool-progress-fill.pool-progress-credit {
+    background: linear-gradient(90deg, var(--warning-color), #e67e22);
+}
+
+.pool-progress-pct {
+    min-width: 40px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    text-align: right;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Per-sale allocation list */
+.pool-alloc-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.pool-alloc-row {
+    display: grid;
+    grid-template-columns: 210px 1fr 110px 110px;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.pool-alloc-current {
+    border-color: rgb(from var(--primary-color) r g b / 25%);
+    background: rgb(from var(--primary-subtle) r g b / 15%);
+}
+
+.pool-alloc-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    white-space: nowrap;
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--text-primary);
+    text-decoration: none;
+    font-variant-numeric: tabular-nums;
+}
+
+.pool-alloc-name:hover { color: var(--primary-color); }
+
+.pool-this-tag {
+    padding: 2px 7px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    line-height: 1;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--primary-color);
+    background: var(--primary-subtle);
+    border-radius: var(--radius-pill);
+}
+
+.pool-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1;
+    background: none;
+    white-space: nowrap;
+}
+
+.pool-tag-paid { color: var(--success-color); }
+.pool-tag-out { color: var(--danger-color); }
+.pool-tag-credit { color: var(--warning-color); }
+
+.pool-alloc-track {
+    width: 100%;
+    height: 8px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+    border: 1px solid gray;
+    position: relative;
+}
+
+.pool-alloc-fill {
+    height: 100%;
+    background: var(--success-color);
+    border-radius: var(--radius-pill);
+    transition: width 0.4s ease;
+}
+
+.pool-alloc-fill-partial { background: var(--info-color); }
+.pool-alloc-fill-credit { background: var(--warning-color); }
+
+/* Payment milestone breakpoints marked on each sale's progress bar.
+   mix-blend-mode keeps the line visible over both the filled and empty track. */
+.pay-bp {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    margin-left: -1px;
+    background: rgba(255, 255, 255, 0.85);
+    mix-blend-mode: difference;
+    z-index: 2;
+    pointer-events: none;
+}
+
+.pool-bp-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 16px;
+    margin: -8px 0 18px;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+}
+
+.pool-bp-legend-title {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.pool-bp-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.pool-bp-dot {
+    width: 2px;
+    height: 12px;
+    background: var(--text-secondary);
+    border-radius: 1px;
+}
+
+.pool-alloc-figs {
+    font-size: 0.75rem;
+    line-height: 1;
+    text-align: right;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.pool-alloc-status {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    line-height: 1;
+    text-align: right;
+}
+
+@media (max-width: 640px) {
+    .pool-stats { grid-template-columns: 1fr; }
+
+    .pool-alloc-row {
+        grid-template-columns: 1fr auto;
+        gap: 6px 10px;
+    }
+
+    .pool-alloc-track {
+        grid-column: 1 / -1;
+        order: 3;
+    }
 }

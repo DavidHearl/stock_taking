@@ -382,7 +382,13 @@ class AnthillPayment(models.Model):
     user_name = models.CharField(max_length=150, blank=True, help_text='User who recorded the payment (not available from Xero)')
     amount = models.DecimalField(
         max_digits=12, decimal_places=2, null=True, blank=True,
-        help_text='Payment amount (GBP)',
+        help_text='Payment amount (GBP). When an invoice is linked to several '
+                  'sales this holds the per-sale split share, not the full value.',
+    )
+    full_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text='Original (un-split) payment amount from the source. When the '
+                  'parent invoice is linked to N sales, amount = full_amount / N.',
     )
     status = models.CharField(
         max_length=50, blank=True,
@@ -2244,6 +2250,8 @@ class PurchaseInvoice(models.Model):
     xero_id          = models.CharField(max_length=100, blank=True, help_text='Xero InvoiceID once pushed to Xero')
     currency         = models.CharField(max_length=3, default='GBP', help_text='ISO currency code')
     vat_rate         = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, help_text='VAT rate applied to this invoice (e.g. 20.00 for 20%)')
+    discount         = models.DecimalField(max_digits=12, decimal_places=2, default=0, help_text='Discount applied to this invoice')
+    discount_pre_vat = models.BooleanField(default=True, help_text='If True, the discount is deducted from the net before VAT is calculated; if False, it is deducted from the gross total')
     created_at       = models.DateTimeField(auto_now_add=True)
     updated_at       = models.DateTimeField(auto_now=True)
     created_by       = models.CharField(max_length=200, blank=True)
@@ -2523,7 +2531,7 @@ class PurchaseInvoiceLineItem(models.Model):
     line_date    = models.DateField(null=True, blank=True, help_text='Date of work or service')
     is_fit_day   = models.BooleanField(default=False, help_text='Mark this line as a fit/installation day so it generates a timesheet entry')
     quantity     = models.DecimalField(max_digits=12, decimal_places=4, default=1)
-    rate         = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    rate         = models.DecimalField(max_digits=12, decimal_places=4, default=0)
     line_total   = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     order        = models.ForeignKey(
         'Order', on_delete=models.SET_NULL, null=True, blank=True,
@@ -2614,6 +2622,7 @@ PAGE_SECTIONS = [
         ('invoices', 'Invoices'),
         ('purchase_invoices', 'Purchase Invoices'),
         ('accounts_payable', 'Accounts Payable'),
+        ('payments', 'Payments'),
     ]),
     ('Purchase', [
         ('purchase_orders', 'Purchase Orders'),

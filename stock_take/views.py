@@ -11757,38 +11757,24 @@ def calendar_view(request):
         fit_date__month=current_month
     ).select_related('order', 'remedial').prefetch_related('order__po_projects__purchase_order'))
 
-    # Attach payment info (sale value / paid / outstanding) from linked AnthillSale
+    # Attach payment info (sale value / paid / outstanding) from linked AnthillSale.
+    # The sale-detail page is the single source of truth: it allocates the
+    # customer's whole payment pool across their sales and persists each sale's
+    # outstanding balance to AnthillSale.balance_payable (with paid_in_full).
+    # Here we simply read those stored values rather than re-deriving them, so a
+    # customer who is in credit on one sale isn't shown as owing on another.
     sale_numbers = [a.order.sale_number for a in appointments if a.order]
     if sale_numbers:
         _sale_rows = (
             AnthillSale.objects
             .filter(anthill_activity_id__in=sale_numbers)
-            .annotate(payments_sum=Sum('payments__amount'))
-            .values('anthill_activity_id', 'sale_value', 'payments_sum')
+            .values('anthill_activity_id', 'sale_value', 'discount',
+                    'balance_payable', 'paid_in_full')
         )
-        # Fallback sale value (invoiced total, then amount paid) when no
-        # sale value has been synced for the record.
-        from .models import AnthillPayment
-        _invoiced = {}
-        for pr in (
-            AnthillPayment.objects
-            .filter(sale__anthill_activity_id__in=sale_numbers, ignored=False)
-            .values('sale__anthill_activity_id', 'xero_invoice_id', 'invoice_total', 'id')
-        ):
-            k = pr['sale__anthill_activity_id']
-            _invoiced.setdefault(k, {})[pr['xero_invoice_id'] or f"_p{pr['id']}"] = pr['invoice_total'] or Decimal('0')
-        _invoiced_total = {k: sum(v.values()) for k, v in _invoiced.items()}
         _fin_map = {}
         for row in _sale_rows:
-            sv = row['sale_value'] or Decimal('0')
-            pt = row['payments_sum'] or Decimal('0')
             key = row['anthill_activity_id']
-            estimated = False
-            if sv <= 0:
-                fallback = _invoiced_total.get(key, Decimal('0')) or pt
-                if fallback > 0:
-                    sv = fallback
-                    estimated = True
+            sv = row['sale_value'] or Decimal('0')
             # Keep the highest-value record when an Anthill order id matches
             # several sale rows, so a populated value isn't clobbered by a zero.
             existing = _fin_map.get(key)
@@ -11796,30 +11782,42 @@ def calendar_view(request):
                 continue
             _fin_map[key] = {
                 'sale_value': sv,
-                'payments_total': pt,
-                'outstanding': sv - pt,
-                'value_estimated': estimated,
+                'discount': row['discount'] or Decimal('0'),
+                'balance_payable': row['balance_payable'],
+                'paid_in_full': row['paid_in_full'],
             }
         for appt in appointments:
-            if appt.order:
-                fin = _fin_map.get(appt.order.sale_number)
-                # Prefer the order's own Total (Inc VAT) — the authoritative
-                # value shown on the sale page — over the Anthill/invoice value.
-                order_total = appt.order.total_value_inc_vat or Decimal('0')
-                if order_total > 0:
-                    if fin is None:
-                        fin = {
-                            'sale_value': order_total,
-                            'payments_total': Decimal('0'),
-                            'outstanding': order_total,
-                            'value_estimated': False,
-                        }
-                    else:
-                        fin = dict(fin)
-                        fin['sale_value'] = order_total
-                        fin['outstanding'] = order_total - fin['payments_total']
-                        fin['value_estimated'] = False
-                appt.fin = fin
+            if not appt.order:
+                continue
+            row = _fin_map.get(appt.order.sale_number)
+            order_total = appt.order.total_value_inc_vat or Decimal('0')
+            if row is None:
+                # No synced Anthill sale — fall back to the order's own total.
+                appt.fin = {
+                    'sale_value': order_total,
+                    'payments_total': Decimal('0'),
+                    'outstanding': order_total,
+                    'value_estimated': False,
+                } if order_total > 0 else None
+                continue
+            # Effective (post-discount) value — mirror the sale page, preferring
+            # the synced sale value and falling back to the order's inc-VAT total.
+            base_value = row['sale_value'] or order_total
+            effective_value = base_value - row['discount']
+            balance = row['balance_payable']
+            if balance is None:
+                # Balance not yet recalculated for this sale — treat as fully
+                # outstanding rather than re-deriving the pool logic here.
+                outstanding = effective_value
+            else:
+                outstanding = balance
+            paid = effective_value - outstanding
+            appt.fin = {
+                'sale_value': effective_value,
+                'payments_total': paid,
+                'outstanding': outstanding,
+                'value_estimated': base_value <= 0,
+            }
     
     # Linked purchase orders per appointment (for the appointment detail modal)
     import json as _json
@@ -11974,18 +11972,10 @@ def calendar_view(request):
                 fits_with_balance += 1
 
     # ── Build 6-week swim-lane structure (a fitter row per week) ─────────
-    FITTER_PALETTE = [
-        ('#5a9fd4', '90, 159, 212'),
-        ('#9c74c8', '156, 116, 200'),
-        ('#e0a23a', '224, 162, 58'),
-        ('#4cc080', '76, 192, 128'),
-        ('#e05260', '224, 82, 96'),
-        ('#26c6da', '38, 198, 218'),
-        ('#ec407a', '236, 64, 122'),
-        ('#8bc34a', '139, 195, 74'),
-        ('#ff7043', '255, 112, 67'),
-        ('#ab47bc', '171, 71, 188'),
-    ]
+    # All fitters share one neutral colour (theme --info-color). Colour is now
+    # used to convey payment status on the job cards (green = paid, amber =
+    # outstanding) rather than to identify individual fitters.
+    NEUTRAL_FITTER_COLOR = ('#56c4e0', '86, 196, 224')
     # Lane order: active fitters first, then any extra codes seen on appointments
     _choice_names = {c: n for c, n in FitAppointment.FITTER_CHOICES}
     lane_codes = []
@@ -12000,9 +11990,7 @@ def calendar_view(request):
         if c not in lane_name_map:
             lane_codes.append(c)
             lane_name_map[c] = _choice_names.get(c, c)
-    fitter_color_map = {
-        c: FITTER_PALETTE[i % len(FITTER_PALETTE)] for i, c in enumerate(lane_codes)
-    }
+    fitter_color_map = {c: NEUTRAL_FITTER_COLOR for c in lane_codes}
 
     grid_start = first_day - timedelta(days=first_day.weekday())  # Monday on/before 1st
     last_day = next_month - timedelta(days=1)
@@ -12055,9 +12043,11 @@ def calendar_view(request):
             })
         month_weeks.append({'widx': _w + 1, 'days': days, 'fitter_lanes': lanes})
 
+    # Legend now reflects payment status (the card colour) rather than listing
+    # every fitter, since all fitters share one neutral colour.
     fitter_legend = [
-        {'name': lane_name_map.get(c, c), 'color': fitter_color_map[c][0]}
-        for c in lane_codes
+        {'name': 'Paid', 'color': '#4cc080'},
+        {'name': 'Outstanding', 'color': '#efb040'},
     ]
 
     # ── Side-panel data ────────────────────────────────────────────────────
@@ -12137,6 +12127,118 @@ def calendar_view(request):
     }
     
     return render(request, 'stock_take/fit_board.html', context)
+
+
+@login_required
+def calendar_check_payments(request):
+    """Sync Xero payments for every sale with a fit appointment in the given
+    month. Runs the sync in a background thread and reports progress to the
+    cache under a job id so the UI can render a live progress bar. The request
+    returns straight away with the job id; the browser then polls
+    ``calendar_check_payments_progress``."""
+    import threading
+    import uuid
+    from django.core.cache import cache
+
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    today = timezone.now().date()
+    try:
+        year = int(request.POST.get('year', today.year))
+        month = int(request.POST.get('month', today.month))
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid month/year'}, status=400)
+
+    # Sale numbers for every order fitting in this month
+    sale_numbers = [
+        s for s in (
+            FitAppointment.objects
+            .filter(fit_date__year=year, fit_date__month=month, order__isnull=False)
+            .values_list('order__sale_number', flat=True)
+        )
+        if s
+    ]
+    sales = list(
+        AnthillSale.objects
+        .filter(anthill_activity_id__in=sale_numbers)
+        .exclude(contract_number__isnull=True)
+        .exclude(contract_number='')
+    )
+
+    if not sales:
+        return JsonResponse({'success': True, 'started': False, 'count': 0})
+
+    job_id = uuid.uuid4().hex
+    cache_key = f'cal_check_payments:{job_id}'
+    total = len(sales)
+    cache.set(cache_key, {
+        'status': 'running',
+        'total': total,
+        'done': 0,
+        'created': 0,
+    }, timeout=600)
+
+    def _run(sale_list, key):
+        from django.db import connection
+        from django.core.cache import cache as _cache
+
+        def _progress(done, tot, created):
+            _cache.set(key, {
+                'status': 'running',
+                'total': tot,
+                'done': done,
+                'created': created,
+            }, timeout=600)
+
+        created_total = 0
+        try:
+            from .dashboard_view import _sync_xero_payments_for_sales
+            created_total = _sync_xero_payments_for_sales(
+                sale_list, progress_callback=_progress)
+        except Exception:
+            logger.exception('calendar_check_payments background sync failed')
+            _cache.set(key, {
+                'status': 'error',
+                'total': len(sale_list),
+                'done': len(sale_list),
+                'created': created_total,
+            }, timeout=600)
+        else:
+            _cache.set(key, {
+                'status': 'done',
+                'total': len(sale_list),
+                'done': len(sale_list),
+                'created': created_total,
+            }, timeout=600)
+        finally:
+            connection.close()
+
+    threading.Thread(target=_run, args=(sales, cache_key), daemon=True).start()
+
+    return JsonResponse({
+        'success': True,
+        'started': True,
+        'count': total,
+        'job_id': job_id,
+    })
+
+
+@login_required
+def calendar_check_payments_progress(request):
+    """Return the progress of a running calendar payment check by job id."""
+    from django.core.cache import cache
+
+    job_id = request.GET.get('job_id', '')
+    if not job_id:
+        return JsonResponse({'success': False, 'error': 'job_id required'}, status=400)
+
+    data = cache.get(f'cal_check_payments:{job_id}')
+    if data is None:
+        # Job unknown or expired — treat as finished so the UI stops polling.
+        return JsonResponse({'success': True, 'status': 'unknown'})
+
+    return JsonResponse({'success': True, **data})
 
 
 @login_required

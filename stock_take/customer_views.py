@@ -1681,10 +1681,54 @@ def _build_sale_context(sale, request_user):
         )
 
     all_payments = list(sale.payments.all().order_by('date'))
-    xero_payments = [p for p in all_payments if p.source != 'manual']
-    manual_payments = [p for p in all_payments if p.source == 'manual']
-    xero_payments_total = sum(p.amount for p in xero_payments if p.amount) or None
+
+    # Both Xero and manual payments are shown customer-wide: every payment across
+    # all of the customer's sales appears here. Xero rows are deduplicated so an
+    # invoice linked to several sales is only listed once (with its full,
+    # un-split value).
+    if sale.customer:
+        customer_payment_qs = (
+            AnthillPayment.objects
+            .filter(sale__customer=sale.customer)
+            .select_related('sale')
+            .order_by('date', 'id')
+        )
+    else:
+        customer_payment_qs = (
+            AnthillPayment.objects.filter(sale=sale).order_by('date', 'id')
+        )
+    customer_payments = list(customer_payment_qs)
+
+    manual_payments = []
+    for p in customer_payments:
+        if p.source != 'manual':
+            continue
+        p.belongs_to_current = (p.sale_id == sale.pk)
+        manual_payments.append(p)
     manual_payments_total = sum(p.amount for p in manual_payments if p.amount) or None
+
+    xero_payments = []
+    _seen_xero = set()
+    for p in customer_payments:
+        if p.source == 'manual':
+            continue
+        # Deduplicate only TRUE duplicates — the same invoice linked to several
+        # sales (via the invoice split) produces one row per sale sharing the
+        # same (invoice, payment id). A single batch Xero payment can apply to
+        # several *different* invoices with the same PaymentID, so the invoice id
+        # must be part of the key to keep those distinct.
+        if p.anthill_payment_id:
+            key = (p.xero_invoice_id, p.anthill_payment_id)
+        else:
+            key = (p.xero_invoice_id, p.date, p.full_amount if p.full_amount is not None else p.amount)
+        if key in _seen_xero:
+            continue
+        _seen_xero.add(key)
+        # Display the real (un-split) amount on the customer-wide list.
+        p.display_amount = p.full_amount if p.full_amount is not None else p.amount
+        p.belongs_to_current = (p.sale_id == sale.pk)
+        xero_payments.append(p)
+    xero_payments_total = sum(p.display_amount for p in xero_payments if p.display_amount) or None
 
     active_payments = [p for p in all_payments if not p.ignored]
     total_paid, discount = _match_credits_to_payments(active_payments)
@@ -1703,6 +1747,24 @@ def _build_sale_context(sale, request_user):
         payment_pct = int(min(total_paid / effective_value * 100, 100)) if effective_value > 0 else 0
     overpayment_pct = int(overpayment / effective_value * 100) if effective_value > 0 and overpayment > 0 else 0
     adjusted_profit = (sale.profit or Decimal('0')) - discount if sale.profit else None
+
+    # ── Customer payment pool ───────────────────────────────────────────────
+    # Treat every eligible sale + payment for this customer as a single pool and
+    # allocate it oldest-sale-first, so a customer is never shown overpaid on one
+    # sale while outstanding on another. When the current sale participates, its
+    # pooled allocation replaces the in-isolation outstanding/overpayment figures.
+    payment_pool = _build_customer_payment_pool(sale)
+    if payment_pool and payment_pool['current'] and not is_cancelled:
+        cur = payment_pool['current']
+        outstanding = cur['outstanding']
+        overpayment = cur['credit']
+        payment_pct = cur['pct']
+        overpayment_pct = int(overpayment / effective_value * 100) if effective_value > 0 and overpayment > 0 else 0
+        hero_value_paid = cur['allocated']
+        hero_value_total = cur['effective_value']
+    else:
+        hero_value_paid = total_paid
+        hero_value_total = effective_value
 
     return {
         'sale': sale,
@@ -1725,6 +1787,9 @@ def _build_sale_context(sale, request_user):
         'overpayment': overpayment,
         'payment_pct': payment_pct,
         'overpayment_pct': overpayment_pct,
+        'payment_pool': payment_pool,
+        'hero_value_paid': hero_value_paid,
+        'hero_value_total': hero_value_total,
         'adjusted_profit': adjusted_profit,
         'gallery_images': gallery_images,
         'remedials': remedials,
@@ -1732,6 +1797,213 @@ def _build_sale_context(sale, request_user):
         'is_completed': is_completed,
         'sale_invoices': sale_invoices,
     }
+
+
+def _sale_alloc_date(sale):
+    """Return the date used to order a sale for payment allocation.
+
+    Prefers the sale's own fit date, then the linked order's fit date. Returns
+    ``None`` when no fit date is known — such sales are treated as the newest
+    (allocated last).
+    """
+    import datetime as _dt
+    d = getattr(sale, 'fit_date', None)
+    if not d and getattr(sale, 'order', None) is not None:
+        d = getattr(sale.order, 'fit_date', None)
+    if isinstance(d, _dt.datetime):
+        return d.date()
+    return d
+
+
+def _within_six_months(d1, d2):
+    """True when ``d2`` (assumed >= ``d1``) falls within six calendar months of
+    ``d1``. Returns ``False`` if either date is missing."""
+    import datetime as _dt
+    if d1 is None or d2 is None:
+        return False
+    month_index = d1.month - 1 + 6
+    year = d1.year + month_index // 12
+    month = month_index % 12 + 1
+    if month == 12:
+        next_month_first = _dt.date(year + 1, 1, 1)
+    else:
+        next_month_first = _dt.date(year, month + 1, 1)
+    last_day = (next_month_first - _dt.timedelta(days=1)).day
+    limit = _dt.date(year, month, min(d1.day, last_day))
+    return d2 <= limit
+
+
+def _fit_date_groups(entries):
+    """Chain ``entries`` (already sorted oldest -> newest by alloc date) into
+    groups where each sale joins the current group only if its fit date is
+    within six months of the previous sale in that group. Sales without a fit
+    date never chain, so each starts (and ends) its own group at the tail."""
+    groups = []
+    current = []
+    prev = None
+    for e in entries:
+        d = e['alloc_date']
+        if not current:
+            current = [e]
+        elif _within_six_months(prev, d):
+            current.append(e)
+        else:
+            groups.append(current)
+            current = [e]
+        prev = d
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _split_proportional(caps, avail):
+    """Distribute ``avail`` across slots proportional to each slot's value, so
+    every slot reaches the same percentage of its value (a percentage-based, not
+    equal-nominal, split).
+
+    Any amount beyond the total of all caps is left undistributed so it can
+    cascade to the next group. Returns a list of per-slot allocations, each
+    <= its cap.
+    """
+    from decimal import Decimal, ROUND_HALF_UP
+    n = len(caps)
+    total = sum(caps, Decimal('0'))
+    if total <= 0:
+        return [Decimal('0')] * n
+    target = avail if avail < total else total
+    result = []
+    allocated = Decimal('0')
+    cent = Decimal('0.01')
+    for i, c in enumerate(caps):
+        if i == n - 1:
+            # Last slot soaks up the rounding remainder so the shares always sum
+            # exactly to ``target``.
+            share = target - allocated
+        else:
+            share = (c / total * target).quantize(cent, rounding=ROUND_HALF_UP)
+        if share < 0:
+            share = Decimal('0')
+        if share > c:
+            share = c
+        result.append(share)
+        allocated += share
+    return result
+
+
+def _allocate_fit_date(entries, pool_paid):
+    """Allocate ``pool_paid`` across ``entries`` (sorted oldest -> newest) using
+    the fit-date grouping rule: fill the oldest group first, splitting each group
+    percentage-wise (pro-rata to value) and cascading any overflow. Mutates each
+    entry's ``allocated`` and returns the leftover credit after every sale is
+    filled.
+    """
+    from decimal import Decimal
+    for e in entries:
+        e['allocated'] = Decimal('0')
+    remaining = pool_paid
+    for group in _fit_date_groups(entries):
+        caps = [e['effective_value'] for e in group]
+        allocated = _split_proportional(caps, remaining)
+        for e, a in zip(group, allocated):
+            e['allocated'] = a
+            remaining -= a
+    return max(remaining, Decimal('0'))
+
+
+def _build_customer_payment_pool(current_sale):
+    """Pool a customer's eligible sales + payments into one balance.
+
+    Real-world payments rarely map 1:1 to a single sale — a customer with
+    several contracts often pays a lump sum that should fill the whole account.
+    Calculating each sale in isolation produces nonsense like one sale being
+    "overpaid" while another is "outstanding". Instead we sum every payment into
+    a pool and allocate it by fit date: sales are grouped so that any two within
+    six months share proportionally (by value), and groups more than six months
+    apart are filled oldest-first.
+
+    Excludes cancelled/dead sales, leads and enquiries. Returns ``None`` when
+    there's no customer; otherwise a dict with pool totals, per-sale allocation
+    entries and the entry for ``current_sale`` (``None`` when the current sale
+    isn't eligible, e.g. it's cancelled).
+    """
+    import datetime as _dt
+    from decimal import Decimal
+
+    customer = current_sale.customer
+    if not customer:
+        return None
+
+    eligible = list(
+        customer.anthill_sales
+        .select_related('order')
+        .prefetch_related('payments')
+        .exclude(activity_type__icontains='lead')
+        .exclude(activity_type__icontains='enquir')
+        .exclude(status__in=['dead', 'cancelled'])
+        .order_by('activity_date', 'id')
+    )
+
+    entries = []
+    pool_value = Decimal('0')
+    pool_paid = Decimal('0')
+    for s in eligible:
+        active = [p for p in s.payments.all() if not p.ignored]
+        paid, discount = _match_credits_to_payments(active)
+        # The sale value isn't always populated on the AnthillSale; fall back to
+        # the linked order's inc-VAT total (the figure shown in the Financial
+        # Summary) so the pool still reflects the real contract value.
+        base_value = s.sale_value or (s.order.total_value_inc_vat if s.order else None) or Decimal('0')
+        eff = base_value - discount
+        if eff < 0:
+            eff = Decimal('0')
+        entries.append({
+            'sale': s,
+            'alloc_date': _sale_alloc_date(s),
+            'effective_value': eff,
+            'received': paid,
+            'discount': discount,
+        })
+        pool_value += eff
+        pool_paid += paid
+
+    # Order by fit date (oldest first); sales without a fit date are treated as
+    # the newest and allocated last.
+    entries.sort(key=lambda e: (e['alloc_date'] is None, e['alloc_date'] or _dt.date.min))
+
+    # Fit-date allocation: sales within six months of each other share
+    # proportionally (percentage-based); groups more than six months apart are
+    # filled oldest-group-first.
+    leftover = _allocate_fit_date(entries, pool_paid)
+    for e in entries:
+        eff = e['effective_value']
+        alloc = e.get('allocated', Decimal('0'))
+        e['outstanding'] = max(eff - alloc, Decimal('0'))
+        e['credit'] = Decimal('0')
+        e['pct'] = int(min(alloc / eff * 100, 100)) if eff > 0 else (100 if alloc > 0 else 0)
+        e['is_current'] = (e['sale'].pk == current_sale.pk)
+    # Money left after filling every sale is the customer's credit — attribute it
+    # to the newest sale (the last entry after fit-date ordering).
+    if entries and leftover > 0:
+        entries[-1]['credit'] = leftover
+
+    net_outstanding = max(pool_value - pool_paid, Decimal('0'))
+    net_credit = max(pool_paid - pool_value, Decimal('0'))
+    pool_pct = int(min(pool_paid / pool_value * 100, 100)) if pool_value > 0 else (100 if pool_paid > 0 else 0)
+
+    current = next((e for e in entries if e['is_current']), None)
+
+    return {
+        'entries': entries,
+        'pool_value': pool_value,
+        'pool_paid': pool_paid,
+        'net_outstanding': net_outstanding,
+        'net_credit': net_credit,
+        'pool_pct': pool_pct,
+        'sale_count': len(entries),
+        'current': current,
+        'multi': len(entries) > 1,
+    }
+
 
 @login_required
 def sale_create_order(request, pk):
@@ -2105,6 +2377,77 @@ def _recalculate_sale_financials(sale):
     sale.paid_in_full = new_balance <= Decimal('0')
     sale.save(update_fields=['discount', 'balance_payable', 'paid_in_full'])
 
+    # When the customer has more than one eligible sale, the in-isolation balance
+    # above is only provisional — re-allocate the whole customer pool by fit date
+    # and persist each sale's pooled balance so the figures stay consistent.
+    if sale.customer_id:
+        _recalculate_customer_financials(sale.customer)
+
+
+def _recalculate_customer_financials(customer):
+    """Allocate the customer's whole payment pool across their sales by the
+    fit-date rule and persist each sale's balance.
+
+    This is the customer-wide counterpart to ``_recalculate_sale_financials``:
+    it writes every eligible sale's ``discount``/``balance_payable``/
+    ``paid_in_full`` from the shared allocation so no sale is shown overpaid
+    while another is outstanding.
+    """
+    from decimal import Decimal
+    if not customer:
+        return
+    anchor = customer.anthill_sales.first()
+    if not anchor:
+        return
+    pool = _build_customer_payment_pool(anchor)
+    if not pool:
+        return
+    for e in pool['entries']:
+        s = e['sale']
+        new_balance = e['outstanding']
+        new_paid = new_balance <= Decimal('0')
+        if s.discount != e['discount'] or s.balance_payable != new_balance or s.paid_in_full != new_paid:
+            s.discount = e['discount']
+            s.balance_payable = new_balance
+            s.paid_in_full = new_paid
+            s.save(update_fields=['discount', 'balance_payable', 'paid_in_full'])
+
+
+
+def _rebalance_invoice_split(invoice_id):
+    """Split each Xero payment equally across every sale linked to the same invoice.
+
+    When a single Xero invoice is linked to N sales, the payment value should be
+    shared equally between them — e.g. a £2,000 invoice linked to 2 sales gives
+    each sale £1,000. The un-split value is preserved in ``full_amount`` so the
+    split can be recomputed whenever a sale is linked or unlinked.
+    """
+    from decimal import Decimal, ROUND_HALF_UP
+    if not invoice_id:
+        return
+    rows = list(
+        AnthillPayment.objects.filter(xero_invoice_id=invoice_id, source='xero')
+    )
+    if not rows:
+        return
+    sale_count = len({r.sale_id for r in rows})
+    if sale_count < 1:
+        return
+
+    affected_sale_ids = set()
+    for r in rows:
+        base = r.full_amount if r.full_amount is not None else (r.amount or Decimal('0'))
+        share = (base / sale_count).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if r.full_amount != base or r.amount != share:
+            r.full_amount = base
+            r.amount = share
+            r.save(update_fields=['full_amount', 'amount'])
+        affected_sale_ids.add(r.sale_id)
+
+    for sale in AnthillSale.objects.filter(pk__in=affected_sale_ids):
+        _recalculate_sale_financials(sale)
+
+
 
 @login_required
 def xero_search_invoices(request, pk):
@@ -2149,6 +2492,42 @@ def xero_search_invoices(request, pk):
         if xid not in other_sale_map:
             other_sale_map[xid] = label
 
+    # Map each of this customer's sale contract numbers to its pk so an invoice
+    # can be routed to the sale whose contract matches the invoice reference
+    # (used by "Link All" to sync every invoice to the correct sale, not just
+    # the current one).
+    cust_sales = []
+    if sale.customer:
+        cust_sales = list(
+            sale.customer.anthill_sales
+            .exclude(activity_type__icontains='lead')
+            .exclude(activity_type__icontains='enquir')
+        )
+    contract_to_pk = {}
+    for s in cust_sales:
+        cn = (s.contract_number or '').strip().upper()
+        if cn:
+            contract_to_pk[cn] = s.pk
+    sale_label_map = {
+        s.pk: (s.contract_number or str(s.anthill_activity_id or s.pk)) for s in cust_sales
+    }
+
+    def _match_sale(reference, inv_number):
+        ref = (reference or '').strip().upper()
+        num = (inv_number or '').strip().upper()
+        if ref and ref in contract_to_pk:
+            return contract_to_pk[ref]
+        if ref:
+            for cn, spk in contract_to_pk.items():
+                if cn in ref or ref in cn:
+                    return spk
+        if num:
+            for cn, spk in contract_to_pk.items():
+                if cn in num or num in cn:
+                    return spk
+        # Fall back to the current sale when nothing matches.
+        return sale.pk
+
     def _parse_date(raw):
         if not raw:
             return None
@@ -2168,6 +2547,7 @@ def xero_search_invoices(request, pk):
         total = Decimal(str(inv.get('Total', 0)))
         amount_due = Decimal(str(inv.get('AmountDue', 0)))
         amount_paid = Decimal(str(inv.get('AmountPaid', 0)))
+        match_pk = _match_sale(inv.get('Reference', ''), inv.get('InvoiceNumber', ''))
         results.append({
             'invoice_id': inv_id,
             'invoice_number': inv.get('InvoiceNumber', ''),
@@ -2180,6 +2560,8 @@ def xero_search_invoices(request, pk):
             'status': status,
             'already_linked': inv_id in linked_ids,
             'linked_to_other': other_sale_map.get(inv_id, ''),
+            'match_sale_pk': match_pk,
+            'match_sale_label': sale_label_map.get(match_pk, ''),
         })
 
     # Sort: authorised first, then by date desc
@@ -2296,7 +2678,8 @@ def xero_link_invoice(request, pk):
                 })
             created_count = 1
 
-        _recalculate_sale_financials(sale)
+        # Split this invoice equally across every sale it is linked to.
+        _rebalance_invoice_split(inv_id)
 
         return JsonResponse({
             'success': True,
@@ -2387,8 +2770,12 @@ def delete_xero_payment(request, pk, payment_pk):
 
     payment = get_object_or_404(AnthillPayment, pk=payment_pk, sale__pk=pk, source='xero')
     sale = payment.sale
+    invoice_id = payment.xero_invoice_id
     payment.delete()
     _recalculate_sale_financials(sale)
+    # Re-split the invoice across its remaining linked sales so each gets a
+    # larger share now that this sale no longer counts.
+    _rebalance_invoice_split(invoice_id)
     return JsonResponse({'success': True})
 
 
@@ -3087,7 +3474,8 @@ def customer_xero_link(request, pk):
                 })
             created_count = 1
 
-        _recalculate_sale_financials(sale)
+        # Split this invoice equally across every sale it is linked to.
+        _rebalance_invoice_split(inv_id)
 
         sale_label = sale.contract_number or str(sale.anthill_activity_id or sale.pk)
         return JsonResponse({
