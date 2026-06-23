@@ -173,7 +173,14 @@ function modalSearchPO(q) {
         return;
     }
     modalPOSearchTimer = setTimeout(() => {
-        fetch(`/api/purchase-order-search/?q=${encodeURIComponent(q.trim())}`, {
+        // When the invoice already has a linked supplier, only surface that
+        // supplier's purchase orders — POs from other suppliers aren't relevant.
+        const supplierInput = document.getElementById('new-pinv-supplier');
+        const linkedSupplier = (supplierInput && supplierInput.dataset.supplierId === 'matched')
+            ? supplierInput.value.trim() : '';
+        const searchUrl = `/api/purchase-order-search/?q=${encodeURIComponent(q.trim())}`
+            + (linkedSupplier ? `&supplier=${encodeURIComponent(linkedSupplier)}` : '');
+        fetch(searchUrl, {
             headers: { 'X-Requested-With': 'XMLHttpRequest' },
             credentials: 'same-origin',
         })
@@ -191,7 +198,7 @@ function modalSearchPO(q) {
                 const status = o.status ? ` <span style="opacity:.6;font-size:.75rem;">(${o.status})</span>` : '';
                 return `<div style="padding:7px 12px;cursor:pointer;font-size:0.82rem;border-bottom:1px solid var(--border-color);"
                              onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''"
-                             onclick="selectModalPOFromSearch('${o.id}','${String(label).replace(/'/g,"\\'")}','${o.po_type || 'supplier'}')">
+                             onclick="selectModalPOFromSearch('${o.id}','${String(label).replace(/'/g,"\\'")}','${o.po_type || 'supplier'}',{replace:true})">
                             <strong>${label}</strong>${supplier ? ` <span style="color:var(--text-secondary);"> \u2013 ${supplier}</span>` : ''}${status}
                         </div>`;
             }).join('');
@@ -212,9 +219,9 @@ function selectModalPO(id, label, poType) {
 }
 
 // User picked a PO from the search dropdown - select it and auto-pull its lines.
-function selectModalPOFromSearch(id, label, poType) {
+function selectModalPOFromSearch(id, label, poType, opts) {
     selectModalPO(id, label, poType);
-    pullPOLines({ silent: true });
+    pullPOLines(Object.assign({ silent: true }, opts || {}));
 }
 
 function clearModalPO() {
@@ -1104,11 +1111,23 @@ function pullPOLines(opts) {
     .then(data => {
         if (data.error) { if (!silent) alert('Could not load PO lines: ' + data.error); return; }
         const results = data.results || [];
-        if (!results.length) { if (!silent) alert('No line items found on this purchase order.'); return; }
+        // A manual PO change (picked from the dropdown) replaces every line with
+        // the newly selected PO's lines — even if that PO has none — so lines
+        // from the previously selected PO never linger.
+        const forceReplace = !!(opts && opts.replace);
+        if (!results.length) {
+            if (forceReplace) {
+                document.getElementById('modal-lines').innerHTML = '';
+                modalLineCount = 0;
+                recalcModalTotal();
+            }
+            if (!silent) alert('No line items found on this purchase order.');
+            return;
+        }
 
         // -- Snapshot existing rows so we can preserve unmatched ones (e.g. surcharges) --
         const existingRows = Array.from(document.querySelectorAll('.pinv-line-row'));
-        const existingSnapshots = existingRows.map(row => ({
+        let existingSnapshots = existingRows.map(row => ({
             desc:        (row.querySelector('.pinv-line-desc')?.value  || '').trim(),
             qty:         parseFloat(row.querySelector('.pinv-line-qty')?.value  || 0),
             rate:        parseFloat(row.querySelector('.pinv-line-rate')?.value || 0),
@@ -1117,6 +1136,15 @@ function pullPOLines(opts) {
             isCarriage:  row.dataset.isCarriage  || '',
             isSurcharge: row.dataset.isSurcharge || '',
         }));
+
+        // If the user manually switched POs, or any current line was already
+        // imported from a PO, this pull replaces every line with the newly
+        // selected PO's lines rather than merging — so stale lines from the
+        // previous PO don't linger and have to be deleted by hand. (On the first
+        // automatic pull the existing rows are PDF / manual lines, which we still
+        // enrich & preserve.)
+        const isPoSwitch = forceReplace || existingSnapshots.some(s => s.poProductId);
+        if (isPoSwitch) existingSnapshots = [];
 
         // Clear and rebuild
         document.getElementById('modal-lines').innerHTML = '';
@@ -1196,6 +1224,10 @@ function pullPOLines(opts) {
         // Append any existing rows that were NOT matched to a PO line (e.g. surcharges from PDF)
         existingSnapshots.forEach((snap, i) => {
             if (matchedExistingIndices.has(i)) return;
+            // Drop rows that were imported from a (previous) PO. The freshly
+            // pulled PO lines above already replace them, so keeping them would
+            // leave stale line items behind when switching to a different PO.
+            if (snap.poProductId) return;
             // Skip blank rows (e.g. the default empty line the modal opens with) so they
             // don't get re-added as an empty extra line that has to be manually deleted.
             const isBlank = !snap.desc && !(snap.qty > 0) && !(snap.rate > 0)

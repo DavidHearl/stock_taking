@@ -16,6 +16,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
 
 from .models import Order, PurchaseInvoice, PurchaseInvoiceLineItem, PurchaseOrder, PurchaseOrderProduct, Supplier, Timesheet, log_activity, EnabledGLCode, OverheadPurchaseOrder
+from .pricing_utils import apply_invoice_price
 
 logger = logging.getLogger(__name__)
 
@@ -994,10 +995,10 @@ def create_purchase_invoice(request):
                     pop = PurchaseOrderProduct.objects.get(id=int(po_product_id))
                     line.po_product = pop
                     line.save(update_fields=['po_product'])
-                    # Always update invoice_price to the latest invoiced rate.
+                    # Apply the invoiced unit price to the PO line: overwrite the
+                    # order price, refresh the product cost and log price history.
                     # Surcharges and other lines may legitimately differ across split invoices.
-                    pop.invoice_price = rate
-                    pop.save(update_fields=['invoice_price'])
+                    apply_invoice_price(pop, rate, pop.purchase_order.display_number, user=getattr(request, 'user', None))
                 except (PurchaseOrderProduct.DoesNotExist, ValueError, TypeError):
                     pass
             # Auto-create installation timesheet if allocated to an order

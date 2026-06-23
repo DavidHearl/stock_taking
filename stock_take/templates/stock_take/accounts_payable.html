@@ -1309,6 +1309,26 @@ function parseManualAttachment(file) {
 }
 
 // -- Link sender email → supplier ----------------------------------------------
+// Enable/disable the "Link to supplier" button. When the sender is already
+// mapped to a supplier (an existing SupplierEmailRule), linking again is
+// redundant, so the button is disabled with an explanatory tooltip.
+function setLinkSupplierButtonState(alreadyLinked, supplierName) {
+    const btn = document.getElementById('modal-link-supplier-btn');
+    if (!btn) return;
+    btn.classList.remove('linked');
+    if (alreadyLinked) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-check-lg"></i> Linked';
+        btn.title = supplierName
+            ? `This sender is already linked to ${supplierName}`
+            : 'This sender is already linked to a supplier';
+    } else {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-link-45deg"></i> Link to supplier';
+        btn.title = "Map this sender's email to the selected supplier so future emails auto-match";
+    }
+}
+
 // Creates/updates a SupplierEmailRule so future emails from this sender (or its
 // domain) auto-match to the currently selected supplier.
 function linkEmailToSupplier() {
@@ -1351,8 +1371,9 @@ function linkEmailToSupplier() {
                 btn.classList.add('linked');
                 btn.innerHTML = '<i class="bi bi-check-lg"></i> Linked';
                 setTimeout(() => {
-                    btn.classList.remove('linked');
-                    btn.innerHTML = '<i class="bi bi-link-45deg"></i> Link to supplier';
+                    // Sender is now linked — keep the button in the disabled
+                    // "Linked" state rather than re-enabling a redundant action.
+                    setLinkSupplierButtonState(true, supplierName);
                 }, 2500);
             }
         } else {
@@ -1392,6 +1413,10 @@ function openCreateModal(btn) {
     } else {
         document.getElementById('new-pinv-supplier').value = senderName;
     }
+    // Disable the "Link to supplier" button when the sender is already linked
+    // (an existing SupplierEmailRule already maps this sender to a supplier),
+    // since linking again would be redundant.
+    setLinkSupplierButtonState(!!matchedSupplier, matchedSupplier);
     // Pre-fill PO if the email has a matched PO
     const prePoId    = btn.dataset.poId    || '';
     const prePoLabel = btn.dataset.poLabel || '';

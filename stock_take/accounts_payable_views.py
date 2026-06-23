@@ -26,6 +26,7 @@ from django.views.decorators.clickjacking import xframe_options_sameorigin
 
 from .models import MailboxEmail, MailboxEmailFilter, MailboxExemption, PurchaseInvoice, PurchaseInvoiceLineItem, Order, Supplier, PurchaseOrder, PurchaseOrderProduct, EnabledGLCode, OverheadPurchaseOrder, SupplierEmailRule
 from .permissions import page_permission_required
+from .pricing_utils import apply_invoice_price
 from .purchase_invoice_views import _extract_pdf_fields, _parse_date, _parse_decimal
 from .services import graph_api
 
@@ -729,8 +730,11 @@ def create_invoice_from_email(request, email_id):
                         pass
                 if po_product_id:
                     try:
-                        PurchaseOrderProduct.objects.filter(id=int(po_product_id)).update(invoice_price=rate)
-                    except (ValueError, TypeError):
+                        pop = PurchaseOrderProduct.objects.get(id=int(po_product_id))
+                        # Apply the invoiced unit price: overwrite the order price,
+                        # refresh the product cost and log price history.
+                        apply_invoice_price(pop, rate, pop.purchase_order.display_number, user=getattr(request, 'user', None))
+                    except (PurchaseOrderProduct.DoesNotExist, ValueError, TypeError):
                         pass
             idx += 1
 

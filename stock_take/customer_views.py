@@ -756,7 +756,7 @@ def sales_list(request):
     if duplicate_pks:
         sales_base = sales_base.exclude(pk__in=duplicate_pks)
 
-    if location_filter and not search_query:
+    if location_filter:
         # The location field on AnthillSale holds dirty/incorrect data for many
         # historical records, so the contract number prefix is the authoritative branch
         # signal (e.g. "BFS-..." = Belfast, "DUB-..." = Dublin). Keep a sale when either:
@@ -764,7 +764,8 @@ def sales_list(request):
         #   * it has no recognisable branch prefix (bare number / non-standard ref) AND
         #     its location field matches the selected branch.
         # Sales with a *different* branch prefix, or prefix-less sales whose location
-        # points elsewhere, are excluded.
+        # points elsewhere, are excluded. This is applied even while searching so the
+        # selected showroom always scopes the results.
         from .dashboard_view import _contract_prefix_for_location
         prefix = _contract_prefix_for_location(location_filter)
         if prefix:

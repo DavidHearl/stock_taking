@@ -6,6 +6,7 @@ from django.core.mail import EmailMessage
 from django.conf import settings
 from .models import BoardsPO, Expense, Fitter, Order, OSDoor, PNXItem, PriceHistory, PurchaseInvoice, PurchaseInvoiceLineItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, RaumplusDraftOrder, StockItem, StockHistory, Supplier, SupplierContact, Timesheet, log_activity
 from .po_pdf_generator import generate_purchase_order_pdf
+from .pricing_utils import apply_invoice_price
 import logging
 import requests
 import json
@@ -1214,54 +1215,14 @@ def purchase_order_save(request, po_id):
                 if 'invoice_price' in prod_data:
                     try:
                         new_invoice_price = float(prod_data['invoice_price']) if prod_data['invoice_price'] else 0
-                        old_invoice_price = float(product.invoice_price)
-                        product.invoice_price = new_invoice_price
-                        # Update linked stock item cost if invoice price changed and is non-zero
-                        if new_invoice_price > 0 and new_invoice_price != old_invoice_price and product.stock_item:
-                            old_cost = product.stock_item.cost
-                            qty_basis = float(product.received_quantity or 0) or float(product.order_quantity or 0) or 1.0
-                            # Invoice entry is a line total; convert to unit cost before storing.
-                            new_cost = (Decimal(str(new_invoice_price)) / Decimal(str(qty_basis))).quantize(Decimal('0.00001'))
-                            if new_cost != old_cost:
-                                product.stock_item.cost = new_cost
-                                # Recalculate average landed price from all PO lines for this item
-                                from django.db.models import F
-                                po_lines = PurchaseOrderProduct.objects.filter(
-                                    stock_item=product.stock_item,
-                                    order_quantity__gt=0,
-                                ).exclude(
-                                    purchase_order__status='Cancelled'
-                                )
-                                total_cost = Decimal('0')
-                                total_qty = Decimal('0')
-                                for line in po_lines:
-                                    # Use invoice_price if set, otherwise order_price
-                                    line_qty_value = float(line.received_quantity or 0) or float(line.order_quantity or 0)
-                                    if line_qty_value <= 0:
-                                        continue
-                                    line_qty = Decimal(str(line_qty_value))
-
-                                    invoice_total = line.invoice_price
-                                    if invoice_total and float(invoice_total) > 0:
-                                        unit_price = Decimal(str(float(invoice_total))) / line_qty
-                                    else:
-                                        unit_price = Decimal(str(float(line.order_price or 0)))
-
-                                    total_cost += unit_price * line_qty
-                                    total_qty += line_qty
-                                if total_qty > 0:
-                                    product.stock_item.average_landed_price = (total_cost / total_qty).quantize(Decimal('0.01'))
-                                product.stock_item.save(update_fields=['cost', 'average_landed_price'])
-                                # Log price history
-                                PriceHistory.objects.create(
-                                    stock_item=product.stock_item,
-                                    old_price=old_cost,
-                                    new_price=new_cost,
-                                    change_source='invoice',
-                                    reference=po.display_number,
-                                    notes=f'Invoice price updated from £{old_cost} to £{new_cost} via {po.display_number}',
-                                    created_by=request.user,
-                                )
+                        old_invoice_price = float(product.invoice_price or 0)
+                        if new_invoice_price > 0 and new_invoice_price != old_invoice_price:
+                            # The invoiced unit price becomes the source of truth: overwrite
+                            # the order price, refresh the linked product cost and log the
+                            # change in price history.
+                            apply_invoice_price(product, new_invoice_price, po.display_number, user=request.user)
+                        else:
+                            product.invoice_price = new_invoice_price
                     except (ValueError, TypeError):
                         pass
                 # Always recalculate line_total from order_price * order_quantity
@@ -4742,8 +4703,15 @@ def purchase_order_search(request):
         Q(supplier_name__icontains=q) |
         Q(project_number__icontains=q) |
         Q(project_name__icontains=q)
-    ).order_by('-display_number')[:20]
+    )
 
+    # Optionally restrict to a single supplier (e.g. when a purchase invoice
+    # already has its supplier linked, only that supplier's POs are relevant).
+    supplier = request.GET.get('supplier', '').strip()
+    if supplier:
+        pos = pos.filter(supplier_name__icontains=supplier)
+
+    pos = pos.order_by('-display_number')[:20]
     results = []
     for po in pos:
         results.append({
