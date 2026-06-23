@@ -46,7 +46,7 @@
                             <i class="bi bi-eye"></i> View PO
                         </a>
                     {% endif %}
-                    <h3>{{ bpo_data.po.po_number }} : Board Details{% if order.boards_not_required %} <span class="badge badge-not-required">NOT REQUIRED</span>{% endif %}{% if not bpo_data.is_primary %} {% endif %}{% if bpo_data.po.is_angled %} <span class="badge badge-info">ANGLED</span>{% endif %}{% if bpo_data.po.boards_ordered %} <span class="badge badge-ordered">ORDERED</span>{% if bpo_data.purchase_order %}{% if bpo_data.purchase_order.status == 'Received' %} <span class="badge badge-received">Received {{ bpo_data.purchase_order.received_date|format_date_str }}</span>{% elif bpo_data.purchase_order.expected_date %} <span class="po-date-hint">Expected: {{ bpo_data.purchase_order.expected_date|format_date_str }}</span>{% endif %}{% endif %}{% endif %}</h3>
+                    <h3>{% if not order.boards_not_required %}{{ bpo_data.po.po_number }} : {% endif %}Board Details{% if order.boards_not_required %} <span class="badge badge-not-required">NOT REQUIRED</span>{% endif %}{% if not bpo_data.is_primary %} {% endif %}{% if bpo_data.po.is_angled %} <span class="badge badge-info">ANGLED</span>{% endif %}{% if bpo_data.po.boards_ordered %} <span class="badge badge-ordered">ORDERED</span>{% if bpo_data.purchase_order %}{% if bpo_data.purchase_order.status == 'Received' %} <span class="badge badge-received">Received {{ bpo_data.purchase_order.received_date|format_date_str }}</span>{% elif bpo_data.purchase_order.expected_date %} <span class="po-date-hint">Expected: {{ bpo_data.purchase_order.expected_date|format_date_str }}</span>{% endif %}{% endif %}{% endif %}</h3>
                 </div>
                 <div class="header-actions">
                     <div class="section-actions">
@@ -897,7 +897,7 @@
                                 <th class="col-select-th"><input type="checkbox" id="glass-select-all" title="Select all"></th>
                                 <th>SKU</th>
                                 <th>Name</th>
-                                <th>Cut Size</th>
+                                {% if has_cts_glass %}<th>Cut Size</th>{% endif %}
                                 <th>Qty</th>
                                 <th>Cost</th>
                                 <th>Stock</th>
@@ -910,6 +910,7 @@
                                 <td><input type="checkbox" class="checkbox-input glass-select" data-accessory-id="{{ glass.id }}" data-allocated="{{ glass.is_allocated|yesno:'1,0' }}"></td>
                                 <td>{% if glass.stock_item %}<a href="{% url 'product_detail' glass.stock_item.id %}" class="sku-link">{{ glass.sku }}</a>{% else %}{{ glass.sku }}{% endif %}</td>
                                 <td>{{ glass.name }}</td>
+                                {% if has_cts_glass %}
                                 <td class="cut-size-cell">
                                     {% if glass.is_cut_to_size %}
                                     <div class="cut-size-inputs">
@@ -933,6 +934,7 @@
                                     <span class="text-muted">-</span>
                                     {% endif %}
                                 </td>
+                                {% endif %}
                                 <td>
                                     <div class="qty-stepper-input">
                                         <button type="button" class="qty-step-btn" onclick="genericQtyStep(this,-1)" tabindex="-1"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
@@ -1761,19 +1763,19 @@
                     <div class="edging-layout">
                         <div class="edging-checkboxes">
                             <label class="checkbox-label" for="add-board-prfid1">
-                                <input type="checkbox" id="add-board-prfid1" onchange="updateEdgingDiagram()">
+                                <input type="checkbox" class="checkbox-input" id="add-board-prfid1" onchange="updateEdgingDiagram()">
                                 <span>E1 <small>(Left)</small></span>
                             </label>
                             <label class="checkbox-label" for="add-board-prfid3">
-                                <input type="checkbox" id="add-board-prfid3" onchange="updateEdgingDiagram()">
+                                <input type="checkbox" class="checkbox-input" id="add-board-prfid3" onchange="updateEdgingDiagram()">
                                 <span>E3 <small>(Right)</small></span>
                             </label>
                             <label class="checkbox-label" for="add-board-prfid4">
-                                <input type="checkbox" id="add-board-prfid4" onchange="updateEdgingDiagram()">
+                                <input type="checkbox" class="checkbox-input" id="add-board-prfid4" onchange="updateEdgingDiagram()">
                                 <span>E4 <small>(Top)</small></span>
                             </label>
                             <label class="checkbox-label" for="add-board-prfid2">
-                                <input type="checkbox" id="add-board-prfid2" onchange="updateEdgingDiagram()">
+                                <input type="checkbox" class="checkbox-input" id="add-board-prfid2" onchange="updateEdgingDiagram()">
                                 <span>E2 <small>(Bottom)</small></span>
                             </label>
                         </div>
@@ -4627,6 +4629,7 @@ function stepInput(id, dir) {
  * Returns empty string if no items exist.
  */
 function getDefaultMaterialForPO(boardsPoId) {
+    // First: find the most common material already in THIS PO's items
     const counts = {};
     document.querySelectorAll(`.pnx-item-checkbox[data-boards-po-id="${boardsPoId}"]`).forEach(cb => {
         const mat = cb.dataset.matname || '';
@@ -4636,7 +4639,20 @@ function getDefaultMaterialForPO(boardsPoId) {
     for (const [mat, count] of Object.entries(counts)) {
         if (count > bestCount) { best = mat; bestCount = count; }
     }
-    return best;
+    if (best) return best;
+
+    // Fallback: this PO has no items yet — use the most common material from
+    // the other boards PO(s) on the same sale (e.g. regular PO alongside an angled PO)
+    const fallbackCounts = {};
+    document.querySelectorAll(`.pnx-item-checkbox:not([data-boards-po-id="${boardsPoId}"])`).forEach(cb => {
+        const mat = cb.dataset.matname || '';
+        if (mat) fallbackCounts[mat] = (fallbackCounts[mat] || 0) + 1;
+    });
+    let fallback = '', fallbackBest = 0;
+    for (const [mat, count] of Object.entries(fallbackCounts)) {
+        if (count > fallbackBest) { fallback = mat; fallbackBest = count; }
+    }
+    return fallback;
 }
 
 /* ── Barcode generation ─── */

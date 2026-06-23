@@ -539,6 +539,7 @@ def load_order_details_ajax(request, sale_number):
         'order': order,
         'price_per_sqm': price_per_sqm,
         'glass_items': glass_items,
+        'has_cts_glass': any(g.is_cut_to_size for g in glass_items),
         'raumplus_accessories': raumplus_accessories,
         'non_glass_accessories': non_glass_accessories,
     })
@@ -7512,6 +7513,7 @@ def _build_order_context(order, request):
         'pnx_total_cost': pnx_total_cost,
         'has_os_door_accessories': has_os_door_accessories,
         'glass_items': glass_items,
+        'has_cts_glass': any(g.is_cut_to_size for g in glass_items),
         'raumplus_accessories': raumplus_accessories,
         'non_glass_accessories': non_glass_accessories,
         'price_per_sqm': price_per_sqm,
@@ -11786,11 +11788,62 @@ def calendar_view(request):
                 'balance_payable': row['balance_payable'],
                 'paid_in_full': row['paid_in_full'],
             }
+
+        # When a sale's Anthill sale_value is missing (None/0), its stored
+        # balance_payable/paid_in_full were calculated against a zero value and
+        # are therefore unreliable — they can wrongly mark a sale as fully paid
+        # even though the order is only part-paid. For those sales recompute the
+        # figures exactly the way the sale-detail page does, via the customer
+        # payment pool (which falls back to the order's inc-VAT total and also
+        # handles cross-sale credits). Computed once per customer and reused.
+        from .customer_views import _build_customer_payment_pool
+        _unreliable_nums = {
+            a.order.sale_number for a in appointments
+            if a.order and (
+                _fin_map.get(a.order.sale_number) is None
+                or _fin_map[a.order.sale_number]['sale_value'] <= 0
+            )
+        }
+        _pool_fin = {}
+        if _unreliable_nums:
+            _pool_cache = {}
+            for _s in (
+                AnthillSale.objects
+                .filter(anthill_activity_id__in=_unreliable_nums)
+                .select_related('customer', 'order')
+            ):
+                if not _s.customer_id:
+                    continue
+                if _s.customer_id not in _pool_cache:
+                    _pool_cache[_s.customer_id] = _build_customer_payment_pool(_s) or False
+                pool = _pool_cache[_s.customer_id]
+                if not pool:
+                    continue
+                for e in pool['entries']:
+                    aid = e['sale'].anthill_activity_id
+                    if aid and e['effective_value'] > 0:
+                        _pool_fin[aid] = {
+                            'effective_value': e['effective_value'],
+                            'outstanding': e['outstanding'],
+                        }
+
         for appt in appointments:
             if not appt.order:
                 continue
             row = _fin_map.get(appt.order.sale_number)
             order_total = appt.order.total_value_inc_vat or Decimal('0')
+
+            # Prefer freshly-pooled figures when the stored balance is unreliable.
+            pooled = _pool_fin.get(appt.order.sale_number)
+            if pooled is not None:
+                appt.fin = {
+                    'sale_value': pooled['effective_value'],
+                    'payments_total': pooled['effective_value'] - pooled['outstanding'],
+                    'outstanding': pooled['outstanding'],
+                    'value_estimated': False,
+                }
+                continue
+
             if row is None:
                 # No synced Anthill sale — fall back to the order's own total.
                 appt.fin = {

@@ -2107,7 +2107,10 @@
                         <span class="fin-label">Total (Inc VAT)</span>
                         <div class="fin-value-wrap">
                             <span class="fin-value" id="total_value_inc_vat_display"><span class="fin-currency">£</span><span class="fin-amount">{{ order.total_value_inc_vat|default:'0.00'|floatformat:2|intcomma }}</span></span>
-                            <input type="text" inputmode="decimal" class="fin-edit-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}" style="display:none;">
+                            <div class="fin-edit-row" id="fin-edit-row-total" style="display:none;">
+                                <input type="text" inputmode="decimal" class="fin-edit-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}">
+                                <button type="button" class="fin-confirm-btn" onclick="saveFinancials({{ order.id }})" title="Save value"><i class="bi bi-check-lg"></i></button>
+                            </div>
                         </div>
                     </div>
                     <div class="fin-row">
@@ -2139,9 +2142,12 @@
             <div class="fin-summary-body">
                 <div class="fin-row fin-row-primary">
                     <span class="fin-label">Total Value (Inc VAT)</span>
-                    <div class="fin-value-wrap">
-                        <span class="fin-value fin-value-large view-val"><span class="fin-currency">£</span><span class="fin-amount">{{ sale.sale_value|default:'0.00'|floatformat:2|intcomma }}</span></span>
-                        <input type="text" inputmode="decimal" class="fin-edit-input edit-val" data-field="sale_value" value="{{ sale.sale_value|default:'0.00' }}" style="display:none;">
+                    <div class="fin-edit-row-sale">
+                        <div class="fin-value-wrap">
+                            <span class="fin-value fin-value-large view-val"><span class="fin-currency">£</span><span class="fin-amount">{{ sale.sale_value|default:'0.00'|floatformat:2|intcomma }}</span></span>
+                            <input type="text" inputmode="decimal" class="fin-edit-input edit-val" data-field="sale_value" value="{{ sale.sale_value|default:'0.00' }}" style="display:none;">
+                        </div>
+                        <button type="button" class="fin-confirm-btn edit-val" style="display:none;" onclick="saveSale()" title="Save value"><i class="bi bi-check-lg"></i></button>
                     </div>
                 </div>
                 {% if discount %}
@@ -2432,19 +2438,47 @@ function switchDetailTab(tab) {
 function toggleFinancialEdit() {
     const display = document.getElementById('total_value_inc_vat_display');
     const input = document.getElementById('total-value-input');
+    const editRow = document.getElementById('fin-edit-row-total');
     const editBtn = document.getElementById('btn-financial-edit');
-    const isEditing = input.style.display !== 'none';
+    const isEditing = editRow.style.display !== 'none';
     if (isEditing) {
-        input.style.display = 'none';
+        editRow.style.display = 'none';
         display.style.display = '';
         editBtn.innerHTML = '<i class="bi bi-pencil"></i> Edit Values';
     } else {
-        input.value = parseFloat(display.textContent.replace('£', '').replace(',', '')) || 0;
+        const amountEl = display.querySelector('.fin-amount');
+        input.value = parseFloat((amountEl ? amountEl.textContent : display.textContent).replace(/,/g, '')) || 0;
         display.style.display = 'none';
-        input.style.display = 'block';
+        editRow.style.display = 'flex';
         input.focus();
         editBtn.innerHTML = '<i class="bi bi-x-lg"></i> Cancel Edit';
     }
+}
+
+function saveFinancials(orderId) {
+    const input = document.getElementById('total-value-input');
+    const display = document.getElementById('total_value_inc_vat_display');
+    const editRow = document.getElementById('fin-edit-row-total');
+    const editBtn = document.getElementById('btn-financial-edit');
+    const value = parseFloat(input.value) || 0;
+    fetch(`/order/${orderId}/update-financial/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ field: 'total_value_inc_vat', value: value })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const amountEl = display.querySelector('.fin-amount');
+            if (amountEl) amountEl.textContent = value.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            editRow.style.display = 'none';
+            display.style.display = '';
+            if (editBtn) editBtn.innerHTML = '<i class="bi bi-pencil"></i> Edit Values';
+        } else {
+            alert('Error saving: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(() => alert('Network error saving financial value'));
 }
 
 function buildFinancialWaffle() {
@@ -2457,14 +2491,17 @@ function buildFinancialWaffle() {
     const osDoors      = parseFloat(d.osDoors)      || 0;
     let installation   = parseFloat(d.installation) || 0;
     let manufacturing  = parseFloat(d.manufacturing)|| 0;
-    let profit         = parseFloat(d.profit)       || 0;
     const totalExc     = parseFloat(d.totalExc)     || 0;
 
     // Provisional estimates when no actual cost recorded: fitting 10%, manufacturing 5%
-    // of net (exc-VAT) value. The estimate is taken out of profit so totals still add up.
+    // of net (exc-VAT) value.
     let installationEst = false, manufacturingEst = false;
-    if (installation <= 0 && totalExc > 0) { installation = totalExc * 0.10; profit -= installation; installationEst = true; }
-    if (manufacturing <= 0 && totalExc > 0) { manufacturing = totalExc * 0.05; profit -= manufacturing; manufacturingEst = true; }
+    if (installation <= 0 && totalExc > 0) { installation = totalExc * 0.10; installationEst = true; }
+    if (manufacturing <= 0 && totalExc > 0) { manufacturing = totalExc * 0.05; manufacturingEst = true; }
+
+    // Always derive profit as what remains after all known/estimated costs.
+    // This avoids relying on a stale stored value that may not yet have been calculated.
+    let profit = totalExc - boards - accessories - osDoors - installation - manufacturing;
     if (profit < 0) profit = 0;
 
     const entries = [
@@ -2521,10 +2558,13 @@ function wireFinancialWaffleHover(section) {
         items.forEach(i => i.classList.toggle('is-active', !!cat && i.dataset.cat === cat));
     }
 
+    // Activate on enter for each cell/legend item
     [...cells, ...items].forEach(el => {
         el.addEventListener('mouseenter', () => setActive(el.dataset.cat));
-        el.addEventListener('mouseleave', () => setActive(null));
     });
+
+    // Only clear when leaving the entire waffle section (not between individual cells)
+    section.addEventListener('mouseleave', () => setActive(null));
 }
 
 // If the Total (Exc VAT) value is missing/zero but a Total (Inc VAT) value

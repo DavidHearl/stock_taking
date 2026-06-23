@@ -1309,8 +1309,10 @@ def download_mailbox_attachment(request, email_id, attachment_id):
 
     content_type = content_type or 'application/octet-stream'
     response = HttpResponse(content, content_type=content_type)
-    # Open PDFs inline in the browser; force-download everything else
-    if 'pdf' in content_type.lower():
+    # Open PDFs inline in the browser; force-download everything else.
+    # A ?download=1 query param forces an attachment disposition for any type.
+    force_download = request.GET.get('download') in ('1', 'true', 'yes')
+    if 'pdf' in content_type.lower() and not force_download:
         response['Content-Disposition'] = f'inline; filename="{filename}"'
     else:
         response['Content-Disposition'] = f'attachment; filename="{filename}"'

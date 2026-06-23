@@ -304,6 +304,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                                 data-email-id="{{ email.id }}"
                                 data-sender="{{ email.sender_name }}{% if email.sender_name and email.sender_email %} ({{ email.sender_email }}){% else %}{{ email.sender_email }}{% endif %}"
                                 data-sender-name="{{ email.sender_name }}"
+                                data-sender-email="{{ email.sender_email }}"
                                 data-subject="{{ email.subject|default:'(no subject)'|truncatechars:80 }}"
                                 data-attachments="{{ email.attachment_names }}"
                                 data-matched-supplier="{{ email.matched_supplier|default:'' }}"
@@ -667,6 +668,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
 const CSRF_TOKEN = '{{ csrf_token }}';
 let currentEmailId = null;
 let currentAttachmentId = null;
+let currentEmailSenderEmail = '';
 let currentManualAttachmentFile = null;
 let linkEmailId = null;
 let selectedInvoiceId = null;
@@ -1195,6 +1197,7 @@ function resetCreateModalBase() {
     document.getElementById('new-pinv-due-date').value = '';
     document.getElementById('new-pinv-status').value = 'Draft';
     document.getElementById('new-pinv-notes').value = '';
+    resetInvoiceNote();
     setModalCurrency('GBP');
     const _discEl = document.getElementById('modal-discount');
     if (_discEl) _discEl.value = '';
@@ -1217,7 +1220,7 @@ function openManualCreateModal(file) {
     currentManualAttachmentFile = file;
 
     document.getElementById('modal-sender').textContent = 'Manual upload';
-    document.getElementById('modal-subject').textContent = file.name;
+    currentEmailSenderEmail = '';
 
     const list = document.getElementById('modal-attachment-list');
     const isPdf = file.name.toLowerCase().endsWith('.pdf');
@@ -1305,6 +1308,60 @@ function parseManualAttachment(file) {
     });
 }
 
+// -- Link sender email → supplier ----------------------------------------------
+// Creates/updates a SupplierEmailRule so future emails from this sender (or its
+// domain) auto-match to the currently selected supplier.
+function linkEmailToSupplier() {
+    const supplierInput = document.getElementById('new-pinv-supplier');
+    const supplierName = supplierInput ? supplierInput.value.trim() : '';
+    if (!supplierName) {
+        alert('Select or enter a supplier first, then link the email.');
+        if (supplierInput) supplierInput.focus();
+        return;
+    }
+    const email = (currentEmailSenderEmail || '').trim().toLowerCase();
+    if (!email || email.indexOf('@') === -1) {
+        alert('No sender email address is available for this email.');
+        return;
+    }
+    const domain = email.split('@')[1];
+    const personalDomains = ['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk',
+        'hotmail.com', 'hotmail.co.uk', 'outlook.com', 'live.com', 'live.co.uk',
+        'icloud.com', 'aol.com', 'msn.com'];
+    // Domain-level rule for business addresses (handier — matches the whole
+    // supplier), exact address for personal/shared mailboxes.
+    const pattern = personalDomains.includes(domain) ? email : '@' + domain;
+    const btn = document.getElementById('modal-link-supplier-btn');
+    if (btn) btn.disabled = true;
+    fetch('{% url "manage_supplier_rules" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'add',
+            email_pattern: pattern,
+            supplier_name: supplierName,
+            note: 'Linked from AP create-invoice modal',
+        }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (btn) btn.disabled = false;
+        if (data.success) {
+            if (btn) {
+                btn.classList.add('linked');
+                btn.innerHTML = '<i class="bi bi-check-lg"></i> Linked';
+                setTimeout(() => {
+                    btn.classList.remove('linked');
+                    btn.innerHTML = '<i class="bi bi-link-45deg"></i> Link to supplier';
+                }, 2500);
+            }
+        } else {
+            alert(data.error || 'Failed to link supplier.');
+        }
+    })
+    .catch(err => { if (btn) btn.disabled = false; alert('Error: ' + err.message); });
+}
+
 // -- Create Invoice Modal ------------------------------------------------------
 function openCreateModal(btn) {
     currentEmailId = btn.dataset.emailId;
@@ -1343,7 +1400,7 @@ function openCreateModal(btn) {
 
     // Email context
     document.getElementById('modal-sender').textContent = senderDisplay;
-    document.getElementById('modal-subject').textContent = btn.dataset.subject || '';
+    currentEmailSenderEmail = btn.dataset.senderEmail || '';
 
     // Render attachment selector
     const list = document.getElementById('modal-attachment-list');
@@ -1365,6 +1422,10 @@ function openCreateModal(btn) {
                 ? `<a href="/accounts-payable/${currentEmailId}/attachment/${attId}/" target="_blank"
                        class="apay-att-preview-btn" title="Open PDF in new tab">
                        <i class="bi bi-eye"></i> Preview
+                   </a>
+                   <a href="/accounts-payable/${currentEmailId}/attachment/${attId}/?download=1" download
+                       class="apay-att-preview-btn" title="Download PDF">
+                       <i class="bi bi-download"></i> Download
                    </a>`
                 : ''}
             </div>`;
@@ -1681,6 +1742,7 @@ function applyQueuedDataToModal(data) {
     document.getElementById('new-pinv-due-date').value = data.due_date || '';
     document.getElementById('new-pinv-status').value = data.status || 'Draft';
     document.getElementById('new-pinv-notes').value = data.notes || '';
+    if (data.notes && typeof showInvoiceNote === 'function') showInvoiceNote();
     document.getElementById('new-pinv-reference').value = data.reference || '';
     document.getElementById('new-pinv-supplier-ref').value = data.supplier_reference || '';
     setModalCurrency(data.currency || 'GBP');

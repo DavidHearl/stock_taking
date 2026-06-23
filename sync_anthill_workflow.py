@@ -344,6 +344,13 @@ def sync_workflow(dry_run: bool = False, days: int = None):
                     matching_order.fit_date = sale.fit_date
                     matching_order.save(update_fields=['fit_date'])
                     logger.info(f'    fit_date → Order: {sale.fit_date}')
+        elif sale.order_id and sale.fit_date:
+            # Sale is already linked — push fit_date to the order if it doesn't have one yet
+            linked_order = sale.order
+            if linked_order and not linked_order.fit_date and not dry_run:
+                linked_order.fit_date = sale.fit_date
+                linked_order.save(update_fields=['fit_date'])
+                logger.info(f'    fit_date → linked Order {linked_order.sale_number}: {sale.fit_date}')
 
         if changed_fields:
             if not dry_run:
