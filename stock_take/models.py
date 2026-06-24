@@ -229,7 +229,6 @@ class SaleCoverSheet(models.Model):
     )
 
     prepared_by = models.CharField(max_length=120, blank=True)
-    cad_number = models.CharField(max_length=120, blank=True)
     revision_number = models.PositiveIntegerField(default=1)
     customer_on_site_name = models.CharField(max_length=255, blank=True)
     customer_on_site_phone = models.CharField(max_length=100, blank=True)
@@ -289,6 +288,21 @@ class SaleCoverSheet(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def cad_number(self):
+        """CAD number is stored in a single place — the linked Order's
+        ``customer_number`` field. Exposed here so the coversheet (and its PDF)
+        always read the same value shown on the sale details card."""
+        order = self.sale.order if self.sale_id else None
+        return order.customer_number if order else ''
+
+    @cad_number.setter
+    def cad_number(self, value):
+        order = self.sale.order if self.sale_id else None
+        if order is not None:
+            order.customer_number = (value or '').strip()[:6]
+            order.save(update_fields=['customer_number'])
 
     def __str__(self):
         return f'Coversheet for Sale {self.sale.anthill_activity_id}'

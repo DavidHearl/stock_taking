@@ -6,7 +6,10 @@ from django.http import HttpResponse, JsonResponse
 from datetime import datetime, timedelta
 from decimal import Decimal
 import json
+import logging
 from .models import Order, PurchaseOrder, PurchaseOrderProduct, StockItem, StockHistory, AnthillSale, AnthillPayment
+
+logger = logging.getLogger(__name__)
 
 # Maps the user's selected_location value to the contract number prefix used by Anthill.
 # Contract numbers are the authoritative location signal — the location field in
@@ -810,12 +813,17 @@ def dashboard(request):
     return render(request, 'stock_take/dashboard.html', context)
 
 
-def _write_xero_payments_for_sale(sale, invoice_data, seen_fallback_base_pids=None):
+def _write_xero_payments_for_sale(sale, invoice_data, seen_fallback_base_pids=None, anthill_payments=None):
     """Persist Xero invoice/payment data onto a single AnthillSale.
 
     Mirrors the linking logic used by the outstanding-balance Xero check
     endpoints (payment cap, fallback de-duplication, cleanup). Returns a
     ``(created, updated, skipped)`` tuple.
+
+    ``anthill_payments`` — optional list of confirmed Anthill payments for this
+    sale's contract (``[{'amount': Decimal, 'date': date, 'payment_type': str}]``).
+    When a Xero invoice is still awaiting payment but Anthill has a matching
+    confirmed payment, it is counted now rather than waiting for Xero to reconcile.
     """
     if seen_fallback_base_pids is None:
         seen_fallback_base_pids = set()
@@ -823,6 +831,20 @@ def _write_xero_payments_for_sale(sale, invoice_data, seen_fallback_base_pids=No
     created = 0
     updated = 0
     skipped = 0
+
+    # Confirmed Anthill payments for this contract, consumed as we match them so
+    # the same payment is never credited to two invoices.
+    anthill_pool = [dict(ap) for ap in (anthill_payments or [])]
+
+    def _consume_anthill(target):
+        """Pop and return a confirmed Anthill payment matching ``target``."""
+        if not target or target <= 0:
+            return None
+        for i, ap in enumerate(anthill_pool):
+            amt = ap.get('amount') or Decimal('0')
+            if abs(amt - target) < Decimal('0.50'):
+                return anthill_pool.pop(i)
+        return None
 
     # Payment cap: never credit more than the sale is worth.
     sale_value = (sale.sale_value or Decimal('0')) - (sale.discount or Decimal('0'))
@@ -833,6 +855,14 @@ def _write_xero_payments_for_sale(sale, invoice_data, seen_fallback_base_pids=No
     for inv in invoice_data:
         if inv.get('status', '').upper() in ('CANCELLED', 'VOIDED', 'DELETED'):
             continue
+
+        if inv['payments']:
+            # A real Xero payment now represents this invoice — drop any earlier
+            # invoice-summary placeholder (including an Anthill-confirmed credit)
+            # so the placeholder and the real payment are never counted together.
+            AnthillPayment.objects.filter(
+                sale=sale, xero_invoice_id=inv['invoice_id'], date=None,
+            ).delete()
 
         for p in inv['payments']:
             if p.get('status', '').upper() == 'CANCELLED':
@@ -893,12 +923,31 @@ def _write_xero_payments_for_sale(sale, invoice_data, seen_fallback_base_pids=No
             else:
                 updated += 1
 
+            # This Xero payment already accounts for an Anthill-recorded payment
+            # of the same amount — consume it so it can't also be matched to an
+            # unpaid invoice below.
+            _consume_anthill(p_amount)
+
             if is_fallback and base_pid:
                 seen_fallback_base_pids.add(base_pid)
 
         # Invoice-level summary row for invoices with no individual payments
         if not inv['payments']:
             inv_amount = inv['amount_paid'] or Decimal('0')
+            inv_status = inv['status']
+            payment_label = 'Invoice Payment'
+
+            # Xero hasn't reconciled a payment for this invoice yet. If Anthill
+            # has a matching confirmed payment, count it now so the calendar /
+            # balances don't have to wait for Xero to catch up.
+            inv_due = inv.get('amount_due') or Decimal('0')
+            if inv_due > Decimal('0.50'):
+                match = _consume_anthill(inv_due) or _consume_anthill(inv.get('total') or Decimal('0'))
+                if match:
+                    inv_amount = match['amount']
+                    payment_label = match.get('payment_type') or 'Anthill Payment'
+                    inv_status = 'Confirmed (Anthill)'
+
             already_exists = AnthillPayment.objects.filter(
                 sale=sale, xero_invoice_id=inv['invoice_id'], date=None).exists()
             if not already_exists and sale_value > 0:
@@ -913,10 +962,10 @@ def _write_xero_payments_for_sale(sale, invoice_data, seen_fallback_base_pids=No
                 'invoice_total': inv['total'],
                 'invoice_amount_due': inv['amount_due'],
                 'invoice_status': inv['status'],
-                'payment_type': 'Invoice Payment',
+                'payment_type': payment_label,
                 'date': None,
                 'amount': inv_amount,
-                'status': inv['status'],
+                'status': inv_status,
                 'location': '',
                 'user_name': '',
             }
@@ -933,7 +982,7 @@ def _write_xero_payments_for_sale(sale, invoice_data, seen_fallback_base_pids=No
     return created, updated, skipped
 
 
-def _sync_xero_payments_for_sales(sales, progress_callback=None):
+def _sync_xero_payments_for_sales(sales, progress_callback=None, anthill_payments_by_contract=None):
     """Link Xero payments for the given AnthillSale objects.
 
     Used by the weekly report to keep payment data correct. Silently no-ops if
@@ -943,6 +992,11 @@ def _sync_xero_payments_for_sales(sales, progress_callback=None):
     ``progress_callback(done, total, created)`` — when supplied, is invoked once
     per sale (after each is processed) so callers can report progress. Any
     exception it raises is swallowed so it can never break the sync.
+
+    ``anthill_payments_by_contract`` — optional ``{contract_number: [payments]}``
+    map of confirmed Anthill payments. When present, invoices still awaiting
+    payment in Xero are credited from a matching confirmed Anthill payment so the
+    figures don't have to wait for Xero to reconcile.
     """
     from .services import xero_api
 
@@ -980,8 +1034,13 @@ def _sync_xero_payments_for_sales(sales, progress_callback=None):
             if not invoice_data:
                 continue
             try:
+                anthill_for_sale = None
+                if anthill_payments_by_contract:
+                    anthill_for_sale = anthill_payments_by_contract.get(
+                        (sale.contract_number or '').strip())
                 created, _updated, _skipped = _write_xero_payments_for_sale(
-                    sale, invoice_data, seen_fallback_base_pids)
+                    sale, invoice_data, seen_fallback_base_pids,
+                    anthill_payments=anthill_for_sale)
                 created_total += created
             except Exception:
                 continue
@@ -1007,6 +1066,183 @@ def _sync_xero_payments_for_sales(sales, progress_callback=None):
     except Exception:
         pass
     return created_total
+
+
+def _sync_calendar_payments(sales, progress=None):
+    """Calendar "Check Payments": link Xero payments and, for invoices still
+    awaiting payment in Xero, credit matching confirmed Anthill payments.
+
+    Flow (matches the way a person would reconcile):
+      1. For each sale, look up its invoices in Xero.
+      2. If every invoice is paid, it's done — nothing else to do.
+      3. The first time a sale has an invoice still awaiting payment, kick off a
+         single Anthill payments scrape in a **background thread** so it runs in
+         parallel while the remaining sales are still being checked in Xero.
+      4. Once all the Xero look-ups are done, wait for the Anthill scrape and
+         credit each awaiting invoice from a matching confirmed Anthill payment.
+
+    ``progress(done, total, created, message)`` reports rich status to the UI and
+    is best-effort (never allowed to raise). Returns the number of payments
+    created.
+    """
+    import threading
+    from .services import xero_api
+
+    total = len(sales)
+
+    def _p(done, created, message=None):
+        if progress:
+            try:
+                progress(done, total, created, message)
+            except Exception:
+                pass
+
+    _p(0, 0, 'Connecting to Xero…')
+    try:
+        access_token, _ = xero_api.get_valid_access_token()
+    except Exception:
+        access_token = None
+    if not access_token:
+        _p(0, 0, 'Xero is not connected — cannot check payments.')
+        return 0
+
+    # ── Lazy + parallel Anthill scrape ────────────────────────────────────
+    anthill_state = {'map': None, 'thread': None, 'started': False}
+
+    def _start_anthill():
+        if anthill_state['started']:
+            return
+        anthill_state['started'] = True
+        _p(_done_holder['n'], created_total_holder['n'],
+           'Awaiting-payment invoice found — fetching Anthill payments in the background…')
+
+        def _worker():
+            from django.db import connection as _conn
+            try:
+                from .invoice_views import confirmed_anthill_payments_by_contract
+                anthill_state['map'] = confirmed_anthill_payments_by_contract(
+                    period='last_12_months', location_filter='')
+            except Exception:
+                logger.exception('calendar Anthill scrape failed')
+                anthill_state['map'] = {}
+            finally:
+                _conn.close()
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        anthill_state['thread'] = t
+
+    def _invoice_awaiting(invoice_data):
+        """True when a sale has an invoice with money still due in Xero and no
+        individual payments recorded — exactly the case Anthill can fill in."""
+        for inv in invoice_data:
+            if inv.get('status', '').upper() in ('CANCELLED', 'VOIDED', 'DELETED'):
+                continue
+            due = inv.get('amount_due') or Decimal('0')
+            if due > Decimal('0.50') and not inv['payments']:
+                return True
+        return False
+
+    # Mutable holders so _start_anthill can report the current counters.
+    _done_holder = {'n': 0}
+    created_total_holder = {'n': 0}
+
+    seen_fallback_base_pids = set()
+    deferred = []   # (sale, invoice_data) awaiting Anthill matching
+
+    # ── Pass 1: check Xero per sale; settle fully-paid sales immediately ───
+    for idx, sale in enumerate(sales, start=1):
+        _done_holder['n'] = idx
+        name = sale.customer_name or sale.contract_number or f'Sale {sale.pk}'
+        _p(idx - 1, created_total_holder['n'], f'Checking Xero — {name} ({idx}/{total})')
+        try:
+            if not sale.contract_number:
+                _p(idx, created_total_holder['n'], f'{name}: no contract number — skipped')
+                continue
+            try:
+                invoice_data = xero_api.get_sale_payments_from_xero(
+                    contract_number=sale.contract_number,
+                    contact_name=sale.customer_name or None,
+                )
+            except Exception:
+                _p(idx, created_total_holder['n'], f'{name}: Xero look-up failed — skipped')
+                continue
+            if not invoice_data:
+                _p(idx, created_total_holder['n'], f'{name}: no Xero invoices found')
+                continue
+
+            inv_count = len([i for i in invoice_data
+                             if i.get('status', '').upper() not in ('CANCELLED', 'VOIDED', 'DELETED')])
+
+            if _invoice_awaiting(invoice_data):
+                # Start the Anthill scrape in parallel (once) and defer the write
+                # until the scraped data is available.
+                _start_anthill()
+                deferred.append((sale, invoice_data))
+                _p(idx, created_total_holder['n'],
+                   f'{name}: {inv_count} Xero invoice(s), awaiting payment — will check Anthill')
+            else:
+                try:
+                    created, _u, _s = _write_xero_payments_for_sale(
+                        sale, invoice_data, seen_fallback_base_pids)
+                    created_total_holder['n'] += created
+                    _p(idx, created_total_holder['n'],
+                       f'{name}: paid in Xero — {created} payment(s) linked')
+                except Exception:
+                    logger.exception('calendar payment write failed for sale %s', sale.pk)
+                    _p(idx, created_total_holder['n'], f'{name}: write failed')
+        except Exception:
+            logger.exception('calendar payment sync: sale %s failed', sale.pk)
+
+    # ── Wait for the parallel Anthill scrape (started during pass 1) ──────
+    if anthill_state['thread'] is not None:
+        _p(total, created_total_holder['n'],
+           'Waiting for Anthill payments to finish loading…')
+        anthill_state['thread'].join(timeout=180)
+    anthill_map = anthill_state['map'] or {}
+
+    # ── Pass 2: match Anthill confirmed payments to awaiting invoices ─────
+    deferred_total = len(deferred)
+    for j, (sale, invoice_data) in enumerate(deferred, start=1):
+        name = sale.customer_name or sale.contract_number or f'Sale {sale.pk}'
+        anthill_for_sale = anthill_map.get((sale.contract_number or '').strip())
+        n_anthill = len(anthill_for_sale or [])
+        _p(total, created_total_holder['n'],
+           f'Matching Anthill — {name} ({j}/{deferred_total}): {n_anthill} confirmed payment(s)')
+        try:
+            created, _u, _s = _write_xero_payments_for_sale(
+                sale, invoice_data, seen_fallback_base_pids,
+                anthill_payments=anthill_for_sale)
+            created_total_holder['n'] += created
+            if anthill_for_sale:
+                _p(total, created_total_holder['n'],
+                   f'{name}: credited {created} payment(s) from Anthill')
+            elif created:
+                _p(total, created_total_holder['n'],
+                   f'{name}: {created} payment(s) linked')
+            else:
+                _p(total, created_total_holder['n'],
+                   f'{name}: no matching Anthill payment found')
+        except Exception:
+            logger.exception('calendar Anthill match failed for sale %s', sale.pk)
+
+    # ── Refresh stored pooled balances for affected customers ────────────
+    _p(total, created_total_holder['n'], 'Updating customer balances…')
+    try:
+        from .customer_views import _recalculate_customer_financials
+        _seen_customers = set()
+        for sale in sales:
+            cid = sale.customer_id
+            if cid and cid not in _seen_customers:
+                _seen_customers.add(cid)
+                try:
+                    _recalculate_customer_financials(sale.customer)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    return created_total_holder['n']
 
 
 @login_required

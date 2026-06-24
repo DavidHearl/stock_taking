@@ -1595,6 +1595,14 @@ def sale_claim_document_upload(request, pk):
     clean_type = re.sub(r'[^A-Za-z0-9]+', '', doc_type) or 'Document'
     uploaded.name = f'{group_key}_{clean_type}{ext}'
 
+    # Replace any existing document of the same type (Update semantics) so each
+    # document slot only ever holds one current file.
+    for d in ClaimDocument.objects.filter(group_key=group_key):
+        if _claim_doc_type_from_filename(d.file.name) == clean_type:
+            if d.file:
+                d.file.delete(save=False)
+            d.delete()
+
     ClaimDocument.objects.create(
         title=f'{clean_type} - {(sale.contract_number or sale.anthill_activity_id)}',
         file=uploaded,
@@ -1605,6 +1613,27 @@ def sale_claim_document_upload(request, pk):
 
     messages.success(request, f'{clean_type} uploaded.')
     return redirect('sale_detail', pk=pk)
+
+
+@login_required
+def sale_claim_document_delete(request, pk):
+    """Delete a single document attached to this sale (file + record)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    sale = get_object_or_404(AnthillSale.objects.select_related('order'), pk=pk)
+    doc_id = (request.POST.get('doc_id') or '').strip()
+    group_key = _sale_claim_group_key(sale)
+
+    try:
+        doc = ClaimDocument.objects.get(pk=doc_id, group_key=group_key)
+    except (ClaimDocument.DoesNotExist, ValueError):
+        return JsonResponse({'success': False, 'error': 'Document not found.'}, status=404)
+
+    if doc.file:
+        doc.file.delete(save=False)
+    doc.delete()
+    return JsonResponse({'success': True})
 
 
 @login_required
@@ -1648,19 +1677,64 @@ def _build_sale_context(sale, request_user):
         dt = _claim_doc_type_from_filename(d.file.name)
         if dt and dt not in docs_by_type:
             docs_by_type[dt] = d
-    important_doc_types = _important_claim_doc_types(limit=3)
-    important_documents = [{'doc_type': dt, 'doc': docs_by_type.get(dt)} for dt in important_doc_types]
+    # Fixed set of main job documents shown on the sale. The coversheet is
+    # rendered separately; these four are matched against attached claim docs by
+    # their cleaned type token (see _claim_doc_type_from_filename).
+    # 'claim' marks documents that originate from the Claim Service (and so get a
+    # search button). The Contract is a simple uploaded/generated PDF, not a
+    # claim document, so it has no search action.
+    important_documents = [
+        {'doc_type': key, 'label': label, 'claim': claim, 'doc': docs_by_type.get(key)}
+        for key, label, claim in (
+            ('Contract', 'Contract', False),
+            ('A3ProductionDrawings', 'A3 Production Drawings', True),
+            ('BillOfMaterials', 'Bill Of Materials', True),
+            ('ProductionDrawings', 'Production Drawings', True),
+        )
+    ]
     coversheet_history = list(coversheet.history_entries.select_related('changed_by').all()[:25])
 
     cad = (coversheet.cad_number or '').strip().lower()
     cad_matches_claim_docs = False
+    cad_expected_numbers = []
     if cad:
+        # Claim service documents often reference the CAD number without its
+        # leading zero(s) (e.g. "23359" instead of "023359"), so compare the
+        # numeric value with leading zeros stripped rather than relying on an
+        # exact substring match. The CAD number lives in the document's
+        # group key / filename (e.g. "1111_Radley_022115"), so search those too.
+        cad_digits = re.sub(r'\D', '', cad)
+        cad_norm = cad_digits.lstrip('0')
+        # The contract number also appears in the document names/group keys, so
+        # ignore it when collecting CAD candidates — it is not a CAD reference.
+        contract_norm = re.sub(r'\D', '', sale.contract_number or '').lstrip('0')
+        seen_numbers = set()
         for d in claim_docs:
-            haystack = f"{d.title or ''} {os.path.basename(d.file.name or '')}".lower()
-            if cad in haystack:
+            haystack = (
+                f"{d.title or ''} {d.group_key or ''} "
+                f"{os.path.basename(d.file.name or '')}"
+            ).lower()
+            if cad and cad in haystack:
                 cad_matches_claim_docs = True
                 break
-    cad_mismatch = bool(cad) and not cad_matches_claim_docs
+            tokens = re.findall(r'\d+', haystack)
+            if cad_norm and any(t.lstrip('0') == cad_norm for t in tokens):
+                cad_matches_claim_docs = True
+                break
+            # Collect CAD-like numbers from the docs so the user can see what
+            # value the documents actually reference, excluding the contract
+            # number which is not a CAD reference.
+            for t in tokens:
+                tnorm = t.lstrip('0')
+                if contract_norm and tnorm == contract_norm:
+                    continue
+                if 5 <= len(t) <= 6 and t not in seen_numbers:
+                    seen_numbers.add(t)
+                    cad_expected_numbers.append(t)
+    # Only flag a mismatch when the documents actually contain a CAD-like number
+    # that differs from the entered value. If the docs only reference the
+    # contract number (or no CAD candidate at all), there is nothing to flag.
+    cad_mismatch = bool(cad) and not cad_matches_claim_docs and bool(cad_expected_numbers)
 
     gallery_images = []
     if sale.order:
@@ -1773,6 +1847,7 @@ def _build_sale_context(sale, request_user):
         'designers': Designer.objects.order_by('name'),
         'coversheet_history': coversheet_history,
         'cad_mismatch': cad_mismatch,
+        'cad_expected_numbers': cad_expected_numbers,
         'claim_group_key': claim_group_key,
         'important_documents': important_documents,
         'related_sales': related_sales,

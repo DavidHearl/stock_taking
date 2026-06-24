@@ -167,7 +167,7 @@
             </div>
         </div>
         <div class="modal-footer">
-            <button type="button" class="btn btn-danger cal-footer-left" onclick="deleteDetailAppointment()">Delete</button>
+            <button type="button" class="btn btn-danger cal-footer-left" onclick="deleteDetailAppointment()">Remove</button>
             <button type="button" class="btn btn-secondary" onclick="closeModal('appointmentDetailModal')">Close</button>
             <button type="button" class="btn btn-primary" onclick="saveDetailMove()">Save Changes</button>
         </div>
@@ -277,22 +277,22 @@
                          ondragend="handleDragEnd(event)"
                          data-appointment-id="{{ appt.id }}"
                          data-order-id="{{ appt.order.id }}"
-                         data-customer-name="{{ appt.order.first_name|escapejs }} {{ appt.order.last_name|escapejs }}"
+                         data-customer-name="{{ appt.order.first_name }} {{ appt.order.last_name }}"
                          data-interior="{{ appt.order.interior_completed|yesno:'true,false' }}"
                          data-door="{{ appt.order.door_completed|yesno:'true,false' }}"
                          data-accessories="{{ appt.order.accessories_completed|yesno:'true,false' }}"
                          data-materials="{{ appt.order.materials_completed|yesno:'true,false' }}"
                          data-paperwork="{{ appt.order.paperwork_completed|yesno:'true,false' }}"
-                         data-sale-number="{{ appt.order.sale_number|escapejs }}"
-                         data-customer-number="{{ appt.order.customer_number|escapejs }}"
-                         data-fitter="{{ appt.get_fitter_display|escapejs }}"
-                         data-fitter-code="{{ appt.fitter|escapejs }}"
+                         data-sale-number="{{ appt.order.sale_number }}"
+                         data-customer-number="{{ appt.order.customer_number }}"
+                         data-fitter="{{ appt.get_fitter_display }}"
+                         data-fitter-code="{{ appt.fitter }}"
                          data-order-date="{{ appt.order.order_date|date:'d/m/Y' }}"
                          data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
                          data-fit-duration="{{ appt.fit_duration }}"
-                         data-address="{{ appt.order.address|default:'-'|escapejs }}"
-                         data-postcode="{{ appt.order.postcode|default:'-'|escapejs }}"
-                         data-designer="{{ appt.order.designer.name|default:'-'|escapejs }}"
+                         data-address="{{ appt.order.address|default:'-' }}"
+                         data-postcode="{{ appt.order.postcode|default:'-' }}"
+                         data-designer="{{ appt.order.designer.name|default:'-' }}"
                          data-order-url="/order/{{ appt.order.id }}/"
                          data-anthill-url="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ appt.order.sale_number }}"
                          {% if appt.fin %}data-sale-value="{{ appt.fin.sale_value|floatformat:0 }}"
@@ -321,15 +321,15 @@
                          ondragend="handleDragEnd(event)"
                          data-appointment-id="{{ appt.id }}"
                          data-remedial-id="{{ appt.remedial.id }}"
-                         data-customer-name="{{ appt.remedial.remedial_number|escapejs }} - {{ appt.remedial.first_name|escapejs }} {{ appt.remedial.last_name|escapejs }}"
-                         data-sale-number="{{ appt.remedial.remedial_number|escapejs }}"
-                         data-customer-number="{{ appt.remedial.customer_number|escapejs }}"
-                         data-fitter="{{ appt.get_fitter_display|escapejs }}"
-                         data-fitter-code="{{ appt.fitter|escapejs }}"
+                         data-customer-name="{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name }} {{ appt.remedial.last_name }}"
+                         data-sale-number="{{ appt.remedial.remedial_number }}"
+                         data-customer-number="{{ appt.remedial.customer_number }}"
+                         data-fitter="{{ appt.get_fitter_display }}"
+                         data-fitter-code="{{ appt.fitter }}"
                          data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
                          data-fit-duration="{{ appt.fit_duration }}"
-                         data-address="{{ appt.remedial.address|default:'-'|escapejs }}"
-                         data-postcode="{{ appt.remedial.postcode|default:'-'|escapejs }}"
+                         data-address="{{ appt.remedial.address|default:'-' }}"
+                         data-postcode="{{ appt.remedial.postcode|default:'-' }}"
                          data-pos="[]"
                          onclick="selectAppointmentFromCard(this)">
                         <span class="job-name">{{ appt.remedial.remedial_number }} - {{ appt.remedial.first_name }} {{ appt.remedial.last_name }}</span>
@@ -412,12 +412,15 @@
              draggable="true"
              data-type="order"
              data-id="{{ order.id }}"
-             data-name="{{ order.first_name|escapejs }} {{ order.last_name|escapejs }}"
-             data-sale-number="{{ order.sale_number|escapejs }}"
+             data-name="{{ order.first_name }} {{ order.last_name }}"
+             data-sale-number="{{ order.sale_number }}"
+             data-fit-days="{{ order.fit_days|default_if_none:'' }}"
              ondragstart="handlePanelDragStart(event)"
              ondragend="handlePanelDragEnd(event)">
+            {% if order.fit_days %}<span class="panel-job-days" title="Fit days from coversheet">{{ order.fit_days|floatformat:"-1" }}d</span>{% endif %}
             <span class="panel-job-name">{{ order.first_name }} {{ order.last_name }}</span>
             <span class="panel-job-meta">{{ order.sale_number }}</span>
+            {% if order.sale_pk %}<a href="{% url 'sale_detail' order.sale_pk %}" class="panel-job-link" title="Open sale" target="_blank" rel="noopener" draggable="false" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"><i class="bi bi-box-arrow-up-right"></i></a>{% endif %}
         </div>
         {% endfor %}
         {% else %}
@@ -433,8 +436,8 @@
              draggable="true"
              data-type="remedial"
              data-id="{{ rem.id }}"
-             data-name="{{ rem.first_name|escapejs }} {{ rem.last_name|escapejs }}"
-             data-sale-number="{{ rem.remedial_number|escapejs }}"
+             data-name="{{ rem.first_name }} {{ rem.last_name }}"
+             data-sale-number="{{ rem.remedial_number }}"
              ondragstart="handlePanelDragStart(event)"
              ondragend="handlePanelDragEnd(event)">
             <span class="panel-job-name">{{ rem.first_name }} {{ rem.last_name }}</span>
@@ -795,7 +798,7 @@ function pollPaymentProgress(jobId, total) {
                 const btn = document.getElementById('checkPaymentsBtn');
                 if (btn) { btn.disabled = false; }
             } else {
-                showPaymentProgress(done, tot, done + ' of ' + tot + ' sales checked');
+                showPaymentProgress(done, tot, data.message || (done + ' of ' + tot + ' sales checked'), data.eta);
                 setTimeout(tick, 1000);
             }
         })
@@ -821,7 +824,7 @@ function finishPaymentProgress(quiet, created) {
     }, 600);
 }
 
-function showPaymentProgress(done, total, label) {
+function showPaymentProgress(done, total, label, eta) {
     let el = document.getElementById('paymentProgress');
     if (!el) {
         el = document.createElement('div');
@@ -844,7 +847,7 @@ function showPaymentProgress(done, total, label) {
     const pct = total > 0 ? Math.round((done / total) * 100) : (label === 'Complete' ? 100 : 6);
     fill.style.width = pct + '%';
     fill.classList.toggle('indeterminate', total <= 0 && label !== 'Complete');
-    count.textContent = total > 0 ? pct + '%' : '';
+    count.textContent = total > 0 ? (pct + '%' + (eta ? ' · ' + eta : '')) : '';
     lbl.textContent = label || '';
 }
 
@@ -1151,11 +1154,11 @@ function updateDetailStatus(field, checked) {
 
 function deleteDetailAppointment() {
     if (!selectedAppointmentId) return;
-    if (!confirm('Delete this appointment?')) return;
+    if (!confirm('Remove this appointment from the calendar? The order itself is not deleted.')) return;
     fetch(`/fit-board/delete-appointment/${selectedAppointmentId}/`, {
         method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token }}' }
     }).then(r => r.json()).then(data => { if (data.success) location.reload(); else alert(data.error); })
-    .catch(() => alert('Error deleting'));
+    .catch(() => alert('Error removing'));
 }
 
 function saveDetailMove() {

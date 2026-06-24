@@ -12288,6 +12288,33 @@ def calendar_view(request):
         if len(pfp_orders) >= 80:
             break
 
+    # Days required per job, taken from the sale coversheet (fit_days). Shown on
+    # the job-list cards and used to size the appointment box when dragged onto
+    # the calendar. Also resolve each order's AnthillSale pk so the card can link
+    # straight to the sale.
+    from .models import SaleCoverSheet
+    _cs_nums = [o.sale_number for o in pfp_orders if o.sale_number]
+    _cs_days = {}
+    _sale_pk_map = {}
+    if _cs_nums:
+        for _r in (
+            SaleCoverSheet.objects
+            .filter(sale__anthill_activity_id__in=_cs_nums, fit_days__isnull=False)
+            .values('sale__anthill_activity_id', 'fit_days')
+        ):
+            _cs_days.setdefault(_r['sale__anthill_activity_id'], _r['fit_days'])
+        for _s in (
+            AnthillSale.objects
+            .filter(anthill_activity_id__in=_cs_nums)
+            .values('pk', 'anthill_activity_id')
+        ):
+            _sale_pk_map.setdefault(_s['anthill_activity_id'], _s['pk'])
+    for _o in pfp_orders:
+        # The coversheet slider defaults to 1 day when unset, so mirror that on
+        # the calendar card: show 1d (and span one day) when no value is stored.
+        _o.fit_days = _cs_days.get(_o.sale_number) or Decimal('1')
+        _o.sale_pk = _sale_pk_map.get(_o.sale_number)
+
     # Unscheduled / outstanding remedials (incomplete, no current appointment)
     scheduled_remedial_ids = FitAppointment.objects.filter(
         remedial__isnull=False
@@ -12390,22 +12417,41 @@ def calendar_check_payments(request):
     }, timeout=600)
 
     def _run(sale_list, key):
+        import time as _time
         from django.db import connection
         from django.core.cache import cache as _cache
 
-        def _progress(done, tot, created):
+        start_ts = _time.monotonic()
+
+        def _fmt_eta(secs):
+            secs = int(round(secs))
+            if secs <= 0:
+                return ''
+            if secs < 60:
+                return f'~{secs}s left'
+            m, s = divmod(secs, 60)
+            return f'~{m}m {s:02d}s left'
+
+        def _progress(done, tot, created, message=None):
+            eta = ''
+            if 0 < done < tot:
+                elapsed = _time.monotonic() - start_ts
+                if elapsed > 0:
+                    eta = _fmt_eta(elapsed / done * (tot - done))
             _cache.set(key, {
                 'status': 'running',
                 'total': tot,
                 'done': done,
                 'created': created,
+                'message': message or '',
+                'eta': eta,
             }, timeout=600)
 
         created_total = 0
         try:
-            from .dashboard_view import _sync_xero_payments_for_sales
-            created_total = _sync_xero_payments_for_sales(
-                sale_list, progress_callback=_progress)
+            from .dashboard_view import _sync_calendar_payments
+            created_total = _sync_calendar_payments(
+                sale_list, progress=_progress)
         except Exception:
             logger.exception('calendar_check_payments background sync failed')
             _cache.set(key, {
@@ -13357,6 +13403,28 @@ def move_fit_appointment(request, appointment_id):
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
 
 
+def _order_fit_duration(order):
+    """Whole-day calendar span for an order's fit, derived from the sale
+    coversheet ``fit_days`` (rounded up so a 1.5-day job spans 2 day cells).
+    Returns ``None`` when there's no coversheet duration set."""
+    import math
+    if not order:
+        return None
+    sale = order.anthill_sale.first()
+    if not sale:
+        return None
+    try:
+        cover = sale.cover_sheet
+    except Exception:
+        cover = None
+    if cover and cover.fit_days:
+        try:
+            return max(1, math.ceil(float(cover.fit_days)))
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 @login_required
 def create_provisional_appointment(request):
     """Create a provisional FitAppointment by dragging a PFP order or remedial onto the calendar."""
@@ -13379,6 +13447,7 @@ def create_provisional_appointment(request):
                 fit_date=fit_date,
                 fitter=fitter,
                 is_provisional=True,
+                fit_duration=_order_fit_duration(order) or 1,
             )
             order.fit_date = fit_date
             order.save(update_fields=['fit_date'])

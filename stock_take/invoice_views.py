@@ -838,6 +838,172 @@ def _create_invoice_from_payment(pay, now):
     )
 
 
+def scrape_anthill_payments(period='last_28_days', location_filter='', emit=None):
+    """Scrape the Anthill CRM "Payments" screen and return the raw payment rows.
+
+    Shared by the SSE invoice-sync endpoint and the calendar payment check.
+    ``emit(payload)`` is an optional progress callback (same event shape the SSE
+    endpoint streams); it is called best-effort and never allowed to raise.
+    Returns ``(scraped_rows, filtered_out)`` where each row is the dict produced
+    by :func:`_row_to_payment`.
+
+    Raises ``RuntimeError`` on hard failures (missing credentials, Playwright not
+    installed) so callers can decide how to surface them.
+    """
+    def _e(payload):
+        if emit:
+            try:
+                emit(payload)
+            except Exception:
+                pass
+
+    username = os.getenv('ANTHILL_USER_USERNAME')
+    password = os.getenv('ANTHILL_USER_PASSWORD')
+    subdomain = os.getenv('ANTHILL_SUBDOMAIN', 'sliderobes')
+
+    if not username or not password:
+        raise RuntimeError('ANTHILL_USER_USERNAME / ANTHILL_USER_PASSWORD not configured.')
+
+    base_url = f'https://{subdomain}.anthillcrm.com'
+    period_qs = '' if period == 'all_time' else period
+    target_url = f'{base_url}/n/screens/12/CAIaEgmLsAFMrjHYQhGCvnwKumuXYyiDAw?d={period_qs}'
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        raise RuntimeError('Playwright is not installed on the server.')
+
+    filtered_out = 0
+    loc_label = location_filter or 'All Locations'
+    scraped_rows = []   # collect raw payment dicts here
+
+    # ── Scrape with Playwright (no ORM calls) ────
+    with sync_playwright() as p:
+        _e({'type': 'status', 'message': 'Launching browser...'})
+
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        )
+        page = context.new_page()
+
+        _e({'type': 'status', 'message': 'Connecting to Anthill CRM...'})
+        page.goto(target_url, timeout=30000)
+        page.wait_for_load_state('domcontentloaded', timeout=15000)
+
+        # Handle login
+        current_url = page.url.lower()
+        if 'sign-in' in current_url or 'login' in current_url or 'signin' in current_url:
+            _e({'type': 'status', 'message': 'Logging in...'})
+            all_inputs = page.locator('input:visible').all()
+            text_inputs = [inp for inp in all_inputs
+                           if (inp.get_attribute('type') or 'text').lower() in ('text', 'email', '')]
+            pass_inputs = [inp for inp in all_inputs
+                           if (inp.get_attribute('type') or '').lower() == 'password']
+            if text_inputs:
+                text_inputs[0].fill(username)
+            if pass_inputs:
+                pass_inputs[0].fill(password)
+            submit = page.locator('button[type="submit"], input[type="submit"]').first
+            submit.click()
+            page.wait_for_load_state('networkidle', timeout=30000)
+            if '/n/screens/12/' not in page.url:
+                page.goto(target_url, timeout=30000)
+                page.wait_for_load_state('networkidle', timeout=30000)
+
+        # Wait for the table
+        if location_filter:
+            _e({'type': 'status', 'message': f'Filtering for {loc_label}...'})
+        else:
+            _e({'type': 'status', 'message': 'Waiting for payments table...'})
+        try:
+            page.wait_for_selector('table.sortable tbody tr', timeout=30000)
+        except Exception:
+            pass
+
+        # Determine page count
+        pager = page.locator('#component-1 .pager select')
+        total_pages = 1
+        if pager.count() > 0:
+            options = pager.locator('option').all()
+            total_pages = len(options)
+
+        # ── Scrape page by page ───────────────────────────
+        for pg_num in range(1, total_pages + 1):
+            _e({'type': 'page', 'current': pg_num, 'total': total_pages})
+
+            if pg_num > 1:
+                pager.select_option(str(pg_num))
+                page.wait_for_timeout(1500)
+                try:
+                    page.wait_for_selector('table.sortable tbody tr', timeout=15000)
+                except Exception:
+                    pass
+
+            parser = _AnthillPaymentsTableParser()
+            parser.feed(page.content())
+            if not parser.found:
+                continue
+
+            for row in parser.rows:
+                pay = _row_to_payment(row)
+                if not pay:
+                    continue
+
+                # Filter by selected location
+                if location_filter:
+                    row_showroom = (pay['showroom'] or '').strip().lower()
+                    if location_filter.lower() not in row_showroom:
+                        filtered_out += 1
+                        continue
+
+                scraped_rows.append(pay)
+
+        browser.close()
+
+    return scraped_rows, filtered_out
+
+
+def confirmed_anthill_payments_by_contract(period='last_12_months', location_filter='', use_cache=True):
+    """Return confirmed Anthill payments grouped by contract number.
+
+    ``{contract_number: [{'amount': Decimal, 'date': date, 'payment_type': str}, ...]}``
+
+    Scrapes the Anthill payments screen (result cached briefly so repeated
+    calendar checks stay fast). Returns ``{}`` on any failure so callers can
+    treat Anthill enrichment as best-effort.
+    """
+    from django.core.cache import cache
+
+    cache_key = f'anthill_confirmed_payments:{period}:{(location_filter or "").lower()}'
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+    try:
+        rows, _ = scrape_anthill_payments(period=period, location_filter=location_filter)
+    except Exception:
+        logger.exception('Anthill confirmed-payment scrape failed')
+        return {}
+
+    by_contract = {}
+    for pay in rows:
+        if (pay.get('status') or '').strip().lower() != 'confirmed':
+            continue
+        contract = (pay.get('contract_number') or '').strip()
+        if not contract:
+            continue
+        by_contract.setdefault(contract, []).append({
+            'amount': _parse_amount(pay.get('amount', '')),
+            'date': _parse_date(pay.get('payment_date', '')),
+            'payment_type': pay.get('payment_type', '') or 'Payment',
+        })
+
+    cache.set(cache_key, by_contract, timeout=300)
+    return by_contract
+
+
 _SENTINEL = object()  # marks end of SSE stream
 
 
@@ -880,111 +1046,14 @@ def sync_invoices_from_anthill(request):
     def _worker():
         """Runs in a daemon thread — all sync I/O is safe here."""
         try:
-            username = os.getenv('ANTHILL_USER_USERNAME')
-            password = os.getenv('ANTHILL_USER_PASSWORD')
-            subdomain = os.getenv('ANTHILL_SUBDOMAIN', 'sliderobes')
-
-            if not username or not password:
-                _emit({'type': 'error', 'message': 'ANTHILL_USER_USERNAME / ANTHILL_USER_PASSWORD not configured.'})
-                return
-
-            base_url = f'https://{subdomain}.anthillcrm.com'
-            period_qs = '' if period == 'all_time' else period
-            target_url = f'{base_url}/n/screens/12/CAIaEgmLsAFMrjHYQhGCvnwKumuXYyiDAw?d={period_qs}'
-
-            try:
-                from playwright.sync_api import sync_playwright
-            except ImportError:
-                _emit({'type': 'error', 'message': 'Playwright is not installed on the server.'})
-                return
-
-            filtered_out = 0
-            loc_label = location_filter or 'All Locations'
-            scraped_rows = []   # collect raw payment dicts here
-
             # ── Phase 1: Scrape with Playwright (no ORM calls) ────
-            with sync_playwright() as p:
-                _emit({'type': 'status', 'message': 'Launching browser...'})
-
-                browser = p.chromium.launch(headless=True)
-                context = browser.new_context(
-                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                )
-                page = context.new_page()
-
-                _emit({'type': 'status', 'message': 'Connecting to Anthill CRM...'})
-                page.goto(target_url, timeout=30000)
-                page.wait_for_load_state('domcontentloaded', timeout=15000)
-
-                # Handle login
-                current_url = page.url.lower()
-                if 'sign-in' in current_url or 'login' in current_url or 'signin' in current_url:
-                    _emit({'type': 'status', 'message': 'Logging in...'})
-                    all_inputs = page.locator('input:visible').all()
-                    text_inputs = [inp for inp in all_inputs
-                                   if (inp.get_attribute('type') or 'text').lower() in ('text', 'email', '')]
-                    pass_inputs = [inp for inp in all_inputs
-                                   if (inp.get_attribute('type') or '').lower() == 'password']
-                    if text_inputs:
-                        text_inputs[0].fill(username)
-                    if pass_inputs:
-                        pass_inputs[0].fill(password)
-                    submit = page.locator('button[type="submit"], input[type="submit"]').first
-                    submit.click()
-                    page.wait_for_load_state('networkidle', timeout=30000)
-                    if '/n/screens/12/' not in page.url:
-                        page.goto(target_url, timeout=30000)
-                        page.wait_for_load_state('networkidle', timeout=30000)
-
-                # Wait for the table
-                if location_filter:
-                    _emit({'type': 'status', 'message': f'Filtering for {loc_label}...'})
-                else:
-                    _emit({'type': 'status', 'message': 'Waiting for payments table...'})
-                try:
-                    page.wait_for_selector('table.sortable tbody tr', timeout=30000)
-                except Exception:
-                    pass
-
-                # Determine page count
-                pager = page.locator('#component-1 .pager select')
-                total_pages = 1
-                if pager.count() > 0:
-                    options = pager.locator('option').all()
-                    total_pages = len(options)
-
-                # ── Scrape page by page ───────────────────────────
-                for pg_num in range(1, total_pages + 1):
-                    _emit({'type': 'page', 'current': pg_num, 'total': total_pages})
-
-                    if pg_num > 1:
-                        pager.select_option(str(pg_num))
-                        page.wait_for_timeout(1500)
-                        try:
-                            page.wait_for_selector('table.sortable tbody tr', timeout=15000)
-                        except Exception:
-                            pass
-
-                    parser = _AnthillPaymentsTableParser()
-                    parser.feed(page.content())
-                    if not parser.found:
-                        continue
-
-                    for row in parser.rows:
-                        pay = _row_to_payment(row)
-                        if not pay:
-                            continue
-
-                        # Filter by selected location
-                        if location_filter:
-                            row_showroom = (pay['showroom'] or '').strip().lower()
-                            if location_filter.lower() not in row_showroom:
-                                filtered_out += 1
-                                continue
-
-                        scraped_rows.append(pay)
-
-                browser.close()
+            try:
+                scraped_rows, filtered_out = scrape_anthill_payments(
+                    period=period, location_filter=location_filter, emit=_emit)
+            except RuntimeError as exc:
+                _emit({'type': 'error', 'message': str(exc)})
+                return
+            loc_label = location_filter or 'All Locations'
 
             # ── Phase 2: Check scraped rows against DB ────────────
             # Playwright context is closed so there is no event loop
