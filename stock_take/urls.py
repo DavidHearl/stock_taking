@@ -369,6 +369,7 @@ urlpatterns = [
     path('add-designer/', views.add_designer, name='add_designer'),
     path('search/', views.search_orders, name='search_orders'),
     path('global-search/', views.global_search, name='global_search'),
+    path('global-search/api/', views.global_search_api, name='global_search_api'),
     path('reports/', views.reports_index, name='reports_index'),
     path('material-report/', views.material_report, name='material_report'),
     path('material-shortage/', views.material_shortage, name='material_shortage'),

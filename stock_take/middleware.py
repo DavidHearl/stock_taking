@@ -60,6 +60,7 @@ EXEMPT_URL_NAMES = {
     'password_reset_complete',
     'toggle_dark_mode',
     'global_search',
+    'global_search_api',
     'search_customers',
     'search_orders_api',
     'search_remedials_api',
@@ -190,6 +191,7 @@ logger = logging.getLogger(__name__)
 _SKIP_URL_NAMES = {
     'toggle_dark_mode',
     'global_search',
+    'global_search_api',
     'search_customers',
     'search_orders_api',
     'search_remedials_api',

@@ -10,6 +10,7 @@ from .pricing_utils import apply_invoice_price
 import logging
 import requests
 import json
+import re
 import time
 from datetime import datetime, timedelta
 
@@ -2740,7 +2741,7 @@ def purchase_order_send_email(request, po_id):
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
     recipient = data.get('to', '').strip()
-    cc_list = [e.strip() for e in data.get('cc', '').split(',') if e.strip()]
+    cc_list = [e.strip() for e in re.split(r'[,;]', data.get('cc', '')) if e.strip()]
     subject = data.get('subject', '').strip()
     body = data.get('body', '').strip()
     attachment_ids = data.get('attachment_ids', [])
@@ -2752,6 +2753,10 @@ def purchase_order_send_email(request, po_id):
             recipient = supplier.email
         else:
             return JsonResponse({'error': 'No recipient email provided and supplier has no email on file.'}, status=400)
+
+    # The recipient field (or supplier email) may contain multiple comma/
+    # semicolon separated addresses, so split it into a proper list.
+    recipient_list = [e.strip() for e in re.split(r'[,;]', recipient) if e.strip()]
 
     if not subject:
         subject = f'Purchase Order {po.display_number} - Sliderobes'
@@ -2814,7 +2819,7 @@ def purchase_order_send_email(request, po_id):
             subject=subject,
             body=body,
             from_email=settings.PO_FROM_EMAIL,
-            to=[recipient],
+            to=recipient_list,
             cc=cc_list if cc_list else None,
         )
         email.attach(pdf_filename, pdf_buffer.read(), 'application/pdf')
@@ -2837,7 +2842,7 @@ def purchase_order_send_email(request, po_id):
         # Mark PO as email sent
         po.email_sent = True
         po.email_sent_at = datetime.now()
-        po.email_sent_to = recipient
+        po.email_sent_to = ', '.join(recipient_list)
         # Lock the issue date to today if not already set
         if not po.issue_date:
             po.issue_date = datetime.now().strftime('%d/%m/%Y')
@@ -2857,10 +2862,11 @@ def purchase_order_send_email(request, po_id):
 
         po.save(update_fields=update_fields)
         
-        logger.info(f'PO {po.display_number} emailed to {recipient} by {request.user}')
+        recipient_display = ', '.join(recipient_list)
+        logger.info(f'PO {po.display_number} emailed to {recipient_display} by {request.user}')
         return JsonResponse({
             'success': True,
-            'message': f'Purchase order sent to {recipient}',
+            'message': f'Purchase order sent to {recipient_display}',
             'new_status': po.status,
         })
     except Exception as e:

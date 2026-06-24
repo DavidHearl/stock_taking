@@ -1240,6 +1240,163 @@ def global_search(request):
         **results,
     })
 
+
+@login_required
+def global_search_api(request):
+    """Live JSON results for the top search bar dropdown.
+
+    Returns categorised matches (purchase orders, the associated customer/order,
+    supplier and any linked invoices) so the user can jump straight to what they
+    are looking for, e.g. typing "PO1770".
+    """
+    from django.urls import reverse
+    from .models import PurchaseOrder, Customer, Supplier, Lead, Invoice, PurchaseInvoice
+
+    query = request.GET.get('q', '').strip()
+    groups = []
+    total = 0
+
+    if len(query) < 2:
+        return JsonResponse({'query': query, 'groups': [], 'total': 0})
+
+    per_section = 5
+
+    def add_group(label, icon, items):
+        nonlocal total
+        if items:
+            groups.append({'label': label, 'icon': icon, 'items': items})
+            total += len(items)
+
+    # --- Purchase Orders ---
+    pos = list(PurchaseOrder.objects.filter(
+        Q(number__icontains=query) |
+        Q(display_number__icontains=query) |
+        Q(supplier_name__icontains=query) |
+        Q(project_name__icontains=query) |
+        Q(project_number__icontains=query)
+    ).order_by('-workguru_id')[:per_section])
+    add_group('Purchase Orders', 'bi-receipt', [
+        {
+            'title': po.display_number or po.number or f'PO #{po.pk}',
+            'subtitle': ' · '.join(p for p in [po.supplier_name, po.project_name, po.status] if p),
+            'url': reverse('purchase_order_detail', kwargs={'po_id': po.workguru_id}),
+        }
+        for po in pos
+    ])
+
+    # --- Orders ---
+    orders = Order.objects.filter(
+        Q(first_name__icontains=query) |
+        Q(last_name__icontains=query) |
+        Q(sale_number__icontains=query) |
+        Q(customer_number__icontains=query)
+    ).order_by('-order_date')[:per_section]
+    add_group('Orders', 'bi-cart3', [
+        {
+            'title': o.sale_number or f'Order #{o.pk}',
+            'subtitle': ' · '.join(p for p in [o.customer_name, o.address] if p),
+            'url': reverse('order_details', kwargs={'order_id': o.pk}),
+        }
+        for o in orders
+    ])
+
+    # --- Customers ---
+    customers = Customer.objects.filter(
+        Q(name__icontains=query) |
+        Q(email__icontains=query)
+    ).order_by('name')[:per_section]
+    add_group('Customers', 'bi-people', [
+        {
+            'title': c.name,
+            'subtitle': ' · '.join(p for p in [c.email, c.phone] if p),
+            'url': reverse('customer_detail', kwargs={'pk': c.pk}),
+        }
+        for c in customers
+    ])
+
+    # --- Suppliers ---
+    supplier_names = {po.supplier_name for po in pos if po.supplier_name}
+    suppliers = Supplier.objects.filter(
+        Q(name__icontains=query) | Q(name__in=supplier_names)
+    ).order_by('name')[:per_section]
+    add_group('Suppliers', 'bi-truck', [
+        {
+            'title': s.name,
+            'subtitle': ' · '.join(p for p in [s.email, s.phone] if p),
+            'url': reverse('supplier_detail', kwargs={'supplier_id': s.workguru_id}),
+        }
+        for s in suppliers
+    ])
+
+    # --- Sales Invoices (direct match + linked to matched POs) ---
+    invoice_q = (
+        Q(invoice_number__icontains=query) |
+        Q(client_name__icontains=query) |
+        Q(client_po__icontains=query) |
+        Q(contract_number__icontains=query)
+    )
+    if pos:
+        invoice_q |= Q(purchase_orders__in=pos)
+    invoices = Invoice.objects.filter(invoice_q).distinct().order_by('-date')[:per_section]
+    add_group('Invoices', 'bi-file-earmark-text', [
+        {
+            'title': inv.invoice_number,
+            'subtitle': ' · '.join(p for p in [inv.client_name, inv.get_payment_status_display()] if p),
+            'url': reverse('invoice_detail', kwargs={'invoice_id': inv.pk}),
+        }
+        for inv in invoices
+    ])
+
+    # --- Purchase / Supplier Invoices (direct match + linked to matched POs) ---
+    pinvoice_q = (
+        Q(invoice_number__icontains=query) |
+        Q(supplier_reference__icontains=query) |
+        Q(supplier_name__icontains=query)
+    )
+    if pos:
+        pinvoice_q |= Q(purchase_orders__in=pos)
+    purchase_invoices = PurchaseInvoice.objects.filter(pinvoice_q).distinct().order_by('-date')[:per_section]
+    add_group('Supplier Invoices', 'bi-file-earmark-ruled', [
+        {
+            'title': pi.invoice_number,
+            'subtitle': ' · '.join(p for p in [pi.supplier_name, pi.get_payment_status_display()] if p),
+            'url': reverse('purchase_invoice_detail', kwargs={'invoice_id': pi.pk}),
+        }
+        for pi in purchase_invoices
+    ])
+
+    # --- Products ---
+    products = StockItem.objects.filter(
+        Q(sku__icontains=query) | Q(name__icontains=query)
+    ).order_by('name')[:per_section]
+    add_group('Products', 'bi-box-seam', [
+        {
+            'title': p.sku,
+            'subtitle': p.name,
+            'url': reverse('product_detail', kwargs={'item_id': p.pk}),
+        }
+        for p in products
+    ])
+
+    # --- Leads ---
+    leads = Lead.objects.filter(
+        Q(name__icontains=query) |
+        Q(email__icontains=query) |
+        Q(phone__icontains=query) |
+        Q(anthill_customer_id__icontains=query)
+    ).order_by('-created_at')[:per_section]
+    add_group('Leads', 'bi-person-plus', [
+        {
+            'title': l.name,
+            'subtitle': ' · '.join(p for p in [l.email, l.phone] if p),
+            'url': reverse('lead_detail', kwargs={'pk': l.pk}),
+        }
+        for l in leads
+    ])
+
+    return JsonResponse({'query': query, 'groups': groups, 'total': total})
+
+
 @login_required
 def reports_index(request):
     """Single landing page listing all available reports."""
