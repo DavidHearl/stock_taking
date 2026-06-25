@@ -24,6 +24,9 @@
         <button class="btn-add-supplier" onclick="document.getElementById('addSupplierModal').style.display='flex'">
             <i class="bi bi-plus-lg"></i> Add Supplier
         </button>
+        <button class="btn-add-supplier" onclick="openXeroImportModal()">
+            <i class="bi bi-cloud-download"></i> Import from Xero
+        </button>
     </div>
 
     {% if suppliers %}
@@ -137,6 +140,39 @@
         </form>
     </div>
 </div>
+
+<!-- Import from Xero Modal -->
+<div class="modal-overlay" id="xeroImportModal" style="display:none;">
+    <div class="modal-box" style="max-width:640px;">
+        <div class="modal-header">
+            <h2><i class="bi bi-cloud-download"></i> Import Suppliers from Xero</h2>
+            <button class="modal-close" onclick="closeXeroImportModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="xeroImportControls" style="display:none;align-items:center;gap:12px;margin-bottom:12px;">
+                <input type="text" id="xeroSupplierSearch" placeholder="Search all Xero contacts by name…" autocomplete="off"
+                       oninput="onXeroSearchInput(this.value)"
+                       style="flex:1;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;">
+                <label style="display:flex;align-items:center;gap:6px;white-space:nowrap;cursor:pointer;font-size:0.9rem;">
+                    <input type="checkbox" id="xeroSelectAll" onchange="toggleSelectAllXero(this)"> Select all
+                </label>
+            </div>
+            <div id="xeroImportHint" style="display:none;font-size:0.8rem;color:var(--text-muted);margin-bottom:8px;">
+                Showing Xero suppliers. Type above to search all contacts (e.g. CIS subcontractors) to add as suppliers.
+            </div>
+            <div id="xeroImportStatus" style="padding:24px;text-align:center;color:var(--text-secondary);">
+                <i class="bi bi-hourglass-split"></i> Loading suppliers from Xero…
+            </div>
+            <div id="xeroSupplierList" style="max-height:50vh;overflow-y:auto;"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeXeroImportModal()">Cancel</button>
+            <button type="button" class="btn-save" id="xeroImportBtn" onclick="importSelectedXeroSuppliers()" disabled>
+                <i class="bi bi-check-lg"></i> Import Selected
+            </button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -199,5 +235,165 @@ document.getElementById('supplier-search').addEventListener('input', function ()
 });
 
 filterAndPaginate();
+
+// ── Import from Xero ────────────────────────────────────────────
+let xeroSuppliers = [];        // base IsSupplier list loaded on open
+let displayedContacts = [];    // currently rendered rows (suppliers or search results)
+let xeroSearchTimer = null;
+
+function getCsrf() {
+    return document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';
+}
+
+function openXeroImportModal() {
+    document.getElementById('xeroImportModal').style.display = 'flex';
+    document.getElementById('xeroSupplierSearch').value = '';
+    loadXeroSuppliers();
+}
+
+function closeXeroImportModal() {
+    document.getElementById('xeroImportModal').style.display = 'none';
+}
+
+function loadXeroSuppliers() {
+    const status = document.getElementById('xeroImportStatus');
+    const list = document.getElementById('xeroSupplierList');
+    const controls = document.getElementById('xeroImportControls');
+    const importBtn = document.getElementById('xeroImportBtn');
+    status.style.display = '';
+    status.innerHTML = '<i class="bi bi-hourglass-split"></i> Loading suppliers from Xero…';
+    list.innerHTML = '';
+    controls.style.display = 'none';
+    document.getElementById('xeroImportHint').style.display = 'none';
+    importBtn.disabled = true;
+    document.getElementById('xeroSelectAll').checked = false;
+
+    fetch('{% url "suppliers_fetch_xero" %}', {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin',
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.success) {
+            status.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${data.error || 'Failed to load suppliers'}`;
+            return;
+        }
+        xeroSuppliers = data.contacts || [];
+        status.style.display = 'none';
+        controls.style.display = 'flex';
+        document.getElementById('xeroImportHint').style.display = '';
+        renderXeroContacts(xeroSuppliers, 'No suppliers found in Xero.');
+    })
+    .catch(() => {
+        status.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Network error loading suppliers.';
+    });
+}
+
+function onXeroSearchInput(value) {
+    clearTimeout(xeroSearchTimer);
+    const q = (value || '').trim();
+    document.getElementById('xeroSelectAll').checked = false;
+    if (q.length < 2) {
+        // Restore the supplier list when the search is cleared
+        renderXeroContacts(xeroSuppliers, 'No suppliers found in Xero.');
+        return;
+    }
+    const status = document.getElementById('xeroImportStatus');
+    xeroSearchTimer = setTimeout(() => {
+        status.style.display = '';
+        status.innerHTML = '<i class="bi bi-hourglass-split"></i> Searching Xero contacts…';
+        document.getElementById('xeroSupplierList').innerHTML = '';
+        fetch(`{% url "suppliers_search_xero" %}?q=${encodeURIComponent(q)}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            credentials: 'same-origin',
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                status.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${data.error || 'Search failed'}`;
+                return;
+            }
+            status.style.display = 'none';
+            renderXeroContacts(data.contacts || [], 'No matching Xero contacts found.');
+        })
+        .catch(() => {
+            status.innerHTML = '<i class="bi bi-exclamation-triangle"></i> Network error during search.';
+        });
+    }, 350);
+}
+
+function renderXeroContacts(contacts, emptyMsg) {
+    displayedContacts = contacts || [];
+    const list = document.getElementById('xeroSupplierList');
+    const status = document.getElementById('xeroImportStatus');
+    if (!displayedContacts.length) {
+        list.innerHTML = '';
+        status.style.display = '';
+        status.innerHTML = `<i class="bi bi-inbox"></i> ${emptyMsg || 'Nothing to show.'}`;
+        updateXeroImportBtn();
+        return;
+    }
+    status.style.display = 'none';
+    list.innerHTML = displayedContacts.map((s, i) => {
+        const disabled = s.already_imported ? 'disabled' : '';
+        const note = s.already_imported
+            ? '<span style="font-size:0.78rem;color:var(--text-muted);">Already imported</span>'
+            : (s.email ? `<span style="font-size:0.8rem;color:var(--text-secondary);">${s.email}</span>` : '');
+        return `<label style="display:flex;align-items:center;gap:10px;padding:8px 6px;border-bottom:1px solid var(--border-color);cursor:${s.already_imported ? 'default' : 'pointer'};${s.already_imported ? 'opacity:0.55;' : ''}">
+                    <input type="checkbox" class="xero-supplier-cb" data-index="${i}" ${disabled} onchange="updateXeroImportBtn()">
+                    <span style="flex:1;font-weight:500;">${s.name}</span>
+                    ${note}
+                </label>`;
+    }).join('');
+    updateXeroImportBtn();
+}
+
+function toggleSelectAllXero(cb) {
+    document.querySelectorAll('#xeroSupplierList .xero-supplier-cb').forEach(box => {
+        if (!box.disabled) box.checked = cb.checked;
+    });
+    updateXeroImportBtn();
+}
+
+function updateXeroImportBtn() {
+    const count = document.querySelectorAll('.xero-supplier-cb:checked').length;
+    const btn = document.getElementById('xeroImportBtn');
+    btn.disabled = count === 0;
+    btn.innerHTML = count > 0
+        ? `<i class="bi bi-check-lg"></i> Import Selected (${count})`
+        : '<i class="bi bi-check-lg"></i> Import Selected';
+}
+
+function importSelectedXeroSuppliers() {
+    const ids = Array.from(document.querySelectorAll('.xero-supplier-cb:checked'))
+        .map(cb => displayedContacts[parseInt(cb.dataset.index, 10)].contact_id)
+        .filter(Boolean);
+    if (!ids.length) return;
+
+    const btn = document.getElementById('xeroImportBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Importing…';
+
+    fetch('{% url "suppliers_import_xero" %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrf() },
+        credentials: 'same-origin',
+        body: JSON.stringify({ contact_ids: ids }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            closeXeroImportModal();
+            location.reload();
+        } else {
+            alert(data.error || 'Failed to import suppliers');
+            updateXeroImportBtn();
+        }
+    })
+    .catch(() => {
+        alert('Network error during import');
+        updateXeroImportBtn();
+    });
+}
 </script>
 {% endblock %}

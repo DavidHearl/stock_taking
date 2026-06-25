@@ -6088,6 +6088,29 @@ function progressToNextStage(orderId) {
     });
 }
 
+// Set "All Items Ordered" on the current order. Reloads so the stage tick and
+// the Progress/Revert action on the current-stage card update to match.
+function setAllItemsOrdered(orderId, checked) {
+    fetch(`/order/${orderId}/update-job-checkbox/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ all_items_ordered: checked })
+    })
+    .then(response => response.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('All Items Ordered updated successfully!', 'success');
+            setTimeout(() => location.reload(), 600);
+        } else {
+            showAlert('Error updating All Items Ordered', 'danger');
+        }
+    })
+    .catch(() => showAlert('Error updating All Items Ordered', 'danger'));
+}
+
 function revertToPreviousStage(orderId) {
     if (!confirm('Are you sure you want to revert to the previous stage?')) {
         return;

@@ -2113,7 +2113,10 @@
             <!-- Stage name -->
             <div class="wf-stage-body">
                 {% if workflow_progress.current_stage %}
-                <span class="wf-stage-name">{{ workflow_progress.current_stage.name }}</span>
+                <div class="wf-stage-name-row">
+                    <span class="wf-stage-name">{{ workflow_progress.current_stage.name }}</span>
+                    {% if stage_criteria_met %}<i class="bi bi-check-circle-fill wf-stage-tick" title="Stage criteria met"></i>{% endif %}
+                </div>
                 {% else %}
                 <span class="wf-badge wf-none">No stage set</span>
                 {% endif %}
@@ -2179,6 +2182,24 @@
                     {% endfor %}
                 </div>
                 {% endif %}
+                {% if workflow_progress.current_stage.name == 'Place Order or Allocate from Stock' %}
+                <label class="wf-order-action {% if order.all_items_ordered %}is-done{% endif %}">
+                    <input type="checkbox" {% if order.all_items_ordered %}checked{% endif %}
+                           onchange="setAllItemsOrdered({{ order.id }}, this.checked)">
+                    <span><i class="bi bi-box-seam"></i> All Items Ordered</span>
+                </label>
+                {% endif %}
+                <div class="wf-stage-actions">
+                    {% if stage_criteria_met %}
+                    <button type="button" class="wf-progress-btn" onclick="progressToNextStage({{ order.id }})">
+                        <i class="bi bi-arrow-right-circle"></i> Progress to Next Stage
+                    </button>
+                    {% else %}
+                    <button type="button" class="wf-revert-btn" onclick="revertToPreviousStage({{ order.id }})">
+                        <i class="bi bi-arrow-left-circle"></i> Revert to Previous Stage
+                    </button>
+                    {% endif %}
+                </div>
                 {% endif %}
             </div>
             <!-- Expand toggle -->
@@ -3426,14 +3447,6 @@ function openDeleteRemedial(pk, number) {
                             <button type="button" class="wf-add-task-btn" onclick="openAddTaskModal({{ stage.id }})">
                                 <i class="bi bi-plus"></i> Add Task
                             </button>
-                            {% endif %}
-                            {% if stage.name == 'Place Order or Allocate from Stock' %}
-                            <label class="wf-acc-action" for="wfAllItemsOrdered">
-                                <span class="wf-acc-action-label"><i class="bi bi-box-seam"></i> All Items Ordered</span>
-                                <input type="checkbox" id="wfAllItemsOrdered" class="job-checkbox"
-                                       {% if order.all_items_ordered %}checked{% endif %}
-                                       onchange="updateJobCheckbox({{ order.id }}, 'all_items_ordered', this.checked)">
-                            </label>
                             {% endif %}
                         </div>
                     </div>

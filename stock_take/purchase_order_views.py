@@ -2273,6 +2273,40 @@ def po_delete_expense(request, po_id, expense_id):
 
 
 @login_required
+def po_update_expense(request, po_id, expense_id):
+    """Update the amount on an expense entry linked to a fitter PO (AJAX)"""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+    exp = get_object_or_404(Expense, id=expense_id, purchase_order=po)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    amount = data.get('amount')
+    if amount is None:
+        return JsonResponse({'error': 'Amount is required'}, status=400)
+
+    try:
+        exp.amount = float(amount)
+    except (ValueError, TypeError):
+        return JsonResponse({'error': 'Invalid amount'}, status=400)
+
+    exp.save(update_fields=['amount'])
+
+    expenses_total = sum(float(e.amount or 0) for e in po.expenses.all())
+
+    return JsonResponse({
+        'success': True,
+        'amount': f'{float(exp.amount):.2f}',
+        'expenses_total': f'{expenses_total:.2f}',
+    })
+
+
+@login_required
 def po_pull_from_invoice(request, po_id):
     """Pull lines from linked purchase invoices into this fitter PO's timesheets/expenses (AJAX POST).
 
@@ -2497,6 +2531,193 @@ def supplier_create(request):
     
     messages.success(request, f'Supplier "{supplier.name}" created successfully.')
     return redirect('supplier_detail', supplier_id=supplier.workguru_id)
+
+
+def _extract_xero_phone(contact):
+    """Build a display phone number from a Xero contact's Phones list."""
+    phones = contact.get('Phones') or []
+    # Prefer DEFAULT, then any non-fax type with a number
+    ordered = sorted(phones, key=lambda p: 0 if p.get('PhoneType') == 'DEFAULT' else 1)
+    for p in ordered:
+        number = (p.get('PhoneNumber') or '').strip()
+        if not number:
+            continue
+        country = (p.get('PhoneCountryCode') or '').strip()
+        area = (p.get('PhoneAreaCode') or '').strip()
+        return ' '.join(part for part in [country, area, number] if part).strip()
+    return ''
+
+
+def _extract_xero_address(contact):
+    """Pull the street (or first) address from a Xero contact's Addresses list."""
+    addresses = contact.get('Addresses') or []
+    chosen = next((a for a in addresses if a.get('AddressType') == 'STREET'), None)
+    if not chosen:
+        chosen = next((a for a in addresses if any(a.get(k) for k in
+                      ('AddressLine1', 'City', 'PostalCode', 'Country'))), None)
+    if not chosen:
+        return {}
+    return {
+        'address_1': (chosen.get('AddressLine1') or '').strip(),
+        'city': (chosen.get('City') or '').strip(),
+        'state': (chosen.get('Region') or '').strip(),
+        'postcode': (chosen.get('PostalCode') or '').strip(),
+        'country': (chosen.get('Country') or '').strip(),
+    }
+
+
+# Xero contact names with these prefixes are ignored on supplier imports.
+XERO_IMPORT_IGNORE_PREFIXES = ('BFS-',)
+
+
+def _is_ignored_xero_name(name):
+    """True if the contact name should be skipped on supplier import."""
+    n = (name or '').strip().lower()
+    return any(n.startswith(p.lower()) for p in XERO_IMPORT_IGNORE_PREFIXES)
+
+
+def _xero_contact_to_result(contact, existing_lower):
+    """Shape a Xero contact dict into the row used by the import modal."""
+    name = (contact.get('Name') or '').strip()
+    return {
+        'contact_id': contact.get('ContactID', ''),
+        'name': name,
+        'email': contact.get('EmailAddress', '') or '',
+        'already_imported': name.lower() in existing_lower,
+    }
+
+
+@login_required
+def suppliers_fetch_xero(request):
+    """Return Xero contacts flagged as suppliers, for the import modal (AJAX)."""
+    from .services import xero_api
+
+    access_token, _tenant_id = xero_api.get_valid_access_token()
+    if not access_token:
+        return JsonResponse({
+            'success': False,
+            'error': 'No valid Xero connection. Connect via the Xero Status page first.',
+        }, status=400)
+
+    contacts = xero_api.get_all_contacts()
+    existing_lower = {
+        n.strip().lower() for n in Supplier.objects.values_list('name', flat=True) if n
+    }
+
+    results = []
+    for c in contacts:
+        if not c.get('IsSupplier'):
+            continue
+        name = (c.get('Name') or '').strip()
+        if not name or _is_ignored_xero_name(name):
+            continue
+        results.append(_xero_contact_to_result(c, existing_lower))
+
+    results.sort(key=lambda r: r['name'].lower())
+    return JsonResponse({'success': True, 'contacts': results})
+
+
+@login_required
+def suppliers_search_xero(request):
+    """Search ALL Xero contacts (not just suppliers) by name, for the import
+    modal. Lets users turn any Xero contact (e.g. CIS subcontractors) into a
+    local supplier."""
+    from .services import xero_api
+
+    q = (request.GET.get('q') or '').strip()
+    if len(q) < 2:
+        return JsonResponse({'success': True, 'contacts': []})
+
+    access_token, _tenant_id = xero_api.get_valid_access_token()
+    if not access_token:
+        return JsonResponse({
+            'success': False,
+            'error': 'No valid Xero connection. Connect via the Xero Status page first.',
+        }, status=400)
+
+    contacts = xero_api.search_contacts_by_name(q)
+    existing_lower = {
+        n.strip().lower() for n in Supplier.objects.values_list('name', flat=True) if n
+    }
+
+    results = []
+    for c in contacts:
+        name = (c.get('Name') or '').strip()
+        if not name or _is_ignored_xero_name(name):
+            continue
+        results.append(_xero_contact_to_result(c, existing_lower))
+
+    results.sort(key=lambda r: r['name'].lower())
+    return JsonResponse({'success': True, 'contacts': results})
+
+
+@login_required
+def suppliers_import_xero(request):
+    """Create Supplier records for the selected Xero contacts (AJAX POST)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    from .services import xero_api
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    selected_ids = set(data.get('contact_ids') or [])
+    if not selected_ids:
+        return JsonResponse({'success': False, 'error': 'No suppliers selected'}, status=400)
+
+    access_token, _tenant_id = xero_api.get_valid_access_token()
+    if not access_token:
+        return JsonResponse({
+            'success': False,
+            'error': 'No valid Xero connection. Connect via the Xero Status page first.',
+        }, status=400)
+
+    contacts = xero_api.get_all_contacts()
+    by_id = {c.get('ContactID'): c for c in contacts}
+
+    existing_lower = {
+        n.strip().lower() for n in Supplier.objects.values_list('name', flat=True) if n
+    }
+
+    max_id = Supplier.objects.order_by('-workguru_id').values_list('workguru_id', flat=True).first() or 0
+    next_id = max(max_id + 1, 900000)
+
+    created = 0
+    skipped = 0
+    for cid in selected_ids:
+        contact = by_id.get(cid)
+        if not contact:
+            skipped += 1
+            continue
+        name = (contact.get('Name') or '').strip()
+        if not name or _is_ignored_xero_name(name) or name.lower() in existing_lower:
+            skipped += 1
+            continue
+
+        addr = _extract_xero_address(contact)
+        Supplier.objects.create(
+            workguru_id=next_id,
+            name=name,
+            email=(contact.get('EmailAddress') or '').strip() or None,
+            phone=_extract_xero_phone(contact) or None,
+            address_1=addr.get('address_1') or None,
+            city=addr.get('city') or None,
+            state=addr.get('state') or None,
+            postcode=addr.get('postcode') or None,
+            country=addr.get('country') or None,
+            currency=(contact.get('DefaultCurrency') or '').strip() or None,
+            is_active=True,
+            raw_data=contact,
+        )
+        existing_lower.add(name.lower())
+        next_id += 1
+        created += 1
+
+    return JsonResponse({'success': True, 'created': created, 'skipped': skipped})
+
 
 
 @login_required
@@ -4708,14 +4929,27 @@ def purchase_order_search(request):
         Q(display_number__icontains=q) |
         Q(supplier_name__icontains=q) |
         Q(project_number__icontains=q) |
-        Q(project_name__icontains=q)
-    )
+        Q(project_name__icontains=q) |
+        # Fitter POs link customer orders via PurchaseOrderProject rather than
+        # the PO's own project fields, so match on those too.
+        Q(fitter__name__icontains=q) |
+        Q(projects__label__icontains=q) |
+        Q(projects__order__sale_number__icontains=q) |
+        Q(projects__order__first_name__icontains=q) |
+        Q(projects__order__last_name__icontains=q)
+    ).distinct()
 
     # Optionally restrict to a single supplier (e.g. when a purchase invoice
     # already has its supplier linked, only that supplier's POs are relevant).
+    # This is a soft filter: if restricting to the supplier would hide every
+    # match (common for fitter POs, whose supplier_name is the fitter's name
+    # rather than the invoice's matched supplier), fall back to all matches so
+    # the user can still find the PO they searched for.
     supplier = request.GET.get('supplier', '').strip()
     if supplier:
-        pos = pos.filter(supplier_name__icontains=supplier)
+        restricted = pos.filter(supplier_name__icontains=supplier)
+        if restricted.exists():
+            pos = restricted
 
     pos = pos.order_by('-display_number')[:20]
     results = []

@@ -910,7 +910,10 @@
                             {% endif %}
                         </td>
                         <td>{{ exp.description|default:"-" }}</td>
-                        <td class="text-right">£{{ exp.amount|floatformat:2 }}</td>
+                        <td class="text-right">
+                            <span class="exp-amount-display" onclick="startEditExpenseAmount({{ exp.id }}, this)" title="Click to edit"
+                                  style="cursor:pointer;border-bottom:1px dashed var(--border-color);">£{{ exp.amount|floatformat:2 }}</span>
+                        </td>
                         <td class="text-center">
                             <button class="btn-inline-delete" onclick="deleteExpense({{ exp.id }}, this)" title="Delete"><i class="bi bi-trash"></i></button>
                         </td>
@@ -4428,6 +4431,80 @@ function deleteExpense(expId, btn) {
         }
     })
     .catch(() => showNotification('Network error', 'error'));
+}
+
+function startEditExpenseAmount(expId, span) {
+    if (span.dataset.editing === '1') return;
+    span.dataset.editing = '1';
+    const current = (span.textContent || '').replace(/[£,\s]/g, '');
+    const cell = span.closest('td');
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = '0.01';
+    input.min = '0';
+    input.value = current;
+    input.className = 'po-inline-input text-right';
+    input.style.maxWidth = '100px';
+    cell.innerHTML = '';
+    cell.appendChild(input);
+    input.focus();
+    input.select();
+
+    let done = false;
+    const commit = () => {
+        if (done) return;
+        done = true;
+        saveExpenseAmount(expId, cell, input.value, current);
+    };
+    const cancel = () => {
+        if (done) return;
+        done = true;
+        renderExpenseAmount(cell, expId, current);
+    };
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        else if (e.key === 'Escape') { e.preventDefault(); done = true; renderExpenseAmount(cell, expId, current); }
+    });
+}
+
+function renderExpenseAmount(cell, expId, value) {
+    const amt = parseFloat(value || 0).toFixed(2);
+    cell.innerHTML = `<span class="exp-amount-display" onclick="startEditExpenseAmount(${expId}, this)" title="Click to edit" style="cursor:pointer;border-bottom:1px dashed var(--border-color);">£${amt}</span>`;
+}
+
+function saveExpenseAmount(expId, cell, newValue, previousValue) {
+    if (newValue === '' || isNaN(parseFloat(newValue)) || parseFloat(newValue) < 0) {
+        showNotification('Invalid amount', 'error');
+        renderExpenseAmount(cell, expId, previousValue);
+        return;
+    }
+    if (parseFloat(newValue).toFixed(2) === parseFloat(previousValue || 0).toFixed(2)) {
+        renderExpenseAmount(cell, expId, previousValue);
+        return;
+    }
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';
+    fetch(`/purchase-order/{{ purchase_order.workguru_id }}/update-expense/${expId}/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+        body: JSON.stringify({ amount: newValue }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            renderExpenseAmount(cell, expId, data.amount);
+            const totalEl = document.getElementById('exp-total-display');
+            if (totalEl && data.expenses_total !== undefined) totalEl.textContent = `£${data.expenses_total}`;
+            showNotification('Expense updated');
+        } else {
+            showNotification(data.error || 'Failed to update', 'error');
+            renderExpenseAmount(cell, expId, previousValue);
+        }
+    })
+    .catch(() => {
+        showNotification('Network error', 'error');
+        renderExpenseAmount(cell, expId, previousValue);
+    });
 }
 {% endif %}
 </script>

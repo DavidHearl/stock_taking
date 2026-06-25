@@ -1018,7 +1018,7 @@ def create_purchase_invoice(request):
     po_id = (data.get('purchase_order_id') or '').strip()
     if po_id:
         try:
-            po_obj = PurchaseOrder.objects.get(id=int(po_id))
+            po_obj = PurchaseOrder.objects.get(workguru_id=int(po_id))
             invoice.purchase_orders.add(po_obj)
             # If the invoice has a carriage/freight line, save it to the PO
             freight_val = _parse_decimal(data.get('freight_cost', '0'))

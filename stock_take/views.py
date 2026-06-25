@@ -7327,6 +7327,13 @@ def _build_order_context(order, request):
                     existing[task.id] = tc
             task_completions = {t.id: existing[t.id] for t in current_tasks if t.id in existing}
 
+    # Whether the current stage's completion criteria are satisfied (gates the
+    # "Progress" vs "Revert" action shown on the current-stage card).
+    stage_criteria_met = workflow_progress.can_progress_to_next_stage
+    if (workflow_progress.current_stage
+            and workflow_progress.current_stage.name == 'Place Order or Allocate from Stock'):
+        stage_criteria_met = stage_criteria_met and order.all_items_ordered
+
     phases = [('enquiry', 'Enquiry'), ('lead', 'Lead'), ('sale', 'Sale')]
     # Count active orders sitting at each stage (for the workflow management modal)
     from django.db.models import Count as _StageCount
@@ -7692,6 +7699,7 @@ def _build_order_context(order, request):
         'workflow_progress': workflow_progress,
         'workflow_stages': workflow_stages,
         'task_completions': task_completions,
+        'stage_criteria_met': stage_criteria_met,
         'phases': phases,
         'stages_by_phase': stages_by_phase,
         'installation_timesheets': installation_timesheets,
