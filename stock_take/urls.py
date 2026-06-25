@@ -523,8 +523,7 @@ urlpatterns = [
     path('search-orders-api/', views.search_orders_api, name='search_orders_api'),
     path('search-remedials-api/', views.search_remedials_api, name='search_remedials_api'),
     
-    # Workflow page
-    path('workflow/', views.workflow, name='workflow'),
+    # Workflow stage/task management (edited via the workflow modal on sale/order detail)
     path('workflow/stage/save/', views.save_workflow_stage, name='save_workflow_stage'),
     path('workflow/stage/<int:stage_id>/', views.get_workflow_stage, name='get_workflow_stage'),
     path('workflow/stage/<int:stage_id>/orders/', views.get_stage_orders, name='get_stage_orders'),

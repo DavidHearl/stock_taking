@@ -1,5 +1,5 @@
 {% comment %}
-Shared "Documents" card used on both the Sale tab and the Order tab of the
+Shared "Documents" section used on both the Sale tab and the Order tab of the
 sale/order detail page.
 
 Parameters:
@@ -9,205 +9,152 @@ Parameters:
   dc_show_complete - when True, renders the "Complete Sale" / "Sale Completed"
                    kebab section. Defaults to False.
 {% endcomment %}
-<div class="card order-info-card">
-    <div class="card-header card-header-job">
-        <h3>Documents</h3>
-        <div class="card-header-actions">
-            <button type="button" class="btn btn-sm btn-outline-primary" onclick="searchAndAttachAll(this)" title="Search the Claim Service and choose which documents to attach to this job">
-                <i class="bi bi-search"></i> Find &amp; review
-            </button>
-            <div class="kebab-menu" id="job-info-menu-wrapper{{ dc_id_suffix }}">
-                <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Job status options">
-                    <i class="bi bi-three-dots-vertical"></i>
-                </button>
-                <div class="kebab-dropdown" id="job-info-dropdown{{ dc_id_suffix }}" data-keep-open>
-                    {% if order %}
-                    <div class="kebab-label">Job Status</div>
-                    <label class="kebab-item kebab-item-toggle" for="boardsNotRequired{{ dc_id_suffix }}">
-                        <span><i class="bi bi-slash-circle icon-warning"></i> Boards Not Required</span>
-                        <input class="job-checkbox" type="checkbox" id="boardsNotRequired{{ dc_id_suffix }}"
-                               {% if order.boards_not_required %}checked{% endif %}
-                               onchange="updateJobCheckbox({{ order.id }}, 'boards_not_required', this.checked)">
-                    </label>
-                    <label class="kebab-item kebab-item-toggle" for="accessoriesNotRequired{{ dc_id_suffix }}">
-                        <span><i class="bi bi-slash-circle icon-warning"></i> Accessories Not Required</span>
-                        <input class="job-checkbox" type="checkbox" id="accessoriesNotRequired{{ dc_id_suffix }}"
-                               {% if order.accessories_not_required %}checked{% endif %}
-                               onchange="updateJobCheckbox({{ order.id }}, 'accessories_not_required', this.checked)">
-                    </label>
-                    <label class="kebab-item kebab-item-toggle" for="allItemsOrdered{{ dc_id_suffix }}">
-                        <span><i class="bi bi-box-seam"></i> All Items Ordered</span>
-                        <input class="job-checkbox" type="checkbox" id="allItemsOrdered{{ dc_id_suffix }}"
-                               {% if order.all_items_ordered %}checked{% endif %}
-                               onchange="updateJobCheckbox({{ order.id }}, 'all_items_ordered', this.checked)">
-                    </label>
-                    <label class="kebab-item kebab-item-toggle" for="jobFinished{{ dc_id_suffix }}">
-                        <span><i class="bi bi-check2-circle"></i> Job Finished</span>
-                        <input class="job-checkbox" type="checkbox" id="jobFinished{{ dc_id_suffix }}"
-                               {% if order.job_finished %}checked{% endif %}
-                               onchange="onJobFinishedChange(this, {{ order.id }})">
-                    </label>
-                    {% if order.accessories.exists %}
-                    <label class="kebab-item kebab-item-toggle" for="materialsAllocated{{ dc_id_suffix }}">
-                        <span><i class="bi bi-box-arrow-in-down"></i> Materials Allocated</span>
-                        <input class="job-checkbox" type="checkbox" id="materialsAllocated{{ dc_id_suffix }}"
-                               {% if all_allocated %}checked{% endif %}
-                               onchange="toggleMaterialsAllocated({{ order.id }}, this.checked, this)">
-                    </label>
-                    {% endif %}
-                    {% if dc_show_complete %}
-                    <div class="kebab-divider"></div>
-                    {% endif %}
-                    {% endif %}
-                    {% if dc_show_complete %}
-                    {% if is_completed %}
-                    <span class="kebab-item disabled">
-                        <i class="bi bi-check-circle-fill"></i> Sale Completed
-                    </span>
-                    {% else %}
-                    <button type="button" class="kebab-item" onclick="completeSaleManual()">
-                        <i class="bi bi-check2-circle"></i> Complete Sale
-                    </button>
-                    {% endif %}
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="card-body padded">
-        <div class="job-info-column">
-            <div class="job-info-docs">
+<div class="doc-standalone">
 
-                <!-- File table -->
-                <table class="doc-table">
-                    <thead>
-                        <tr>
-                            <th class="dt-th-name">Name</th>
-                            <th class="dt-th-meta">Last edited</th>
-                            <th class="dt-th-actions">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
+    <!-- File table -->
+    <div class="doc-table-wrap">
+    <table class="doc-table">
+        <thead>
+            <tr>
+                <th class="dt-th-name">Documents</th>
+                <th class="dt-th-meta">Last edited</th>
+                <th class="dt-th-actions">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
 
-                        <!-- Coversheet (generated) -->
-                        <tr>
-                            <td class="dt-td-name">
-                                <div class="dt-name-inner">
-                                <i class="bi bi-file-earmark-text dt-icon dt-icon-ok"></i>
-                                <span class="dt-label">
-                                    Coversheet
-                                    {% if coversheet.is_final %}
-                                    <span class="job-doc-badge job-doc-badge-final">Final</span>
-                                    {% else %}
-                                    <span class="job-doc-badge job-doc-badge-draft">Draft</span>
-                                    {% endif %}
-                                </span>
-                                </div>
-                            </td>
-                            <td class="dt-td-meta">
-                                <span class="dt-meta-user">{{ coversheet.prepared_by|default:'—' }}</span>
-                                <span class="dt-meta-date">{{ coversheet.updated_at|date:'d M Y' }}</span>
-                            </td>
-                            <td class="dt-td-actions">
-                                <a href="{% url 'sale_coversheet_pdf' sale.pk %}" target="_blank" class="dx-btn" title="View PDF">
-                                    <i class="bi bi-file-earmark-pdf"></i>
+                <!-- Coversheet (generated) -->
+                <tr>
+                    <td class="dt-td-name">
+                        <div class="dt-name-inner">
+                        <i class="bi bi-file-earmark-text dt-icon dt-icon-ok"></i>
+                        <span class="dt-label">
+                            Coversheet
+                            {% if coversheet.is_final %}
+                            <span class="job-doc-badge job-doc-badge-final">Final</span>
+                            {% else %}
+                            <span class="job-doc-badge job-doc-badge-draft">Draft</span>
+                            {% endif %}
+                        </span>
+                        </div>
+                    </td>
+                    <td class="dt-td-meta">
+                        <span class="dt-meta-user">{{ coversheet.prepared_by|default:'—' }}</span>
+                        <span class="dt-meta-date">{{ coversheet.updated_at|date:'d M Y' }}</span>
+                    </td>
+                    <td class="dt-td-actions">
+                        <div class="kebab-menu">
+                            <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Options">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="kebab-dropdown">
+                                <a href="{% url 'sale_coversheet_pdf' sale.pk %}" target="_blank" class="kebab-item">
+                                    <i class="bi bi-eye"></i> View PDF
                                 </a>
-                                <button type="button" class="dx-btn" onclick="openCoversheetModal()" title="Edit coversheet">
-                                    <i class="bi bi-pencil"></i>
+                                <a href="{% url 'sale_coversheet_pdf' sale.pk %}" download class="kebab-item">
+                                    <i class="bi bi-download"></i> Download
+                                </a>
+                                <button type="button" class="kebab-item" onclick="openCoversheetModal(); closeAllKebabs()">
+                                    <i class="bi bi-pencil"></i> Edit Coversheet
                                 </button>
-                            </td>
-                        </tr>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
 
-                        <!-- Uploaded documents -->
-                        {% for item in important_documents %}
-                        <tr class="{% if not item.doc %}dt-row-missing{% endif %}">
-                            <td class="dt-td-name">
-                                <div class="dt-name-inner">
-                                {% if item.doc %}
-                                <i class="bi bi-file-earmark-check dt-icon dt-icon-ok"></i>
-                                {% else %}
-                                <i class="bi bi-file-earmark dt-icon dt-icon-empty"></i>
-                                {% endif %}
-                                <span class="dt-label">{{ item.label }}</span>
-                                </div>
-                            </td>
-                            <td class="dt-td-meta">
-                                {% if item.doc %}
-                                <span class="dt-meta-user">{{ item.doc.uploaded_by.get_full_name|default:item.doc.uploaded_by.username|default:'—' }}</span>
-                                <span class="dt-meta-date">{{ item.doc.uploaded_at|date:'d M Y' }}</span>
-                                {% else %}
-                                <span class="dt-meta-empty">—</span>
-                                {% endif %}
-                            </td>
-                            <td class="dt-td-actions">
+                <!-- Uploaded documents -->
+                {% for item in important_documents %}
+                <tr class="{% if not item.doc %}dt-row-missing{% endif %}">
+                    <td class="dt-td-name">
+                        <div class="dt-name-inner">
+                        {% if item.doc %}
+                        <i class="bi bi-file-earmark-check dt-icon dt-icon-ok"></i>
+                        {% else %}
+                        <i class="bi bi-file-earmark dt-icon dt-icon-empty"></i>
+                        {% endif %}
+                        <span class="dt-label">{{ item.label }}</span>
+                        </div>
+                    </td>
+                    <td class="dt-td-meta">
+                        {% if item.doc %}
+                        <span class="dt-meta-user">{{ item.doc.uploaded_by.get_full_name|default:item.doc.uploaded_by.username|default:'—' }}</span>
+                        <span class="dt-meta-date">{{ item.doc.uploaded_at|date:'d M Y' }}</span>
+                        {% else %}
+                        <span class="dt-meta-empty">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="dt-td-actions">
+                        <div class="kebab-menu">
+                            <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Options">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="kebab-dropdown">
                                 {% if item.claim %}
-                                <button type="button" class="dx-btn" onclick="searchClaimDocs('{{ item.doc_type|escapejs }}')" title="Search Claim Service for {{ item.label }}">
-                                    <i class="bi bi-search"></i>
+                                <button type="button" class="kebab-item" onclick="searchClaimDocs('{{ item.doc_type|escapejs }}'); closeAllKebabs()">
+                                    <i class="bi bi-search"></i> Search Claim Service
                                 </button>
                                 {% endif %}
                                 {% if item.doc %}
-                                <a href="{{ item.doc.file.url }}" target="_blank" class="dx-btn" title="View {{ item.label }}">
-                                    <i class="bi bi-eye"></i>
+                                <a href="{{ item.doc.file.url }}" target="_blank" class="kebab-item">
+                                    <i class="bi bi-eye"></i> View
+                                </a>
+                                <a href="{{ item.doc.file.url }}" download class="kebab-item">
+                                    <i class="bi bi-download"></i> Download
                                 </a>
                                 {% endif %}
                                 <form method="POST" action="{% url 'sale_claim_document_upload' sale.pk %}" enctype="multipart/form-data" class="job-doc-upload-form">
                                     {% csrf_token %}
                                     <input type="hidden" name="doc_type" value="{{ item.doc_type }}">
-                                    <label class="dx-btn{% if not item.doc %} dx-btn-primary{% endif %}" title="{% if item.doc %}Replace{% else %}Upload{% endif %} {{ item.label }}">
-                                        <i class="bi bi-upload"></i>
+                                    <label class="kebab-item" style="cursor:pointer">
+                                        <i class="bi bi-upload"></i> {% if item.doc %}Replace{% else %}Upload{% endif %}
                                         <input type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" class="job-doc-file-hidden" onchange="this.closest('form').submit()">
                                     </label>
                                 </form>
                                 {% if item.doc %}
-                                <button type="button" class="dx-btn dx-btn-danger" data-delete-url="{% url 'sale_claim_document_delete' sale.pk %}" data-doc-id="{{ item.doc.id }}" onclick="deleteSaleDocument(this)" title="Delete {{ item.label }}">
-                                    <i class="bi bi-trash"></i>
+                                <div class="kebab-divider"></div>
+                                <button type="button" class="kebab-item kebab-item-danger" data-delete-url="{% url 'sale_claim_document_delete' sale.pk %}" data-doc-id="{{ item.doc.id }}" onclick="deleteSaleDocument(this)">
+                                    <i class="bi bi-trash"></i> Delete
                                 </button>
                                 {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
 
-                    </tbody>
-                </table>
-
-                <!-- Completed Job Photos -->
-                <div class="job-doc-list-header">
-                    <span class="job-doc-list-title">Completed Job Photos</span>
-                    {% if sale.order %}
-                    <label class="btn btn-sm btn-outline-primary job-photo-add-btn" title="Add photos of the completed job">
-                        <i class="bi bi-camera"></i> Add Photos
-                        <input type="file" accept="image/*" multiple class="job-doc-file-hidden" onchange="uploadSalePhotos(this, {{ sale.order.id }})">
-                    </label>
-                    {% endif %}
-                </div>
-                {% if sale.order %}
-                <div class="job-photo-grid">
-                    {% for img in gallery_images %}
-                    <div class="job-photo-tile">
-                        <a href="{{ img.image.url }}" target="_blank" class="job-photo-thumb">
-                            <img src="{{ img.thumbnail.url|default:img.image.url }}" alt="{{ img.caption|default:'Job photo' }}" loading="lazy">
-                        </a>
-                        <button type="button" class="job-photo-delete" data-delete-url="{% url 'gallery_delete' img.id %}" onclick="deleteSalePhoto(this)" title="Remove photo">
-                            <i class="bi bi-x-lg"></i>
-                        </button>
-                    </div>
-                    {% empty %}
-                    <div class="job-photo-empty">
-                        <i class="bi bi-images"></i>
-                        <span>No photos yet — add photos of the completed job. They'll appear in the gallery too.</span>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <div class="job-photo-empty">
-                    <i class="bi bi-link-45deg"></i>
-                    <span>Link an order to this sale to add completed job photos.</span>
-                </div>
-                {% endif %}
-
-            </div>
-        </div>
+        </tbody>
+    </table>
     </div>
+
+    <!-- Completed Job Photos -->
+    <div class="job-doc-list-header">
+        <span class="job-doc-list-title"><i class="bi bi-camera"></i> Completed Job Photos</span>
+    </div>
+    {% if sale.order %}
+    <div class="job-photo-grid">
+        {% for img in gallery_images %}
+        <div class="job-photo-tile">
+            <a href="{{ img.image.url }}" target="_blank" class="job-photo-thumb">
+                <img src="{{ img.thumbnail.url|default:img.image.url }}" alt="{{ img.caption|default:'Job photo' }}" loading="lazy">
+            </a>
+            <button type="button" class="job-photo-delete" data-delete-url="{% url 'gallery_delete' img.id %}" onclick="deleteSalePhoto(this)" title="Remove photo">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+        {% endfor %}
+        <label class="job-photo-upload-tile" id="photoDropZone" data-order-id="{{ sale.order.id }}" title="Drop photos here or click to browse">
+            <i class="bi bi-camera"></i>
+            <span>Drop or click</span>
+            <input type="file" accept="image/*" multiple class="job-doc-file-hidden" onchange="uploadSalePhotos(this, {{ sale.order.id }})">
+        </label>
+    </div>
+    {% else %}
+    <div class="job-photo-empty">
+        <i class="bi bi-link-45deg"></i>
+        <span>Link an order to this sale to add completed job photos.</span>
+    </div>
+    {% endif %}
+
 </div>
 
 <script>
@@ -220,8 +167,12 @@ Parameters:
         if (!input.files || !input.files.length) return;
         const label = input.closest('label');
         if (label) label.classList.add('is-uploading');
+        _doUploadPhotos(input.files, orderId, label);
+    };
+
+    function _doUploadPhotos(files, orderId, el) {
         const fd = new FormData();
-        for (const f of input.files) fd.append('images', f);
+        for (const f of files) fd.append('images', f);
         fd.append('order_id', orderId);
         fetch("{% url 'gallery_upload' %}", {
             method: 'POST',
@@ -234,13 +185,35 @@ Parameters:
                 window.location.reload();
             } else {
                 alert((data && data.error) || 'Upload failed.');
-                if (label) label.classList.remove('is-uploading');
+                if (el) el.classList.remove('is-uploading');
             }
         })
         .catch(() => {
             alert('Upload failed.');
-            if (label) label.classList.remove('is-uploading');
+            if (el) el.classList.remove('is-uploading');
         });
+    }
+
+    // Drag-and-drop for the photo upload tile
+    const dropZone = document.getElementById('photoDropZone');
+    if (dropZone) {
+        const orderId = dropZone.dataset.orderId;
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+        dropZone.addEventListener('dragleave', (e) => {
+            if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drag-over');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const files = e.dataTransfer.files;
+            if (!files.length) return;
+            dropZone.classList.add('is-uploading');
+            _doUploadPhotos(files, orderId, dropZone);
+        });
+    }
     };
 
     window.deleteSalePhoto = function (btn) {

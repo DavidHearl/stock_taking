@@ -7328,6 +7328,15 @@ def _build_order_context(order, request):
             task_completions = {t.id: existing[t.id] for t in current_tasks if t.id in existing}
 
     phases = [('enquiry', 'Enquiry'), ('lead', 'Lead'), ('sale', 'Sale')]
+    # Count active orders sitting at each stage (for the workflow management modal)
+    from django.db.models import Count as _StageCount
+    _stage_order_counts = dict(
+        OrderWorkflowProgress.objects.filter(
+            order__isnull=False, order__job_finished=False
+        ).values('current_stage_id').annotate(c=_StageCount('id')).values_list('current_stage_id', 'c')
+    )
+    for _stage in workflow_stages:
+        _stage.order_count = _stage_order_counts.get(_stage.id, 0)
     # Filter stages in Python — avoids 3 extra DB round-trips
     stages_by_phase = {
         phase_code: [s for s in workflow_stages if s.phase == phase_code]
@@ -12829,47 +12838,6 @@ def calendar_weekly(request):
 
 
 @login_required
-def workflow(request):
-    """Display workflow stages for order management"""
-    from .models import WorkflowStage, OrderWorkflowProgress
-    
-    stages = WorkflowStage.objects.all().prefetch_related('tasks')
-    phases = [
-        ('enquiry', 'Enquiry'),
-        ('lead', 'Lead'),
-        ('sale', 'Sale'),
-    ]
-    
-    # Count orders at each stage (only active orders)
-    from django.db.models import Count
-    stage_order_counts = dict(
-        OrderWorkflowProgress.objects.filter(
-            order__isnull=False,
-            order__job_finished=False,
-        )
-        .values('current_stage_id')
-        .annotate(count=Count('id'))
-        .values_list('current_stage_id', 'count')
-    )
-    
-    # Attach counts to stage objects
-    for stage in stages:
-        stage.order_count = stage_order_counts.get(stage.id, 0)
-    
-    # Group stages by phase for template iteration
-    stages_by_phase = {}
-    for phase_code, phase_display in phases:
-        stages_by_phase[phase_code] = stages.filter(phase=phase_code)
-    
-    context = {
-        'stages': stages,
-        'phases': phases,
-        'stages_by_phase': stages_by_phase,
-    }
-    return render(request, 'stock_take/workflow.html', context)
-
-
-@login_required
 def save_workflow_stage(request):
     """Create or update a workflow stage"""
     from .models import WorkflowStage
@@ -12918,9 +12886,9 @@ def save_workflow_stage(request):
                     'order': stage.order,
                 },
             })
-        return redirect('workflow')
+        return redirect(request.META.get('HTTP_REFERER', '/'))
     
-    return redirect('workflow')
+    return redirect(request.META.get('HTTP_REFERER', '/'))
 
 
 @login_required
@@ -13066,9 +13034,9 @@ def save_workflow_task(request):
                     'options': task.options,
                 },
             })
-        return redirect('workflow')
+        return redirect(request.META.get('HTTP_REFERER', '/'))
     
-    return redirect('workflow')
+    return redirect(request.META.get('HTTP_REFERER', '/'))
 
 
 @login_required

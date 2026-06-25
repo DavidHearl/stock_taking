@@ -22,6 +22,9 @@
 {% block content %}
 <div class="page-content">
 
+    <div class="sale-page-layout">
+    <div class="sale-page-main">
+
     <!-- ===== CUSTOMER HERO CARD ===== -->
     {% if sale.customer %}
         {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer.name hero_customer_pk=sale.customer.pk hero_phone=sale.customer.phone hero_email=sale.customer.email hero_address_1=sale.customer.address_1 hero_address_2=sale.customer.address_2 hero_city=sale.customer.city hero_postcode=sale.customer.postcode hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class hero_collapsible_details=True hero_fit_date=order.fit_date hero_value_paid=hero_value_paid hero_value_total=hero_value_total hero_next_step=order.workflow_progress.current_stage.name %}
@@ -29,14 +32,11 @@
         {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer_name hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class hero_collapsible_details=True hero_fit_date=order.fit_date hero_value_paid=hero_value_paid hero_value_total=hero_value_total hero_next_step=order.workflow_progress.current_stage.name %}
     {% endif %}
 
-    <div class="sale-page-layout">
-    <div class="sale-page-main">
-
     <!-- ===== TAB BAR ===== -->
     <div class="detail-tab-bar">
+        <button class="detail-tab {% if active_tab == 'enquiry' %}active{% endif %}" onclick="switchDetailTab('enquiry')" data-tab="enquiry">Enquiry</button>
         <button class="detail-tab {% if active_tab != 'order' and active_tab != 'enquiry' and active_tab != 'remedials' and active_tab != 'purchase_orders' %}active{% endif %}" onclick="switchDetailTab('sale')" data-tab="sale">Sale</button>
         <button class="detail-tab {% if active_tab == 'order' %}active{% endif %}" onclick="switchDetailTab('order')" data-tab="order">Order</button>
-        <button class="detail-tab {% if active_tab == 'enquiry' %}active{% endif %}" onclick="switchDetailTab('enquiry')" data-tab="enquiry">Enquiry</button>
         <button class="detail-tab {% if active_tab == 'remedials' %}active{% endif %}" onclick="switchDetailTab('remedials')" data-tab="remedials">
             Remedials{% if remedials %} <span class="tab-count">{{ remedials|length }}</span>{% endif %}
         </button>
@@ -1984,7 +1984,7 @@
                 {% for note in order_notes %}
                 <div class="order-note-item" id="note-{{ note.id }}">
                     <div class="order-note-meta">
-                        <span class="order-note-author">{{ note.created_by.get_full_name|default:note.created_by.username|default:"Unknown" }}</span>
+                        <span class="order-note-author">{% if note.created_by %}{{ note.created_by.get_full_name|default:note.created_by.username }}{% else %}Unknown{% endif %}</span>
                         <span class="order-note-date">{{ note.created_at|date:"d M Y H:i" }}</span>
                         <button type="button" class="order-note-delete" onclick="deleteOrderNote({{ note.id }})" title="Delete note">
                             <i class="bi bi-trash"></i>
@@ -2079,6 +2079,115 @@
 
     </div><!-- /.sale-page-main -->
     <div class="sale-page-summary-col">
+
+        <!-- ===== WORKFLOW STAGE ===== -->
+        {% if order %}
+        <div class="card workflow-compact">
+            <!-- Team header -->
+            <div class="wf-card-header">
+                <div class="wf-card-header-left">
+                    {% if workflow_progress.current_stage %}
+                    <span class="wf-badge wf-role-{{ workflow_progress.current_stage.role }}">
+                        <i class="bi bi-people"></i> {{ workflow_progress.current_stage.get_role_display }}
+                    </span>
+                    {% else %}
+                    <span class="wf-badge wf-none">No team</span>
+                    {% endif %}
+                </div>
+                <div class="wf-card-header-right">
+                    {% if workflow_progress.current_stage and workflow_progress.current_stage.expected_days %}
+                    <span class="wf-badge wf-days"><i class="bi bi-clock"></i> {{ workflow_progress.current_stage.expected_days }}d</span>
+                    {% endif %}
+                    <div class="kebab-menu">
+                        <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Options">
+                            <i class="bi bi-three-dots-vertical"></i>
+                        </button>
+                        <div class="kebab-dropdown">
+                            <button type="button" class="kebab-item" onclick="openWorkflowModal(); closeAllKebabs()">
+                                <i class="bi bi-diagram-3"></i> View Full Workflow
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- Stage name -->
+            <div class="wf-stage-body">
+                {% if workflow_progress.current_stage %}
+                <span class="wf-stage-name">{{ workflow_progress.current_stage.name }}</span>
+                {% else %}
+                <span class="wf-badge wf-none">No stage set</span>
+                {% endif %}
+            </div>
+            <!-- Expandable detail panel -->
+            <div class="workflow-detail-panel collapsed" id="workflow-accordion-body">
+                {% if workflow_progress.current_stage %}
+                {% if workflow_progress.current_stage.description %}
+                <p class="wf-description">{{ workflow_progress.current_stage.description }}</p>
+                {% endif %}
+                {% if workflow_progress.current_stage.tasks.all %}
+                <div class="wf-tasks">
+                    {% for task in workflow_progress.current_stage.tasks.all %}
+                    {% with completion=task_completions|get_item:task.id %}
+                    <div class="wf-task-item">
+                        {% if task.task_type == 'decision_matrix' %}
+                            <span class="wf-task-label">{{ task.description }}</span>
+                            <div class="wf-decision-btns">
+                                <button class="wf-dec proceed {% if completion.selected_option == 'proceed' %}active{% endif %}"
+                                        onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'proceed')">Proceed</button>
+                                <button class="wf-dec postpone {% if completion.selected_option == 'postpone' %}active{% endif %}"
+                                        onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'postpone')">Postpone</button>
+                                <button class="wf-dec dead {% if completion.selected_option == 'dead' %}active{% endif %}"
+                                        onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'dead')">Dead</button>
+                            </div>
+                        {% elif task.task_type == 'radio' %}
+                            <span class="wf-task-label">{{ task.description }}</span>
+                            <div class="wf-radio-group">
+                                {% if task.options %}{% for option in task.options|split_options %}
+                                <label class="wf-radio"><input type="radio" name="task_{{ task.id }}" value="{{ option }}"
+                                       {% if completion.selected_option == option %}checked{% endif %}
+                                       onchange="updateTaskRadio({{ order.id }}, {{ task.id }}, '{{ option }}')" /> {{ option }}</label>
+                                {% endfor %}{% endif %}
+                            </div>
+                        {% elif task.task_type == 'dropdown' %}
+                            <label class="wf-task-label">{{ task.description }}
+                                <select class="wf-select" onchange="updateTaskDropdown({{ order.id }}, {{ task.id }}, this.value)">
+                                    <option value="">Select...</option>
+                                    {% if task.options %}{% for option in task.options|split_options %}
+                                    <option value="{{ option }}" {% if completion.selected_option == option %}selected{% endif %}>{{ option }}</option>
+                                    {% endfor %}{% endif %}
+                                </select>
+                            </label>
+                        {% elif task.task_type == 'attachment' %}
+                            <label class="wf-check">
+                                <input type="checkbox" {% if completion.completed %}checked{% endif %}
+                                       onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)" />
+                                {{ task.description }} <i class="bi bi-paperclip wf-attach-icon"></i>
+                                {% if completion.attachment %}<a href="{{ completion.attachment.url }}" target="_blank" class="wf-file-link">View</a>{% endif %}
+                            </label>
+                            <input type="file" id="attachment_{{ task.id }}" class="attachment-input"
+                                   onchange="uploadTaskAttachment({{ order.id }}, {{ task.id }}, this)" />
+                        {% else %}
+                            <label class="wf-check">
+                                <input type="checkbox" {% if completion.completed %}checked{% endif %}
+                                       onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)" />
+                                {{ task.description }}
+                                {% if task.task_type == 'requirement' %}<span class="wf-req">Required</span>{% endif %}
+                            </label>
+                        {% endif %}
+                    </div>
+                    {% endwith %}
+                    {% endfor %}
+                </div>
+                {% endif %}
+                {% endif %}
+            </div>
+            <!-- Expand toggle -->
+            <button class="wf-expand-btn" onclick="toggleWorkflowAccordion()">
+                <i class="bi bi-chevron-down" id="workflow-accordion-arrow"></i>
+                <span>Stage Details</span>
+            </button>
+        </div>
+        {% endif %}
 
         <!-- ===== FINANCIAL SUMMARY (PERSISTENT) ===== -->
         {% if order %}
@@ -2180,101 +2289,6 @@
         </div>
         {% endif %}
 
-        <!-- ===== WORKFLOW STAGE ===== -->
-        {% if order %}
-        <div class="card workflow-compact">
-            <div class="workflow-compact-row">
-                <div class="workflow-compact-info">
-                    {% if workflow_progress.current_stage %}
-                    <span class="wf-badge wf-phase">{{ workflow_progress.current_stage.get_phase_display }}</span>
-                    <span class="wf-stage-name">{{ workflow_progress.current_stage.name }}</span>
-                    {% if workflow_progress.current_stage.expected_days %}
-                    <span class="wf-badge wf-days"><i class="bi bi-clock"></i> {{ workflow_progress.current_stage.expected_days }}d</span>
-                    {% endif %}
-                    {% else %}
-                    <span class="wf-badge wf-none">No stage set</span>
-                    {% endif %}
-                </div>
-                <div class="workflow-compact-nav">
-                    <button class="wf-nav-btn wf-workflow" onclick="openWorkflowModal()" title="Full Workflow">
-                        <i class="bi bi-diagram-3"></i> Workflow
-                    </button>
-                    <button class="wf-nav-btn wf-prev" onclick="revertToPreviousStage({{ order.id }})" title="Previous Stage">
-                        <i class="bi bi-chevron-left"></i> Previous
-                    </button>
-                    <button class="wf-nav-btn wf-next" onclick="progressToNextStage({{ order.id }})" title="Next Stage">
-                        Next <i class="bi bi-chevron-right"></i>
-                    </button>
-                    <button class="wf-nav-btn wf-expand" onclick="toggleWorkflowAccordion()" title="Show details">
-                        <i class="bi bi-chevron-down" id="workflow-accordion-arrow"></i>
-                    </button>
-                </div>
-            </div>
-            <div class="workflow-detail-panel collapsed" id="workflow-accordion-body">
-                {% if workflow_progress.current_stage %}
-                {% if workflow_progress.current_stage.description %}
-                <p class="wf-description">{{ workflow_progress.current_stage.description }}</p>
-                {% endif %}
-                {% if workflow_progress.current_stage.tasks.all %}
-                <div class="wf-tasks">
-                    {% for task in workflow_progress.current_stage.tasks.all %}
-                    {% with completion=task_completions|get_item:task.id %}
-                    <div class="wf-task-item">
-                        {% if task.task_type == 'decision_matrix' %}
-                            <span class="wf-task-label">{{ task.description }}</span>
-                            <div class="wf-decision-btns">
-                                <button class="wf-dec proceed {% if completion.selected_option == 'proceed' %}active{% endif %}"
-                                        onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'proceed')">Proceed</button>
-                                <button class="wf-dec postpone {% if completion.selected_option == 'postpone' %}active{% endif %}"
-                                        onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'postpone')">Postpone</button>
-                                <button class="wf-dec dead {% if completion.selected_option == 'dead' %}active{% endif %}"
-                                        onclick="updateTaskDecision({{ order.id }}, {{ task.id }}, 'dead')">Dead</button>
-                            </div>
-                        {% elif task.task_type == 'radio' %}
-                            <span class="wf-task-label">{{ task.description }}</span>
-                            <div class="wf-radio-group">
-                                {% if task.options %}{% for option in task.options|split_options %}
-                                <label class="wf-radio"><input type="radio" name="task_{{ task.id }}" value="{{ option }}"
-                                       {% if completion.selected_option == option %}checked{% endif %}
-                                       onchange="updateTaskRadio({{ order.id }}, {{ task.id }}, '{{ option }}')"/> {{ option }}</label>
-                                {% endfor %}{% endif %}
-                            </div>
-                        {% elif task.task_type == 'dropdown' %}
-                            <label class="wf-task-label">{{ task.description }}
-                                <select class="wf-select" onchange="updateTaskDropdown({{ order.id }}, {{ task.id }}, this.value)">
-                                    <option value="">Select...</option>
-                                    {% if task.options %}{% for option in task.options|split_options %}
-                                    <option value="{{ option }}" {% if completion.selected_option == option %}selected{% endif %}>{{ option }}</option>
-                                    {% endfor %}{% endif %}
-                                </select>
-                            </label>
-                        {% elif task.task_type == 'attachment' %}
-                            <label class="wf-check">
-                                <input type="checkbox" {% if completion.completed %}checked{% endif %}
-                                       onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
-                                {{ task.description }} <i class="bi bi-paperclip wf-attach-icon"></i>
-                                {% if completion.attachment %}<a href="{{ completion.attachment.url }}" target="_blank" class="wf-file-link">View</a>{% endif %}
-                            </label>
-                            <input type="file" id="attachment_{{ task.id }}" class="attachment-input"
-                                   onchange="uploadTaskAttachment({{ order.id }}, {{ task.id }}, this)"/>
-                        {% else %}
-                            <label class="wf-check">
-                                <input type="checkbox" {% if completion.completed %}checked{% endif %}
-                                       onchange="updateTaskCheckbox({{ order.id }}, {{ task.id }}, this.checked)"/>
-                                {{ task.description }}
-                                {% if task.task_type == 'requirement' %}<span class="wf-req">Required</span>{% endif %}
-                            </label>
-                        {% endif %}
-                    </div>
-                    {% endwith %}
-                    {% endfor %}
-                </div>
-                {% endif %}
-                {% endif %}
-            </div>
-        </div>
-        {% endif %}
-
         <!-- Quick Actions Card -->
         <div class="card sale-sidebar-card">
             <div class="card-header">
@@ -2288,6 +2302,57 @@
                     <a href="{% url 'generate_summary_document' order.id %}" class="btn btn-sm btn-primary sale-sidebar-btn" title="Download Summary Document PDF">
                         <i class="bi bi-file-earmark-pdf"></i> Summary Document
                     </a>
+                    <button type="button" class="btn btn-sm btn-outline-primary sale-sidebar-btn" onclick="searchAndAttachAll(this)" title="Search the Claim Service and attach documents">
+                        <i class="bi bi-search"></i> Find &amp; review
+                    </button>
+                    <label class="btn btn-sm btn-outline-primary sale-sidebar-btn" title="Add completed job photos">
+                        <i class="bi bi-camera"></i> Add Photos
+                        <input type="file" accept="image/*" multiple class="job-doc-file-hidden" onchange="uploadSalePhotos(this, {{ order.id }})">
+                    </label>
+
+                    <!-- Job Status -->
+                    <span class="qa-section-header">Job Status</span>
+                    <label class="kebab-item kebab-item-toggle" for="boardsNotRequired">
+                        <span><i class="bi bi-slash-circle icon-warning"></i> Boards Not Required</span>
+                        <input class="job-checkbox" type="checkbox" id="boardsNotRequired"
+                               {% if order.boards_not_required %}checked{% endif %}
+                               onchange="updateJobCheckbox({{ order.id }}, 'boards_not_required', this.checked)">
+                    </label>
+                    <label class="kebab-item kebab-item-toggle" for="accessoriesNotRequired">
+                        <span><i class="bi bi-slash-circle icon-warning"></i> Accessories Not Required</span>
+                        <input class="job-checkbox" type="checkbox" id="accessoriesNotRequired"
+                               {% if order.accessories_not_required %}checked{% endif %}
+                               onchange="updateJobCheckbox({{ order.id }}, 'accessories_not_required', this.checked)">
+                    </label>
+                    <label class="kebab-item kebab-item-toggle" for="allItemsOrdered">
+                        <span><i class="bi bi-box-seam"></i> All Items Ordered</span>
+                        <input class="job-checkbox" type="checkbox" id="allItemsOrdered"
+                               {% if order.all_items_ordered %}checked{% endif %}
+                               onchange="updateJobCheckbox({{ order.id }}, 'all_items_ordered', this.checked)">
+                    </label>
+                    <label class="kebab-item kebab-item-toggle" for="jobFinished">
+                        <span><i class="bi bi-check2-circle"></i> Job Finished</span>
+                        <input class="job-checkbox" type="checkbox" id="jobFinished"
+                               {% if order.job_finished %}checked{% endif %}
+                               onchange="onJobFinishedChange(this, {{ order.id }})">
+                    </label>
+                    {% if order.accessories.exists %}
+                    <label class="kebab-item kebab-item-toggle" for="materialsAllocated">
+                        <span><i class="bi bi-box-arrow-in-down"></i> Materials Allocated</span>
+                        <input class="job-checkbox" type="checkbox" id="materialsAllocated"
+                               {% if all_allocated %}checked{% endif %}
+                               onchange="toggleMaterialsAllocated({{ order.id }}, this.checked, this)">
+                    </label>
+                    {% endif %}
+                    {% if is_completed %}
+                    <span class="kebab-item disabled">
+                        <i class="bi bi-check-circle-fill icon-success"></i> Sale Completed
+                    </span>
+                    {% else %}
+                    <button type="button" class="kebab-item" onclick="completeSaleManual()">
+                        <i class="bi bi-check2-circle"></i> Complete Sale
+                    </button>
+                    {% endif %}
                     {% endif %}
 
                     {% if sale.anthill_activity_id or sale.anthill_customer_id or sale.customer %}
@@ -3251,6 +3316,474 @@ function openDeleteRemedial(pk, number) {
     document.getElementById('delete-rem-number').textContent = number;
     openModal('deleteRemedialModal');
 }
+</script>
+{% endif %}
+
+{% if order %}
+<!-- Workflow Management Modal (outside tab panels so display:none on tab panel doesn't hide it) -->
+<div class="modal" id="workflowModal">
+    <div class="modal-overlay" onclick="closeWorkflowModal()"></div>
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="wf-modal-title">
+                    <h3>Workflow Management</h3>
+                    <span class="wf-modal-sub" id="wfModalSummary"></span>
+                </div>
+                <div class="wf-modal-head-actions">
+                    {% if role_perms.workflow.can_edit or is_role_admin %}
+                    <button type="button" class="btn btn-sm btn-primary" onclick="openAddStageModal()">
+                        <i class="bi bi-plus-circle"></i> Add Stage
+                    </button>
+                    {% endif %}
+                    <button type="button" class="modal-close" onclick="closeWorkflowModal()">&times;</button>
+                </div>
+            </div>
+            <div class="modal-body" style="padding: 0;">
+                <div class="wf-acc-wrap">
+                    {% for phase, phase_display in phases %}
+                    {% with phase_stages=stages_by_phase|get_item:phase %}
+                    <div class="wf-phase-sep">
+                        <span class="wf-phase-sep-label">{{ phase_display }}</span>
+                        <span class="wf-phase-sep-count">{{ phase_stages|length }} stage{{ phase_stages|length|pluralize }}</span>
+                    </div>
+                    {% for stage in phase_stages %}
+                    <div class="wf-stage-acc {% if workflow_progress.current_stage.id == stage.id %}wf-acc-current{% endif %}" data-stage-id="{{ stage.id }}">
+                        <div class="wf-acc-header" onclick="toggleStageAccordion(this)">
+                            <i class="bi bi-chevron-right wf-acc-chevron"></i>
+                            <span class="wf-acc-order">{{ stage.order }}</span>
+                            <span class="wf-acc-name">{{ stage.name }}</span>
+                            <span class="wf-badge wf-role-{{ stage.role }}">{{ stage.get_role_display }}</span>
+                            {% if stage.expected_days %}<span class="wf-badge wf-days"><i class="bi bi-clock"></i> {{ stage.expected_days }}d</span>{% endif %}
+                            {% if stage.tasks.all %}<span class="wf-acc-taskcount" title="Tasks in this stage"><i class="bi bi-check2-square"></i> {{ stage.tasks.all|length }}</span>{% endif %}
+                            {% if workflow_progress.current_stage.id == stage.id %}<span class="current-badge"><i class="bi bi-check-circle-fill"></i> Current</span>{% endif %}
+                            <span class="wf-acc-spacer"></span>
+                            {% if stage.order_count %}
+                            <button type="button" class="wf-acc-count" onclick="event.stopPropagation(); openStageOrdersModal({{ stage.id }})" title="View customers at this stage">
+                                <i class="bi bi-people-fill"></i> {{ stage.order_count }}
+                            </button>
+                            {% endif %}
+                            {% if role_perms.workflow.can_edit or is_role_admin %}
+                            <div class="kebab-menu" onclick="event.stopPropagation()">
+                                <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Stage options">
+                                    <i class="bi bi-three-dots-vertical"></i>
+                                </button>
+                                <div class="kebab-dropdown">
+                                    <button type="button" class="kebab-item" onclick="selectWorkflowStage({{ order.id }}, {{ stage.id }}); closeAllKebabs()">
+                                        <i class="bi bi-check2-circle"></i> Set as Current Stage
+                                    </button>
+                                    <div class="kebab-divider"></div>
+                                    <button type="button" class="kebab-item" onclick="editStage({{ stage.id }}); closeAllKebabs()">
+                                        <i class="bi bi-pencil"></i> Edit Stage
+                                    </button>
+                                    <button type="button" class="kebab-item" onclick="openAddTaskModal({{ stage.id }}); closeAllKebabs()">
+                                        <i class="bi bi-plus-circle"></i> Add Task
+                                    </button>
+                                    <button type="button" class="kebab-item" onclick="moveStage({{ stage.id }}, 'up'); closeAllKebabs()">
+                                        <i class="bi bi-arrow-up"></i> Move Up
+                                    </button>
+                                    <button type="button" class="kebab-item" onclick="moveStage({{ stage.id }}, 'down'); closeAllKebabs()">
+                                        <i class="bi bi-arrow-down"></i> Move Down
+                                    </button>
+                                    <div class="kebab-divider"></div>
+                                    <button type="button" class="kebab-item kebab-item-danger" onclick="deleteWorkflowStageItem({{ stage.id }}); closeAllKebabs()">
+                                        <i class="bi bi-trash"></i> Delete Stage
+                                    </button>
+                                </div>
+                            </div>
+                            {% else %}
+                            <button type="button" class="wf-acc-setbtn" onclick="event.stopPropagation(); selectWorkflowStage({{ order.id }}, {{ stage.id }})" title="Set as current stage">
+                                <i class="bi bi-check2-circle"></i>
+                            </button>
+                            {% endif %}
+                        </div>
+                        <div class="wf-acc-body {% if workflow_progress.current_stage.id != stage.id %}collapsed{% endif %}">
+                            {% if stage.description %}<p class="wf-acc-desc">{{ stage.description }}</p>{% endif %}
+                            <div class="wf-acc-tasks">
+                                {% for task in stage.tasks.all %}
+                                <div class="wf-acc-task">
+                                    <div class="wf-acc-task-main">
+                                        {% if task.task_type == 'requirement' %}<i class="bi bi-exclamation-circle wf-task-icon wf-task-icon-req"></i>
+                                        {% elif task.task_type == 'attachment' %}<i class="bi bi-paperclip wf-task-icon"></i>
+                                        {% elif task.task_type == 'radio' %}<i class="bi bi-ui-radios wf-task-icon"></i>
+                                        {% elif task.task_type == 'dropdown' %}<i class="bi bi-menu-button-wide wf-task-icon"></i>
+                                        {% elif task.task_type == 'decision_matrix' %}<i class="bi bi-signpost-split wf-task-icon"></i>
+                                        {% else %}<i class="bi bi-check2-square wf-task-icon"></i>{% endif %}
+                                        <span class="wf-acc-task-desc">{{ task.description }}</span>
+                                        {% if task.task_type == 'requirement' %}<span class="wf-tasktag wf-tasktag-req">Required</span>
+                                        {% elif task.task_type == 'attachment' %}<span class="wf-tasktag">Attachment</span>
+                                        {% elif task.task_type == 'radio' %}<span class="wf-tasktag">Radio</span>
+                                        {% elif task.task_type == 'dropdown' %}<span class="wf-tasktag">Dropdown</span>
+                                        {% elif task.task_type == 'decision_matrix' %}<span class="wf-tasktag">Decision</span>
+                                        {% else %}<span class="wf-tasktag">Record</span>{% endif %}
+                                        {% if task.options %}<span class="wf-task-options">{{ task.options }}</span>{% endif %}
+                                    </div>
+                                    {% if role_perms.workflow.can_edit or is_role_admin %}
+                                    <button type="button" class="wf-task-del" onclick="deleteWorkflowTaskItem({{ task.id }})" title="Delete task">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                    {% endif %}
+                                </div>
+                                {% empty %}
+                                <p class="wf-acc-empty">No tasks defined for this stage.</p>
+                                {% endfor %}
+                            </div>
+                            {% if role_perms.workflow.can_edit or is_role_admin %}
+                            <button type="button" class="wf-add-task-btn" onclick="openAddTaskModal({{ stage.id }})">
+                                <i class="bi bi-plus"></i> Add Task
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% empty %}
+                    <p class="wf-acc-empty wf-acc-empty-phase">No stages in this phase.</p>
+                    {% endfor %}
+                    {% endwith %}
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeWorkflowModal()">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if role_perms.workflow.can_edit or is_role_admin %}
+<!-- Add / Edit Stage Modal -->
+<div class="modal" id="addStageModal" style="z-index: 2200;">
+    <div class="modal-overlay" onclick="closeModal('addStageModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="wfStageModalTitle">Add Workflow Stage</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addStageModal')">&times;</button>
+            </div>
+            <form id="wfStageForm" action="{% url 'save_workflow_stage' %}" onsubmit="saveWorkflowStageForm(event)">
+                {% csrf_token %}
+                <input type="hidden" id="wfStageId" name="stage_id">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="wfStageName">Stage Name</label>
+                        <input type="text" id="wfStageName" name="name" required class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="wfStagePhase">Phase</label>
+                        <select id="wfStagePhase" name="phase" required class="form-input">
+                            <option value="enquiry">Enquiry</option>
+                            <option value="lead">Lead</option>
+                            <option value="sale">Sale</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="wfStageRole">Team / Role</label>
+                        <select id="wfStageRole" name="role" required class="form-input">
+                            <option value="customer-support">Customer Support</option>
+                            <option value="design">Design</option>
+                            <option value="fitter">Fitter</option>
+                            <option value="operations">Operations</option>
+                            <option value="manufacturing">Manufacturing</option>
+                            <option value="enquiry">Enquiry</option>
+                            <option value="waiting">Waiting Period</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="wfStageDescription">Description</label>
+                        <textarea id="wfStageDescription" name="description" rows="3" required class="form-input"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="wfExpectedDays">Expected Days (optional)</label>
+                        <input type="number" id="wfExpectedDays" name="expected_days" min="0" class="form-input">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('addStageModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Stage</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Add Task Modal -->
+<div class="modal" id="addTaskModal" style="z-index: 2200;">
+    <div class="modal-overlay" onclick="closeModal('addTaskModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Task</h3>
+                <button type="button" class="modal-close" onclick="closeModal('addTaskModal')">&times;</button>
+            </div>
+            <form id="wfTaskForm" action="{% url 'save_workflow_task' %}" onsubmit="saveWorkflowTaskForm(event)">
+                {% csrf_token %}
+                <input type="hidden" id="wfTaskStageId" name="stage_id">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="wfTaskDescription">Task Description</label>
+                        <input type="text" id="wfTaskDescription" name="description" required class="form-input">
+                    </div>
+                    <div class="form-group">
+                        <label for="wfTaskType">Task Type</label>
+                        <select id="wfTaskType" name="task_type" required class="form-input" onchange="toggleWfTaskOptions()">
+                            <option value="record">Record Checkbox</option>
+                            <option value="requirement">Requirement Checkbox (Must Complete)</option>
+                            <option value="attachment">Attachment Field</option>
+                            <option value="radio">Radio Buttons</option>
+                            <option value="dropdown">Dropdown Menu</option>
+                            <option value="decision_matrix">Decision Matrix</option>
+                        </select>
+                        <small class="form-help">
+                            <strong>Record:</strong> Simple tracking checkbox ·
+                            <strong>Requirement:</strong> Must be completed to progress ·
+                            <strong>Attachment:</strong> File upload ·
+                            <strong>Radio/Dropdown:</strong> Choose from options ·
+                            <strong>Decision Matrix:</strong> Proceed / Postpone / Dead
+                        </small>
+                    </div>
+                    <div class="form-group" id="wfTaskOptionsGroup" style="display: none;">
+                        <label for="wfTaskOptions">Options (comma-separated)</label>
+                        <input type="text" id="wfTaskOptions" name="options" class="form-input" placeholder="e.g., Brochure, Design Appointment, Both">
+                        <small class="form-help">Enter options separated by commas for radio buttons or dropdown menu.</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('addTaskModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Task</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Stage Customers Modal -->
+<div class="modal" id="stageOrdersModal" style="z-index: 2200;">
+    <div class="modal-overlay" onclick="closeModal('stageOrdersModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="wfStageOrdersTitle">Customers at Stage</h3>
+                <button type="button" class="modal-close" onclick="closeModal('stageOrdersModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="wfStageOrdersMeta" class="wf-stage-orders-meta"></p>
+                <div id="wfStageOrdersLoading" class="wf-stage-orders-loading"><i class="bi bi-arrow-repeat spin"></i> Loading...</div>
+                <table id="wfStageOrdersTable" class="wf-stage-orders-table" style="display: none;">
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>Sale Number</th>
+                            <th>At Stage Since</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="wfStageOrdersBody"></tbody>
+                </table>
+                <p id="wfStageOrdersEmpty" class="wf-acc-empty" style="display: none;">No customers at this stage.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    if (window.__workflowMgmtInit) return;
+    window.__workflowMgmtInit = true;
+    var WF_CSRF = '{{ csrf_token }}';
+
+    function wfReloadKeepOpen() {
+        sessionStorage.setItem('wfModalOpen', '1');
+        location.reload();
+    }
+
+    window.closeWorkflowModal = function () {
+        sessionStorage.removeItem('wfModalOpen');
+        closeModal('workflowModal');
+    };
+
+    window.toggleStageAccordion = function (headerEl) {
+        var acc = headerEl.closest('.wf-stage-acc');
+        var body = headerEl.nextElementSibling;
+        if (!body) return;
+        body.classList.toggle('collapsed');
+        acc.classList.toggle('open');
+    };
+
+    window.openAddStageModal = function () {
+        var f = document.getElementById('wfStageForm');
+        if (f) f.reset();
+        document.getElementById('wfStageId').value = '';
+        document.getElementById('wfStageModalTitle').textContent = 'Add Workflow Stage';
+        openModal('addStageModal');
+    };
+
+    window.editStage = function (stageId) {
+        fetch('/workflow/stage/' + stageId + '/')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                document.getElementById('wfStageModalTitle').textContent = 'Edit Workflow Stage';
+                document.getElementById('wfStageId').value = data.id;
+                document.getElementById('wfStageName').value = data.name;
+                document.getElementById('wfStagePhase').value = data.phase;
+                document.getElementById('wfStageRole').value = data.role;
+                document.getElementById('wfStageDescription').value = data.description;
+                document.getElementById('wfExpectedDays').value = data.expected_days || '';
+                openModal('addStageModal');
+            })
+            .catch(function () { alert('Could not load stage details.'); });
+    };
+
+    window.saveWorkflowStageForm = function (event) {
+        event.preventDefault();
+        var form = event.target;
+        fetch(form.action, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': WF_CSRF, 'X-Requested-With': 'XMLHttpRequest' },
+            body: new FormData(form),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.success) { wfReloadKeepOpen(); }
+            else { alert('Error saving stage.'); }
+        })
+        .catch(function () { alert('Error saving stage.'); });
+    };
+
+    window.deleteWorkflowStageItem = function (stageId) {
+        if (!confirm('Delete this workflow stage? This cannot be undone.')) return;
+        fetch('/workflow/stage/' + stageId + '/delete/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': WF_CSRF, 'X-Requested-With': 'XMLHttpRequest' },
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.success) { wfReloadKeepOpen(); }
+            else { alert('Error: ' + (data.error || 'Could not delete stage.')); }
+        });
+    };
+
+    window.moveStage = function (stageId, direction) {
+        fetch('/workflow/stage/' + stageId + '/move/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': WF_CSRF,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: 'direction=' + encodeURIComponent(direction),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) { if (data.success) { wfReloadKeepOpen(); } });
+    };
+
+    window.openAddTaskModal = function (stageId) {
+        var f = document.getElementById('wfTaskForm');
+        if (f) f.reset();
+        document.getElementById('wfTaskStageId').value = stageId;
+        document.getElementById('wfTaskOptionsGroup').style.display = 'none';
+        openModal('addTaskModal');
+    };
+
+    window.toggleWfTaskOptions = function () {
+        var t = document.getElementById('wfTaskType').value;
+        var show = (t === 'radio' || t === 'dropdown');
+        document.getElementById('wfTaskOptionsGroup').style.display = show ? 'block' : 'none';
+        document.getElementById('wfTaskOptions').required = show;
+    };
+
+    window.saveWorkflowTaskForm = function (event) {
+        event.preventDefault();
+        var form = event.target;
+        fetch(form.action, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': WF_CSRF, 'X-Requested-With': 'XMLHttpRequest' },
+            body: new FormData(form),
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.success) { wfReloadKeepOpen(); }
+            else { alert('Error adding task.'); }
+        })
+        .catch(function () { alert('Error adding task.'); });
+    };
+
+    window.deleteWorkflowTaskItem = function (taskId) {
+        if (!confirm('Delete this task?')) return;
+        fetch('/workflow/task/' + taskId + '/delete/', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': WF_CSRF, 'X-Requested-With': 'XMLHttpRequest' },
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (data.success) { wfReloadKeepOpen(); }
+            else { alert('Error: ' + (data.error || 'Could not delete task.')); }
+        });
+    };
+
+    window.openStageOrdersModal = function (stageId) {
+        document.getElementById('wfStageOrdersLoading').style.display = 'block';
+        document.getElementById('wfStageOrdersTable').style.display = 'none';
+        document.getElementById('wfStageOrdersEmpty').style.display = 'none';
+        document.getElementById('wfStageOrdersTitle').textContent = 'Customers at Stage';
+        document.getElementById('wfStageOrdersMeta').textContent = '';
+        openModal('stageOrdersModal');
+
+        fetch('/workflow/stage/' + stageId + '/orders/')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                document.getElementById('wfStageOrdersLoading').style.display = 'none';
+                document.getElementById('wfStageOrdersTitle').textContent = data.stage_name;
+                document.getElementById('wfStageOrdersMeta').textContent =
+                    data.phase + ' · ' + data.stage_role + ' · ' + data.count +
+                    ' customer' + (data.count !== 1 ? 's' : '');
+                if (!data.orders.length) {
+                    document.getElementById('wfStageOrdersEmpty').style.display = 'block';
+                    return;
+                }
+                var tb = document.getElementById('wfStageOrdersBody');
+                tb.innerHTML = '';
+                data.orders.forEach(function (o) {
+                    var tr = document.createElement('tr');
+                    var c1 = document.createElement('td'); c1.textContent = o.customer_name;
+                    var c2 = document.createElement('td'); c2.textContent = o.sale_number;
+                    var c3 = document.createElement('td'); c3.textContent = o.stage_started;
+                    var c4 = document.createElement('td');
+                    var a = document.createElement('a');
+                    a.href = '/order/' + encodeURIComponent(o.id) + '/';
+                    a.className = 'btn-icon';
+                    a.title = 'View Order';
+                    a.innerHTML = '<i class="bi bi-box-arrow-up-right"></i>';
+                    c4.appendChild(a);
+                    tr.append(c1, c2, c3, c4);
+                    tb.appendChild(tr);
+                });
+                document.getElementById('wfStageOrdersTable').style.display = 'table';
+            })
+            .catch(function () {
+                document.getElementById('wfStageOrdersLoading').style.display = 'none';
+                document.getElementById('wfStageOrdersEmpty').style.display = 'block';
+            });
+    };
+
+    // Populate the modal summary line and reopen after an edit-triggered reload
+    document.addEventListener('DOMContentLoaded', function () {
+        var summary = document.getElementById('wfModalSummary');
+        if (summary) {
+            var stageCount = document.querySelectorAll('#workflowModal .wf-stage-acc').length;
+            var totalDays = 0;
+            document.querySelectorAll('#workflowModal .wf-stage-acc .wf-badge.wf-days').forEach(function (el) {
+                var m = (el.textContent || '').match(/(\d+)/);
+                if (m) totalDays += parseInt(m[1], 10);
+            });
+            summary.textContent = stageCount + ' stage' + (stageCount !== 1 ? 's' : '') +
+                ' · ' + totalDays + ' day' + (totalDays !== 1 ? 's' : '') + ' total';
+        }
+        if (sessionStorage.getItem('wfModalOpen') === '1') {
+            sessionStorage.removeItem('wfModalOpen');
+            if (typeof openWorkflowModal === 'function') openWorkflowModal();
+        }
+    });
+})();
 </script>
 {% endif %}
 
