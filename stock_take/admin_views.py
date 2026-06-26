@@ -966,10 +966,17 @@ def admin_activity_log(request):
     """Admin page showing the user activity log."""
     from django.contrib.auth.models import User as DjangoUser
 
+    PAGE_SIZE = 50
+
     # Filters
     event_type   = request.GET.get('event_type', '')
     user_id      = request.GET.get('user_id', '')
     search       = request.GET.get('q', '').strip()
+
+    try:
+        offset = max(0, int(request.GET.get('offset', 0) or 0))
+    except (TypeError, ValueError):
+        offset = 0
 
     logs = ActivityLog.objects.select_related('user', 'order')
 
@@ -980,11 +987,29 @@ def admin_activity_log(request):
     if search:
         logs = logs.filter(description__icontains=search)
 
-    # Paginate – 50 per page
-    from django.core.paginator import Paginator
-    paginator  = Paginator(logs, 50)
-    page_num   = request.GET.get('page', 1)
-    page_obj   = paginator.get_page(page_num)
+    # Only count the entries; fetch a single 50-row slice to keep overhead low.
+    total_count = logs.count()
+    entries     = list(logs[offset:offset + PAGE_SIZE])
+    next_offset = offset + PAGE_SIZE
+    has_more    = next_offset < total_count
+    loaded      = offset + len(entries)
+
+    # AJAX "load more" – return the next batch of rendered rows only.
+    if request.GET.get('ajax') == '1':
+        from django.http import JsonResponse
+        from django.template.loader import render_to_string
+        rows_html = render_to_string(
+            'stock_take/partials/activity_log_rows.html',
+            {'entries': entries},
+            request=request,
+        )
+        return JsonResponse({
+            'rows_html':   rows_html,
+            'has_more':    has_more,
+            'next_offset': next_offset,
+            'loaded':      loaded,
+            'total_count': total_count,
+        })
 
     users          = DjangoUser.objects.filter(activity_logs__isnull=False).distinct().order_by('first_name', 'last_name')
     event_choices  = ActivityLog.EVENT_CHOICES
@@ -1008,13 +1033,16 @@ def admin_activity_log(request):
     )
 
     return render(request, 'stock_take/admin_activity_log.html', {
-        'page_obj':      page_obj,
+        'entries':       entries,
         'users':         users,
         'event_choices': all_choices,
         'filter_event':  event_type,
         'filter_user':   user_id,
         'filter_q':      search,
-        'total_count':   logs.count(),
+        'total_count':   total_count,
+        'loaded':        loaded,
+        'next_offset':   next_offset,
+        'has_more':      has_more,
         'error_logs':    error_logs,
     })
 

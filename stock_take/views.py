@@ -28,6 +28,78 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+def csrf_failure(request, reason="", template_name="403.html"):
+    """Custom CSRF failure view that records *why* a CSRF check failed.
+
+    A 403 on ``POST /accounts/login/`` is almost always a CSRF verification
+    failure (an expired or missing token, blocked/cleared cookies, or an
+    origin/referer mismatch) — NOT bad credentials. Wrong credentials render
+    the login form again with a 200. Django passes a human-readable ``reason``
+    to this view, which pinpoints the cause, e.g.:
+
+      * "CSRF cookie not set."            -> cookies blocked / first request
+      * "CSRF token missing."             -> form rendered without a token
+                                             (often a cached/stale login page)
+      * "CSRF token incorrect."           -> token expired or session rotated
+      * "Origin checking failed - ..."    -> proxy / CSRF_TRUSTED_ORIGINS issue
+      * "Referer checking failed - ..."   -> HTTPS referer/proxy issue
+
+    We log it to the server log AND to the ActivityLog error table so it shows
+    up on the Activity Log admin page, then flag the request so the
+    ActivityLoggingMiddleware does not write a second, vaguer entry.
+    """
+    from django.http import HttpResponseForbidden
+    from django.template import loader
+
+    user = getattr(request, 'user', None)
+    user = user if (user and user.is_authenticated) else None
+
+    logger.warning(
+        "CSRF verification failed: %s %s — reason: %s "
+        "(user=%s, origin=%s, referer=%s, ua=%s)",
+        request.method,
+        request.path,
+        reason,
+        user.username if user else 'anonymous',
+        request.META.get('HTTP_ORIGIN', ''),
+        request.META.get('HTTP_REFERER', ''),
+        request.META.get('HTTP_USER_AGENT', ''),
+    )
+
+    try:
+        from .models import ActivityLog
+        ActivityLog.objects.create(
+            user=user,
+            event_type='error',
+            description=f"403 CSRF failure on {request.method} {request.path}: {reason}",
+            extra_data={
+                'path': request.path,
+                'method': request.method,
+                'status_code': 403,
+                'error_message': reason,
+                'exception_type': 'CSRF verification failed',
+                'csrf_reason': reason,
+                'origin': request.META.get('HTTP_ORIGIN', ''),
+                'referer': request.META.get('HTTP_REFERER', ''),
+                'user_agent': request.META.get('HTTP_USER_AGENT', ''),
+            },
+        )
+    except Exception:
+        logger.exception('csrf_failure view failed to write ActivityLog entry')
+
+    # Tell ActivityLoggingMiddleware we've already logged this 403.
+    request._csrf_logged = True
+
+    try:
+        template = loader.get_template(template_name)
+        return HttpResponseForbidden(template.render({'reason': reason}, request))
+    except Exception:
+        return HttpResponseForbidden(
+            '<h1>403 Forbidden</h1><p>CSRF verification failed. '
+            'Please refresh the page and try signing in again.</p>'
+        )
+
+
 def _build_anthill_sale_pk_map():
     """Map sale_number -> AnthillSale.pk for the unresolved 'orders to place'.
 
@@ -14764,7 +14836,27 @@ def generate_and_upload_accessories_csv(request, order_id):
             msg_parts.append(f'New substitutions created: {substitutions_created}')
         
         messages.success(request, ' '.join(msg_parts))
-        
+
+        log_activity(
+            user=request.user,
+            event_type='accessories_generated',
+            description=(
+                f"{request.user.get_full_name() or request.user.username} generated accessories "
+                f"for {order.sale_number or order.id} (CAD {order.customer_number}): "
+                f"{row_count} items, {accessories_created} created, {accessories_updated} updated."
+            ),
+            order=order,
+            extra_data={
+                'cad_number': order.customer_number,
+                'row_count': row_count,
+                'accessories_created': accessories_created,
+                'accessories_updated': accessories_updated,
+                'substitutions_used': substitutions_used,
+                'substitutions_created': substitutions_created,
+            },
+            request=request,
+        )
+
         return redirect('order_details', order_id=order_id)
         
     except Exception as e:

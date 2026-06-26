@@ -3058,6 +3058,7 @@ class ActivityLog(models.Model):
         ('product_created',    'Product Created'),
         ('product_updated',    'Product Updated'),
         ('stock_adjusted',     'Stock Adjusted'),
+        ('accessories_generated', 'Accessories Generated'),
         ('po_split',           'Purchase Order Split'),
         ('po_status_change',   'PO Status Change'),
         ('po_updated',         'Purchase Order Updated'),

@@ -167,13 +167,14 @@
         </div>
     </div>
 
-    <div class="admin-card">
+    <div class="admin-card log-entries-card">
         <div class="admin-card-header">
-            <h2>Log Entries</h2>
+            <h2><i class="bi bi-list-ul"></i> Log Entries</h2>
+            <span class="log-count-badge" id="log-count-badge" title="Total matching entries">{{ total_count }}</span>
         </div>
-        {% if page_obj.object_list %}
+        {% if entries %}
         <div class="admin-table-wrapper">
-            <table class="admin-table">
+            <table class="admin-table activity-log-table">
                 <thead>
                     <tr>
                         <th>Timestamp</th>
@@ -183,65 +184,21 @@
                         <th>Order</th>
                     </tr>
                 </thead>
-                <tbody>
-                    {% for entry in page_obj %}
-                    <tr>
-                        <td class="timestamp-cell">
-                            {{ entry.timestamp|date:"d M Y" }}<br>
-                            <span style="font-size: 0.72rem; opacity: 0.65;">{{ entry.timestamp|date:"H:i:s" }}</span>
-                        </td>
-                        <td>
-                            <div class="user-cell">
-                                <i class="bi bi-person-circle"></i>
-                                {{ entry.user.get_full_name|default:entry.user.username|default:"—" }}
-                            </div>
-                        </td>
-                        <td>
-                            <span class="event-badge {{ entry.event_type }}">
-                                {{ entry.get_event_type_display }}
-                            </span>
-                        </td>
-                        <td class="desc-cell">{{ entry.description }}</td>
-                        <td>
-                            {% if entry.order %}
-                            <a href="{% url 'order_details' entry.order.id %}" class="order-link">
-                                {{ entry.order.sale_number|default:entry.order.id }}
-                            </a>
-                            {% else %}
-                            <span style="color: var(--text-muted); font-size:0.75rem;">—</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
+                <tbody id="activity-log-body">
+                    {% include 'stock_take/partials/activity_log_rows.html' %}
                 </tbody>
             </table>
         </div>
 
-        <div class="pagination-bar" style="padding: 12px 20px;">
-            <span>
-                Showing {{ page_obj.start_index }}&ndash;{{ page_obj.end_index }} of {{ total_count }} result{{ total_count|pluralize }}
+        <div class="load-more-bar">
+            <span class="load-more-status">
+                Showing <strong id="loaded-count">{{ loaded }}</strong> of <strong>{{ total_count }}</strong> entr{{ total_count|pluralize:"y,ies" }}
             </span>
-            <div class="pagination-links">
-                {% if page_obj.has_previous %}
-                <a href="?{% if filter_q %}q={{ filter_q }}&{% endif %}{% if filter_user %}user_id={{ filter_user }}&{% endif %}{% if filter_event %}event_type={{ filter_event }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo; Prev</a>
-                {% else %}
-                <span class="disabled">&laquo; Prev</span>
-                {% endif %}
-
-                {% for num in page_obj.paginator.page_range %}
-                    {% if page_obj.number == num %}
-                    <span class="current">{{ num }}</span>
-                    {% elif num > page_obj.number|add:"-3" and num < page_obj.number|add:"3" %}
-                    <a href="?{% if filter_q %}q={{ filter_q }}&{% endif %}{% if filter_user %}user_id={{ filter_user }}&{% endif %}{% if filter_event %}event_type={{ filter_event }}&{% endif %}page={{ num }}">{{ num }}</a>
-                    {% endif %}
-                {% endfor %}
-
-                {% if page_obj.has_next %}
-                <a href="?{% if filter_q %}q={{ filter_q }}&{% endif %}{% if filter_user %}user_id={{ filter_user }}&{% endif %}{% if filter_event %}event_type={{ filter_event }}&{% endif %}page={{ page_obj.next_page_number }}">Next &raquo;</a>
-                {% else %}
-                <span class="disabled">Next &raquo;</span>
-                {% endif %}
-            </div>
+            <button type="button" class="btn btn-secondary btn-sm load-more-btn" id="load-more-btn"
+                    data-next-offset="{{ next_offset }}"
+                    {% if not has_more %}style="display:none;"{% endif %}>
+                <i class="bi bi-arrow-down-circle"></i> Load 50 More
+            </button>
         </div>
         {% else %}
         <div class="no-logs">
@@ -344,6 +301,34 @@ document.addEventListener('DOMContentLoaded', function() {
     modal?.addEventListener('click', function(e) {
         if (e.target === modal) modal.style.display = 'none';
     });
+
+    // Load More – fetch the next 50 entries and append them
+    var loadMoreBtn = document.getElementById('load-more-btn');
+    if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', function() {
+            var params = new URLSearchParams(window.location.search);
+            params.set('ajax', '1');
+            params.set('offset', loadMoreBtn.dataset.nextOffset);
+            var original = loadMoreBtn.innerHTML;
+            loadMoreBtn.disabled = true;
+            loadMoreBtn.innerHTML = '<i class="bi bi-arrow-clockwise spin"></i> Loading…';
+            fetch('?' + params.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var tbody = document.getElementById('activity-log-body');
+                    tbody.insertAdjacentHTML('beforeend', data.rows_html);
+                    document.getElementById('loaded-count').textContent = data.loaded;
+                    loadMoreBtn.dataset.nextOffset = data.next_offset;
+                    loadMoreBtn.disabled = false;
+                    loadMoreBtn.innerHTML = original;
+                    if (!data.has_more) loadMoreBtn.style.display = 'none';
+                })
+                .catch(function() {
+                    loadMoreBtn.disabled = false;
+                    loadMoreBtn.innerHTML = original;
+                });
+        });
+    }
 });
 </script>
 {% endblock %}

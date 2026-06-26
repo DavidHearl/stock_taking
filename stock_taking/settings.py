@@ -280,6 +280,11 @@ LOGGING = {
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
+# Custom CSRF failure view — logs the specific failure reason (token missing/
+# expired, origin/referer mismatch, cookie not set) so login 403s can be
+# diagnosed instead of guessed. See stock_take.views.csrf_failure.
+CSRF_FAILURE_VIEW = 'stock_take.views.csrf_failure'
+
 CSRF_TRUSTED_ORIGINS_STRING = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
 if CSRF_TRUSTED_ORIGINS_STRING:
     CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in CSRF_TRUSTED_ORIGINS_STRING.split(',') if origin.strip()]

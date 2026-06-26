@@ -247,6 +247,10 @@ class ActivityLoggingMiddleware:
 
         # ── Log error responses (4xx / 5xx) ──
         if response.status_code >= 400:
+            # CSRF failures are already logged with their specific reason by
+            # the custom csrf_failure view — don't write a second, vaguer entry.
+            if getattr(request, '_csrf_logged', False):
+                return response
             # Only log mutating methods or server errors
             if request.method in ('POST', 'PUT', 'PATCH', 'DELETE') or response.status_code >= 500:
                 error_message = ''
