@@ -260,8 +260,17 @@ LOGGING = {
             'filters': ['skip_debug_toolbar'],
         },
     },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
     'loggers': {
         'django.server': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'stock_take': {
             'handlers': ['console'],
             'level': 'INFO',
             'propagate': False,

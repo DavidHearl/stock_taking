@@ -901,26 +901,6 @@ def sales_list(request):
     # PFP sales (no fit date) are collapsed into a single group shown only on page 1.
     pfp_sales = list(sales.filter(fit_date__isnull=True))
 
-    # Sort keys: group by ordering status (Required -> Short -> Ordered/Validated -> none).
-    # Required is ordered by nearest upcoming fit date first; every other bracket is
-    # ordered by fit date descending (furthest-away date first).
-    from datetime import date as _date
-    _today = _date.today()
-    _status_rank = {'required': 0, 'short': 1, 'ordered': 2, 'validated': 2}
-
-    def _fit_key(s):
-        if s.fit_date >= _today:
-            return (0, (s.fit_date - _today).days)
-        return (1, (_today - s.fit_date).days)
-
-    def _sort_key(s):
-        rank = _status_rank.get(s.ordering_status, 3)
-        if s.ordering_status == 'required':
-            # Nearest upcoming fit date first within the Required group.
-            return (rank, 0, _fit_key(s))
-        # All other groups: furthest-away fit date first (descending).
-        return (rank, 1, (-s.fit_date.toordinal(),))
-
     if status_filter == 'complete':
         # The "complete" bracket is huge and status grouping is irrelevant there, so
         # just order by most-recent fit date and compute status for the visible page.
@@ -932,11 +912,11 @@ def sales_list(request):
             dated_sales + (pfp_sales if page_obj.number == 1 else [])
         )
     else:
-        # Actionable brackets: materialise all dated sales, resolve status, then sort
-        # by status group + fit date so the ordering is consistent across pages.
-        dated_all = list(sales.filter(fit_date__isnull=False))
+        # Order strictly by fit date descending (furthest-away date first, past dates
+        # last) so the "Today" divider lands on the single upcoming -> past boundary.
+        dated_qs = sales.filter(fit_date__isnull=False).order_by(F('fit_date').desc(nulls_last=True))
+        dated_all = list(dated_qs)
         order_map = _attach_ordering_status(dated_all + pfp_sales)
-        dated_all.sort(key=_sort_key)
         paginator = Paginator(dated_all, 100)
         page_obj = paginator.get_page(page_number)
         dated_sales = list(page_obj)
@@ -2328,7 +2308,7 @@ def sale_detail(request, pk):
         context['create_order_form'] = context.get('create_order_form') or OrderForm(initial=initial_data)
 
         # Fields the user must fill in: always show designer; show any field where we have no data
-        _never_visible = {'order_type', 'customer', 'anthill_id', 'postcode', 'os_doors_required', 'all_items_ordered', 'job_finished'}
+        _never_visible = {'order_type', 'customer', 'anthill_id', 'address', 'postcode', 'os_doors_required', 'all_items_ordered', 'job_finished'}
         missing = {'designer'}  # designer is never derivable from sale data
         for field_name, value in initial_data.items():
             if field_name not in _never_visible and not value:

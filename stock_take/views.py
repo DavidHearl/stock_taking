@@ -62,6 +62,70 @@ def _build_anthill_sale_pk_map():
     return pk_map
 
 
+def _populate_missing_sale_fit_dates(orders):
+    """Copy each 'order to place' fit date onto its linked AnthillSale when the
+    sale has no fit_date yet.
+
+    The Anthill "Orders to Place" modal shows fit dates from the workflow screen.
+    Some matching sale records have an empty fit_date — fill those in from the
+    modal value so the sale detail page no longer shows "Not set".
+
+    `orders` is a list of dicts each with a contract/contract_number and a
+    fit_date/fitDate string. Returns the number of sales updated.
+    """
+    from .models import AnthillSale
+
+    def _sale_number_from_contract(contract):
+        contract = str(contract or '').strip()
+        if not contract:
+            return None
+        if contract.isdigit():
+            return contract
+        digits = re.findall(r'\d+', contract)
+        return digits[-1] if digits else None
+
+    # Map sale_number -> fit date string (only rows that actually have a fit date)
+    wanted = {}
+    for o in orders:
+        fit_str = (o.get('fit_date') or o.get('fitDate') or '').strip()
+        if not fit_str:
+            continue
+        sale_number = _sale_number_from_contract(o.get('contract') or o.get('contract_number'))
+        if sale_number:
+            wanted.setdefault(sale_number, fit_str)
+
+    if not wanted:
+        return 0
+
+    _DATE_FMTS = ('%d/%m/%Y', '%d/%m/%y', '%Y-%m-%d', '%d-%m-%Y')
+
+    def _parse(fit_str):
+        for fmt in _DATE_FMTS:
+            try:
+                return datetime.datetime.strptime(fit_str, fmt).date()
+            except ValueError:
+                continue
+        m = re.search(r'(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})', fit_str)
+        if m:
+            try:
+                return datetime.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+            except ValueError:
+                return None
+        return None
+
+    updated = 0
+    sales = AnthillSale.objects.filter(
+        anthill_activity_id__in=wanted.keys(), fit_date__isnull=True
+    )
+    for sale in sales:
+        parsed = _parse(wanted[sale.anthill_activity_id])
+        if parsed:
+            sale.fit_date = parsed
+            sale.save(update_fields=['fit_date'])
+            updated += 1
+    return updated
+
+
 @login_required
 def ordering(request):
     # Handle price per square meter update
@@ -1115,6 +1179,9 @@ def scrape_anthill_orders_to_place(request):
             change = None
         orders.append({**o, 'change': change})
 
+    # Backfill fit dates onto any linked sales that don't have one yet
+    _populate_missing_sale_fit_dates(orders)
+
     return JsonResponse({
         'success': True,
         'orders': orders,
@@ -1146,6 +1213,10 @@ def get_anthill_orders_from_db(request):
             'order_url': r.order_url,
             'change': None,
         })
+
+    # Backfill fit dates onto any linked sales that don't have one yet
+    _populate_missing_sale_fit_dates(orders)
+
     agg = AnthillOrderToPlace.objects.filter(resolved=False).aggregate(m=Max('last_seen'))
     last_seen = agg.get('m')
     return JsonResponse({
@@ -14441,6 +14512,7 @@ def generate_and_upload_accessories_csv(request, order_id):
         messages.error(request, 'Order must have a CAD Number to generate accessories CSV.')
         return redirect('order_details', order_id=order_id)
     
+    cad_db_path = None
     try:
         # Always fetch cad_data.db from DigitalOcean Spaces
         import tempfile
@@ -14701,6 +14773,13 @@ def generate_and_upload_accessories_csv(request, order_id):
         logger.error(f"Error generating accessories CSV for order {order_id}: {error_detail}")
         messages.error(request, f'Error generating CSV: {str(e)}')
         return redirect('order_details', order_id=order_id)
+    finally:
+        # Always remove the temp copy of cad_data.db to avoid filling /tmp over time
+        if cad_db_path and os.path.exists(cad_db_path):
+            try:
+                os.unlink(cad_db_path)
+            except OSError as cleanup_error:
+                logger.warning(f"Could not delete temp CAD DB {cad_db_path}: {cleanup_error}")
 
 
 # Timesheet API Views
