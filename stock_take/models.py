@@ -1755,6 +1755,71 @@ class CalendarBlock(models.Model):
         return f'Block: {self.fitter_code} on {self.date}'
 
 
+class EmployeeCalendarEntry(models.Model):
+    """Records an employee's working status for a specific day on the employee calendar."""
+    STATUS_CHOICES = [
+        ('office', 'In Office'),
+        ('showroom', 'Showroom'),
+        ('workshop', 'Workshop'),
+        ('wfh', 'Working From Home'),
+        ('off', 'Day Off'),
+        ('sick', 'Sick Leave'),
+        ('holiday', 'Holiday'),
+        ('training', 'Training'),
+    ]
+
+    employee = models.ForeignKey(
+        'auth.User',
+        on_delete=models.CASCADE,
+        related_name='calendar_entries',
+        help_text='The user this entry belongs to',
+    )
+    date = models.DateField(db_index=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
+    note = models.CharField(max_length=200, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['date', 'employee']
+        unique_together = [['employee', 'date']]
+
+    def __str__(self):
+        return f'{self.employee.username} – {self.get_status_display()} on {self.date}'
+
+
+class EmployeeCalendarRule(models.Model):
+    """A recurring weekly status rule for an employee (e.g. Rory: WFH every Wed & Fri)."""
+    WEEKDAY_CHOICES = [
+        (0, 'Monday'),
+        (1, 'Tuesday'),
+        (2, 'Wednesday'),
+        (3, 'Thursday'),
+        (4, 'Friday'),
+        (5, 'Saturday'),
+        (6, 'Sunday'),
+    ]
+
+    employee = models.ForeignKey(
+        'auth.User',
+        on_delete=models.CASCADE,
+        related_name='calendar_rules',
+        help_text='The user this recurring rule applies to',
+    )
+    weekday = models.IntegerField(choices=WEEKDAY_CHOICES)
+    status = models.CharField(max_length=20, choices=EmployeeCalendarEntry.STATUS_CHOICES)
+    note = models.CharField(max_length=200, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['employee', 'weekday']
+        unique_together = [['employee', 'weekday']]
+
+    def __str__(self):
+        return f'{self.employee.username} – {self.get_status_display()} every {self.get_weekday_display()}'
+
+
 class SalesAppointment(models.Model):
     """Track sales team appointments for the sales calendar."""
     EVENT_TYPE_CHOICES = [
@@ -1914,6 +1979,7 @@ class Fitter(models.Model):
     phone = models.CharField(max_length=20, blank=True)
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Hourly rate for this fitter')
     active = models.BooleanField(default=True)
+    location = models.CharField(max_length=100, blank=True, default='', help_text='Branch / office location (e.g. Belfast, Dublin)')
     created_at = models.DateTimeField(auto_now_add=True)
     
     def __str__(self):
@@ -2832,7 +2898,10 @@ class UserProfile(models.Model):
     dark_mode = models.BooleanField(default=True, help_text='Enable dark mode theme')
     selected_location = models.CharField(max_length=100, blank=True, default='', help_text='Currently selected site location')
     role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, related_name='users')
+    phone = models.CharField(max_length=100, blank=True, default='', help_text='Contact phone number')
     dashboard_layout = models.JSONField(blank=True, null=True, help_text='Per-user dashboard widget layout config')
+
+    calendar_order = models.IntegerField(default=0, help_text='Sort position in the employee calendar list')
 
     def __str__(self):
         role_display = self.role.get_name_display() if self.role else 'No Role'

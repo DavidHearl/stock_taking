@@ -12496,8 +12496,143 @@ def calendar_view(request):
         calendar_blocks.setdefault(_ds, {})[_b.fitter_code] = _b.id
     calendar_blocks_json = _json.dumps(calendar_blocks)
 
+    # ── Employee calendar data ────────────────────────────────────────────────
+    from .models import EmployeeCalendarEntry, EmployeeCalendarRule
+    from django.contrib.auth.models import User
+    # Filter employees for the employee calendar by the user's selected location.
+    _emp_location = ''
+    try:
+        _emp_location = (request.user.profile.selected_location or '').strip()
+    except Exception:
+        pass
+    if _emp_location:
+        emp_user_qs = User.objects.filter(
+            is_active=True, profile__selected_location__iexact=_emp_location
+        ).order_by('profile__calendar_order', 'first_name', 'last_name', 'username')
+    else:
+        emp_user_qs = User.objects.filter(is_active=True).order_by('profile__calendar_order', 'first_name', 'last_name', 'username')
+
+    # Show this week and next week (Mon–Sun) instead of the whole month.
+    import datetime as _dt
+    _today = timezone.now().date()
+    _week_start = _today - _dt.timedelta(days=_today.weekday())  # Monday of current week
+    _emp_range_start = _week_start
+    _emp_range_end = _week_start + _dt.timedelta(days=13)        # Sunday of next week
+
+    _emp_entries = EmployeeCalendarEntry.objects.filter(
+        date__gte=_emp_range_start, date__lte=_emp_range_end
+    ).select_related('employee')
+    # {user_id: {date_str: entry}}
+    _emp_status_map = {}
+    for _e in _emp_entries:
+        _emp_status_map.setdefault(_e.employee_id, {})[_e.date.strftime('%Y-%m-%d')] = _e
+
+    # Recurring weekly rules → applied as defaults when no explicit entry exists.
+    # {user_id: {weekday: rule}}
+    _emp_rule_map = {}
+    for _r in EmployeeCalendarRule.objects.select_related('employee'):
+        _emp_rule_map.setdefault(_r.employee_id, {})[_r.weekday] = _r
+
+    _status_labels = dict(EmployeeCalendarEntry.STATUS_CHOICES)
+
+    emp_weeks = []
+    for _w in range(2):
+        _days = []
+        for _d in range(7):
+            _dd = _week_start + _dt.timedelta(days=_w * 7 + _d)
+            _days.append({
+                'date': _dd,
+                'in_month': True,
+                'is_today': _dd == _today,
+                'date_str': _dd.strftime('%Y-%m-%d'),
+            })
+        _emp_lanes = []
+        for _u in emp_user_qs:
+            _name = _u.get_full_name() or _u.username
+            _days_out = []
+            for _day in _days:
+                _ds = _day['date_str']
+                _entry = _emp_status_map.get(_u.id, {}).get(_ds)
+                _rule = None
+                if _entry is None:
+                    _rule = _emp_rule_map.get(_u.id, {}).get(_day['date'].weekday())
+                _days_out.append({
+                    'date': _day['date'],
+                    'is_today': _day['is_today'],
+                    'date_str': _ds,
+                    'entry': _entry,
+                    'rule': _rule,
+                })
+            # Build merged segments: consecutive days with same status collapse
+            # into one box that spans multiple columns.
+            _segments = []
+            _i = 0
+            while _i < 7:
+                _d0 = _days_out[_i]
+                _status = _d0['entry'].status if _d0['entry'] else (_d0['rule'].status if _d0['rule'] else None)
+                if _status is None:
+                    _i += 1
+                    continue
+                _is_rule = _d0['entry'] is None
+                _entry_ids = [] if _is_rule else [_d0['entry'].id]
+                _j = _i + 1
+                while _j < 7:
+                    _dn = _days_out[_j]
+                    _ns = _dn['entry'].status if _dn['entry'] else (_dn['rule'].status if _dn['rule'] else None)
+                    _nr = _dn['entry'] is None
+                    if _ns == _status and _nr == _is_rule:
+                        if not _nr:
+                            _entry_ids.append(_dn['entry'].id)
+                        _j += 1
+                    else:
+                        break
+                _segments.append({
+                    'col_start': _i + 1,
+                    'col_end': _j + 1,
+                    'span': _j - _i,
+                    'status': _status,
+                    'status_display': _status_labels.get(_status, _status),
+                    'is_rule': _is_rule,
+                    'entry_ids': ','.join(str(e) for e in _entry_ids),
+                    'date_start': _days_out[_i]['date_str'],
+                    'date_end': _days_out[_j - 1]['date_str'],
+                    'col_index_start': _i,   # 0-based index within the week
+                    'col_index_end': _j - 1,
+                })
+                _i = _j
+            _emp_lanes.append({
+                'employee': {'id': _u.id, 'name': _name},
+                'days': _days_out,
+                'segments': _segments,
+            })
+        emp_weeks.append({'widx': _w + 1, 'days': _days, 'emp_lanes': _emp_lanes})
+
+    # Flat lists for the rules management UI.
+    emp_rules = list(
+        EmployeeCalendarRule.objects.select_related('employee')
+        .order_by('employee__first_name', 'employee__last_name', 'weekday')
+    )
+    emp_users = [{'id': _u.id, 'name': (_u.get_full_name() or _u.username)} for _u in emp_user_qs]
+    emp_statuses = EmployeeCalendarEntry.STATUS_CHOICES
+    emp_weekdays = EmployeeCalendarRule.WEEKDAY_CHOICES
+    # {user_id: {weekday: status}} for prefilling the per-employee rule editor.
+    _rules_by_user = {}
+    for _r in emp_rules:
+        _rules_by_user.setdefault(_r.employee_id, {})[_r.weekday] = _r.status
+    emp_rules_json = _json.dumps(_rules_by_user)
+    # One row per employee that has at least one rule (for the summary list).
+    _seen_rule_users = set()
+    emp_rule_users = []
+    for _r in emp_rules:
+        if _r.employee_id in _seen_rule_users:
+            continue
+        _seen_rule_users.add(_r.employee_id)
+        emp_rule_users.append({
+            'id': _r.employee_id,
+            'name': _r.employee.get_full_name() or _r.employee.username,
+        })
+
     context = {
-        'current_year': current_year,
         'current_month': current_month,
         'month_name': month_name,
         'month_days': month_days,
@@ -12521,6 +12656,14 @@ def calendar_view(request):
         'pfp_orders': pfp_orders,
         'panel_remedials': panel_remedials,
         'calendar_blocks_json': calendar_blocks_json,
+        'emp_weeks': emp_weeks,
+        'emp_location': _emp_location,
+        'emp_rules': emp_rules,
+        'emp_users': emp_users,
+        'emp_statuses': emp_statuses,
+        'emp_weekdays': emp_weekdays,
+        'emp_rules_json': emp_rules_json,
+        'emp_rule_users': emp_rule_users,
     }
     
     return render(request, 'stock_take/fit_board.html', context)
@@ -12655,6 +12798,184 @@ def calendar_check_payments_progress(request):
         return JsonResponse({'success': True, 'status': 'unknown'})
 
     return JsonResponse({'success': True, **data})
+
+
+@login_required
+def employee_calendar_set_status(request):
+    """Create or update an EmployeeCalendarEntry (drag-drop from the Employee Calendar tab)."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    import json as _json
+    try:
+        data = _json.loads(request.body)
+    except ValueError:
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    employee_id = data.get('employee_id')
+    date_str = data.get('date')
+    status = data.get('status')
+    note = data.get('note', '').strip()
+
+    if not employee_id or not date_str or not status:
+        return JsonResponse({'success': False, 'error': 'employee_id, date and status are required'})
+
+    from .models import EmployeeCalendarEntry
+    valid_statuses = [s[0] for s in EmployeeCalendarEntry.STATUS_CHOICES]
+    if status not in valid_statuses:
+        return JsonResponse({'success': False, 'error': f'Invalid status: {status}'})
+
+    import datetime as _dt
+    try:
+        date = _dt.datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return JsonResponse({'success': False, 'error': 'Invalid date format, expected YYYY-MM-DD'})
+
+    from django.contrib.auth.models import User
+    employee = get_object_or_404(User, id=int(employee_id))
+    entry, created = EmployeeCalendarEntry.objects.update_or_create(
+        employee=employee,
+        date=date,
+        defaults={'status': status, 'note': note},
+    )
+    return JsonResponse({
+        'success': True,
+        'entry_id': entry.id,
+        'status': entry.status,
+        'status_display': entry.get_status_display(),
+        'created': created,
+    })
+
+
+@login_required
+def employee_calendar_delete_status(request, entry_id):
+    """Delete an EmployeeCalendarEntry."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    from .models import EmployeeCalendarEntry
+    entry = get_object_or_404(EmployeeCalendarEntry, id=int(entry_id))
+    entry.delete()
+    return JsonResponse({'success': True})
+
+
+@login_required
+def employee_calendar_set_rule(request):
+    """Create or update a recurring weekly EmployeeCalendarRule."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    import json as _json
+    try:
+        data = _json.loads(request.body)
+    except ValueError:
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    employee_id = data.get('employee_id')
+    weekday = data.get('weekday')
+    status = data.get('status')
+    note = (data.get('note') or '').strip()
+
+    if employee_id is None or weekday is None or not status:
+        return JsonResponse({'success': False, 'error': 'employee_id, weekday and status are required'})
+
+    from .models import EmployeeCalendarEntry, EmployeeCalendarRule
+    valid_statuses = [s[0] for s in EmployeeCalendarEntry.STATUS_CHOICES]
+    if status not in valid_statuses:
+        return JsonResponse({'success': False, 'error': f'Invalid status: {status}'})
+    try:
+        weekday = int(weekday)
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'Invalid weekday'})
+    if weekday < 0 or weekday > 6:
+        return JsonResponse({'success': False, 'error': 'weekday must be 0–6'})
+
+    from django.contrib.auth.models import User
+    employee = get_object_or_404(User, id=int(employee_id))
+    rule, created = EmployeeCalendarRule.objects.update_or_create(
+        employee=employee,
+        weekday=weekday,
+        defaults={'status': status, 'note': note},
+    )
+    return JsonResponse({
+        'success': True,
+        'rule_id': rule.id,
+        'employee_id': employee.id,
+        'employee_name': employee.get_full_name() or employee.username,
+        'weekday': rule.weekday,
+        'weekday_display': rule.get_weekday_display(),
+        'status': rule.status,
+        'status_display': rule.get_status_display(),
+        'note': rule.note,
+        'created': created,
+    })
+
+
+@login_required
+def employee_calendar_delete_rule(request, rule_id):
+    """Delete a recurring weekly EmployeeCalendarRule."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    from .models import EmployeeCalendarRule
+    rule = get_object_or_404(EmployeeCalendarRule, id=int(rule_id))
+    rule.delete()
+    return JsonResponse({'success': True})
+
+
+@login_required
+def employee_calendar_set_week_rules(request):
+    """Set a full week of recurring rules for one employee in a single request.
+    Body: {employee_id, days: {"0": "office", "1": "", ...}}. Empty/blank status
+    clears that weekday's rule."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    import json as _json
+    try:
+        data = _json.loads(request.body)
+    except ValueError:
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+    employee_id = data.get('employee_id')
+    days = data.get('days') or {}
+    if not employee_id or not isinstance(days, dict):
+        return JsonResponse({'success': False, 'error': 'employee_id and days are required'})
+
+    from .models import EmployeeCalendarEntry, EmployeeCalendarRule
+    valid_statuses = [s[0] for s in EmployeeCalendarEntry.STATUS_CHOICES]
+    from django.contrib.auth.models import User
+    employee = get_object_or_404(User, id=int(employee_id))
+
+    for _wd, _status in days.items():
+        try:
+            wd = int(_wd)
+        except (TypeError, ValueError):
+            continue
+        if wd < 0 or wd > 6:
+            continue
+        if _status and _status in valid_statuses:
+            EmployeeCalendarRule.objects.update_or_create(
+                employee=employee, weekday=wd, defaults={'status': _status},
+            )
+        else:
+            EmployeeCalendarRule.objects.filter(employee=employee, weekday=wd).delete()
+    return JsonResponse({'success': True})
+
+
+@login_required
+def employee_calendar_reorder(request):
+    """Persist the display order of employees on the calendar. Body: {order: [user_id, ...]}."""
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+    import json as _json
+    try:
+        data = _json.loads(request.body)
+    except ValueError:
+        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+    order = data.get('order') or []
+    from .models import UserProfile
+    for idx, uid in enumerate(order):
+        try:
+            UserProfile.objects.filter(user_id=int(uid)).update(calendar_order=idx)
+        except (TypeError, ValueError):
+            continue
+    return JsonResponse({'success': True})
 
 
 @login_required
@@ -14877,9 +15198,13 @@ def generate_and_upload_accessories_csv(request, order_id):
 # Timesheet API Views
 @require_http_methods(["GET"])
 def get_fitters(request):
-    """Get all active fitters"""
+    """Get all active fitters, optionally filtered by location."""
     from .models import Fitter
-    fitters = Fitter.objects.filter(active=True).values('id', 'code', 'name', 'hourly_rate')
+    qs = Fitter.objects.filter(active=True)
+    loc = request.GET.get('location', '').strip()
+    if loc:
+        qs = qs.filter(location__iexact=loc)
+    fitters = qs.order_by('name').values('id', 'code', 'name', 'hourly_rate', 'location')
     return JsonResponse({'fitters': list(fitters)})
 
 
@@ -14905,13 +15230,15 @@ def add_fitter(request):
         if not name:
             return JsonResponse({'success': False, 'error': 'Name is required'})
         
+        location = data.get('location', '').strip()
         fitter = Fitter.objects.create(
             name=name,
             code=code,
             email='',
             phone='',
             hourly_rate=0,
-            active=True
+            active=True,
+            location=location,
         )
         
         return JsonResponse({
@@ -14919,7 +15246,8 @@ def add_fitter(request):
             'fitter': {
                 'id': fitter.id,
                 'code': fitter.code,
-                'name': fitter.name
+                'name': fitter.name,
+                'location': fitter.location,
             }
         })
     except Exception as e:
@@ -15844,6 +16172,8 @@ def update_fitter(request, fitter_id):
             fitter.hourly_rate = data['hourly_rate']
         if 'active' in data:
             fitter.active = data['active']
+        if 'location' in data:
+            fitter.location = data['location'].strip()
         
         fitter.save()
         

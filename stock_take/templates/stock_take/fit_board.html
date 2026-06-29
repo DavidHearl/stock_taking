@@ -232,6 +232,18 @@
 
 <div class="cal-with-panel">
 
+<!-- ── Page-level tab switcher ── -->
+<div class="cal-page-tabs" id="calPageTabs">
+    <button class="cal-page-tab active" data-target="fitBoardTab" onclick="switchCalTab('fitBoardTab', this)">
+        <i class="bi bi-calendar3"></i> Fit Board
+    </button>
+    <button class="cal-page-tab" data-target="empCalTab" onclick="switchCalTab('empCalTab', this)">
+        <i class="bi bi-people"></i> Employee Calendar
+    </button>
+</div>
+
+<!-- ══════════════════════════════ FIT BOARD TAB ════════════════════════════════ -->
+<div id="fitBoardTab" class="cal-tab-pane active">
 <div class="calendar-container">
     <div class="month-weeks" id="monthWeeks">
         {% for week in month_weeks %}
@@ -451,7 +463,213 @@
 </div><!-- /.schedule-panel-inner -->
 </div><!-- /#schedulePanel -->
 
+</div><!-- /#fitBoardTab .cal-tab-pane -->
+
+<!-- ══════════════════════════ EMPLOYEE CALENDAR TAB ═══════════════════════════ -->
+<div id="empCalTab" class="cal-tab-pane">
+<div class="emp-cal-layout">
+
+    <!-- Employee calendar grid (left, fills remaining space) -->
+    <div class="emp-cal-grid">
+        {% if not emp_weeks or not emp_weeks.0.emp_lanes %}
+        <div class="emp-empty-notice">
+            <i class="bi bi-person-x"></i>
+            {% if emp_location %}
+            No employees are assigned to <strong>{{ emp_location }}</strong>. Use the admin panel or the Manage Fitters dialog to assign a location to each fitter.
+            {% else %}
+            No location is selected. Choose a location from the top navbar to see employees for that branch.
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="emp-month-weeks" id="empMonthWeeks">
+            {% for week in emp_weeks %}
+            <div class="emp-week-block">
+                <!-- Day header -->
+                <div class="emp-header-row">
+                    <div class="emp-corner">{% if week.widx == 1 %}This Week{% else %}Next Week{% endif %}</div>
+                    {% for day in week.days %}
+                    <div class="emp-col-header {% if day.is_today %}today{% endif %}">
+                        <div>{{ day.date|date:"D" }}</div>
+                        <div class="emp-col-date">{{ day.date|date:"j M" }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <!-- One row per employee -->
+                {% for lane in week.emp_lanes %}
+                <div class="emp-lane-row" data-employee-id="{{ lane.employee.id }}" draggable="true"
+                     ondragstart="handleEmpRowDragStart(event)" ondragend="handleEmpRowDragEnd(event)"
+                     ondragover="handleEmpRowDragOver(event)" ondrop="handleEmpRowDrop(event)">
+                    <div class="emp-lane-label" title="{{ lane.employee.name }}"><i class="bi bi-grip-vertical emp-grip"></i>{{ lane.employee.name }}</div>
+                    <div class="emp-lane-grid">
+                        {% for dinfo in lane.days %}
+                        <div class="emp-day-cell in-month {% if dinfo.is_today %}today{% endif %}"
+                             style="grid-column: {{ forloop.counter }};"
+                             data-date="{{ dinfo.date_str }}"
+                             data-employee-id="{{ lane.employee.id }}"
+                             ondragover="handleEmpDragOver(event)"
+                             ondragleave="handleEmpDragLeave(event)"
+                             ondrop="handleEmpDrop(event)"></div>
+                        {% endfor %}
+                        {% for seg in lane.segments %}
+                        <div class="emp-status-chip emp-status--{{ seg.status }}{% if seg.is_rule %} emp-status-chip--rule{% endif %}"
+                             style="grid-column: {{ seg.col_start }} / {{ seg.col_end }};"
+                             {% if not seg.is_rule %}
+                             data-entry-ids="{{ seg.entry_ids }}"
+                             data-status="{{ seg.status }}"
+                             data-status-display="{{ seg.status_display }}"
+                             data-date-start="{{ seg.date_start }}"
+                             data-date-end="{{ seg.date_end }}"
+                             data-col-start="{{ seg.col_index_start }}"
+                             data-col-end="{{ seg.col_index_end }}"
+                             data-employee-id="{{ lane.employee.id }}"
+                             data-week-idx="{{ week.widx }}"
+                             onclick="openEmpChipMenu(event, this)"
+                             {% endif %}
+                             title="{{ seg.status_display }}{% if seg.is_rule %} (recurring rule){% endif %}">
+                            {{ seg.status_display }}
+                            {% if seg.is_rule %}<i class="bi bi-arrow-repeat emp-chip-rule-icon"></i>{% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div><!-- /.emp-cal-grid -->
+
+    <!-- Status palette panel (right — styled like the fit board schedule panel) -->
+    <div class="emp-status-panel">
+        <div class="emp-status-panel-header">
+            <span class="emp-status-panel-title"><i class="bi bi-grid-3x3-gap"></i> Status</span>
+        </div>
+        <div class="emp-status-panel-body">
+            <div class="emp-status-section-title">Drag to assign</div>
+            <div class="emp-status-palette">
+                <div class="emp-palette-chip emp-status--office"
+                     draggable="true" data-status="office"
+                     ondragstart="handleEmpPaletteDragStart(event)"
+                     ondragend="handleEmpPaletteDragEnd(event)">
+                    <i class="bi bi-building"></i> In Office
+                </div>
+                <div class="emp-palette-chip emp-status--showroom"
+                     draggable="true" data-status="showroom"
+                     ondragstart="handleEmpPaletteDragStart(event)"
+                     ondragend="handleEmpPaletteDragEnd(event)">
+                    <i class="bi bi-shop"></i> Showroom
+                </div>
+                <div class="emp-palette-chip emp-status--workshop"
+                     draggable="true" data-status="workshop"
+                     ondragstart="handleEmpPaletteDragStart(event)"
+                     ondragend="handleEmpPaletteDragEnd(event)">
+                    <i class="bi bi-tools"></i> Workshop
+                </div>
+                <div class="emp-palette-chip emp-status--wfh"
+                     draggable="true" data-status="wfh"
+                     ondragstart="handleEmpPaletteDragStart(event)"
+                     ondragend="handleEmpPaletteDragEnd(event)">
+                    <i class="bi bi-house"></i> WFH
+                </div>
+                <div class="emp-palette-chip emp-status--off"
+                     draggable="true" data-status="off"
+                     ondragstart="handleEmpPaletteDragStart(event)"
+                     ondragend="handleEmpPaletteDragEnd(event)">
+                    <i class="bi bi-calendar-x"></i> Day Off
+                </div>
+                <div class="emp-palette-chip emp-status--sick"
+                     draggable="true" data-status="sick"
+                     ondragstart="handleEmpPaletteDragStart(event)"
+                     ondragend="handleEmpPaletteDragEnd(event)">
+                    <i class="bi bi-thermometer-half"></i> Sick
+                </div>
+                <div class="emp-palette-chip emp-status--holiday"
+                     draggable="true" data-status="holiday"
+                     ondragstart="handleEmpPaletteDragStart(event)"
+                     ondragend="handleEmpPaletteDragEnd(event)">
+                    <i class="bi bi-sun"></i> Holiday
+                </div>
+                <div class="emp-palette-chip emp-status--training"
+                     draggable="true" data-status="training"
+                     ondragstart="handleEmpPaletteDragStart(event)"
+                     ondragend="handleEmpPaletteDragEnd(event)">
+                    <i class="bi bi-book"></i> Training
+                </div>
+            </div>
+            <p class="emp-palette-note">Drag a status onto a day cell to assign it. Click an existing chip to remove it.</p>
+
+            <div class="emp-status-section-title emp-rules-heading">
+                <span><i class="bi bi-arrow-repeat"></i> Recurring Rules</span>
+                <button type="button" class="emp-rules-add-btn" onclick="openEmpRulesModal()" title="Manage rules">
+                    <i class="bi bi-pencil-square"></i>
+                </button>
+            </div>
+            <div class="emp-rules-summary" id="empRulesSummary">
+                {% for u in emp_rule_users %}
+                <div class="emp-rule-line" data-employee-id="{{ u.id }}">
+                    <span class="emp-rule-name">{{ u.name }}</span>
+                    <button type="button" class="emp-rule-edit-btn" onclick="openEmpRulesModalFor('{{ u.id }}')" title="Edit rules">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                </div>
+                {% empty %}
+                <p class="emp-palette-note" id="empRulesEmpty">No recurring rules. Click the pencil to add one.</p>
+                {% endfor %}
+            </div>
+        </div>
+    </div><!-- /.emp-status-panel -->
+
+</div><!-- /.emp-cal-layout -->
+</div><!-- /#empCalTab .cal-tab-pane -->
+
 </div><!-- /.cal-with-panel -->
+
+<!-- Employee chip popover (shared, positioned by JS) -->
+<div id="empChipMenu" class="emp-chip-menu" style="display:none;">
+    <span class="emp-chip-menu-label" id="empChipMenuLabel"></span>
+    <div class="emp-chip-menu-actions">
+        <button type="button" class="emp-chip-menu-btn" id="empChipShrinkLeft"  title="Remove first day" onclick="empChipShrink('start')"><i class="bi bi-caret-right"></i></button>
+        <button type="button" class="emp-chip-menu-btn" id="empChipGrowLeft"   title="Extend left one day" onclick="empChipGrow('start')"><i class="bi bi-skip-start"></i></button>
+        <button type="button" class="emp-chip-menu-btn emp-chip-menu-btn--del" title="Remove all" onclick="empChipDelete()"><i class="bi bi-trash"></i></button>
+        <button type="button" class="emp-chip-menu-btn" id="empChipGrowRight"  title="Extend right one day" onclick="empChipGrow('end')"><i class="bi bi-skip-end"></i></button>
+        <button type="button" class="emp-chip-menu-btn" id="empChipShrinkRight" title="Remove last day" onclick="empChipShrink('end')"><i class="bi bi-caret-left"></i></button>
+    </div>
+</div>
+
+<!-- Employee Recurring Rules Modal -->
+<div id="empRulesModal" class="modal">
+    <div class="modal-overlay" onclick="closeModal('empRulesModal')"></div>
+    <div class="modal-content modal--sm">
+        <div class="modal-header">
+            <h3><i class="bi bi-arrow-repeat"></i> Recurring Rules</h3>
+            <button type="button" class="modal-close" onclick="closeModal('empRulesModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="emp-palette-note">Pick an employee, then set a status for each weekday (leave a day on “None” for no rule). Explicit day assignments always override a rule.</p>
+            <select id="empRuleEmployee" class="modal-select" onchange="loadEmpRuleWeek()">
+                {% for u in emp_users %}
+                <option value="{{ u.id }}">{{ u.name }}</option>
+                {% endfor %}
+            </select>
+            <div class="emp-rule-week" id="empRuleWeek">
+                {% for val, label in emp_weekdays %}
+                <div class="emp-rule-day-row">
+                    <span class="emp-rule-day-name">{{ label }}</span>
+                    <select class="modal-select emp-rule-day-status" data-weekday="{{ val }}">
+                        <option value="">None</option>
+                        {% for sval, slabel in emp_statuses %}
+                        <option value="{{ sval }}">{{ slabel }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endfor %}
+            </div>
+            <button type="button" class="btn btn-primary emp-rule-save-week" onclick="saveEmpWeekRules()">Save Week</button>
+        </div>
+    </div>
+</div>
+
+<script id="empRulesData" type="application/json">{{ emp_rules_json|safe }}</script>
 
 <!-- Add Appointment Modal -->
 <div id="addAppointmentModal" class="modal">
@@ -1461,6 +1679,279 @@ function deleteFitterCrud(id, btn) {
         else alert('Error: ' + (data.error || 'Unknown error'));
     })
     .catch(() => alert('Error deleting fitter'));
+}
+
+/* ══════════════════════════════════════════════════════════════
+   EMPLOYEE CALENDAR — tab switching, drag-drop, AJAX
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Tab switching ─────────────────────────────────────────── */
+function switchCalTab(targetId, btn) {
+    document.querySelectorAll('.cal-tab-pane').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.cal-page-tab').forEach(b => b.classList.remove('active'));
+    document.getElementById(targetId).classList.add('active');
+    btn.classList.add('active');
+    try { localStorage.setItem('calActiveTab', targetId); } catch(e) {}
+}
+
+// Restore last active tab on page load
+(function() {
+    try {
+        const saved = localStorage.getItem('calActiveTab');
+        if (saved) {
+            const btn = document.querySelector('[data-target="' + saved + '"]');
+            if (btn) switchCalTab(saved, btn);
+        }
+    } catch(e) {}
+})();
+/* ── Palette drag ──────────────────────────────────────────── */
+let empDragStatus = null;
+
+function handleEmpPaletteDragStart(event) {
+    empDragStatus = event.currentTarget.dataset.status;
+    event.currentTarget.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'copy';
+    try { event.dataTransfer.setData('text/plain', empDragStatus); } catch(e) {}
+}
+
+function handleEmpPaletteDragEnd(event) {
+    event.currentTarget.classList.remove('dragging');
+}
+
+/* ── Cell drop handlers ────────────────────────────────────── */
+function handleEmpDragOver(event) {
+    if (!empDragStatus) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    event.currentTarget.classList.add('drag-over');
+}
+
+function handleEmpDragLeave(event) {
+    event.currentTarget.classList.remove('drag-over');
+}
+
+function handleEmpDrop(event) {
+    event.preventDefault();
+    const cell = event.currentTarget;
+    cell.classList.remove('drag-over');
+    if (!empDragStatus) return;
+    const date = cell.dataset.date;
+    const employeeId = cell.dataset.employeeId;
+    empSetStatus(cell, employeeId, date, empDragStatus);
+}
+
+/* ── Status labels map ─────────────────────────────────────── */
+const EMP_STATUS_LABELS = {
+    office: 'In Office',
+    showroom: 'Showroom',
+    workshop: 'Workshop',
+    wfh: 'WFH',
+    off: 'Day Off',
+    sick: 'Sick',
+    holiday: 'Holiday',
+    training: 'Training',
+};
+
+// ── Chip popover ──────────────────────────────────────────────────────────────
+let _empActiveChip = null;
+
+function openEmpChipMenu(event, chipEl) {
+    event.stopPropagation();
+    _empActiveChip = chipEl;
+    const menu = document.getElementById('empChipMenu');
+    document.getElementById('empChipMenuLabel').textContent = chipEl.dataset.statusDisplay;
+
+    // Disable shrink buttons when span is 1
+    const colStart = parseInt(chipEl.dataset.colStart);
+    const colEnd   = parseInt(chipEl.dataset.colEnd);
+    const span = colEnd - colStart + 1;
+    document.getElementById('empChipShrinkLeft').disabled  = span <= 1;
+    document.getElementById('empChipShrinkRight').disabled = span <= 1;
+
+    // Disable grow when already at week boundary (0–6)
+    document.getElementById('empChipGrowLeft').disabled  = colStart <= 0;
+    document.getElementById('empChipGrowRight').disabled = colEnd   >= 6;
+
+    // Position the menu below the chip
+    const rect = chipEl.getBoundingClientRect();
+    menu.style.display = 'flex';
+    let left = rect.left + window.scrollX;
+    const menuW = menu.offsetWidth || 220;
+    if (left + menuW > window.innerWidth + window.scrollX - 8) {
+        left = window.innerWidth + window.scrollX - menuW - 8;
+    }
+    menu.style.left = left + 'px';
+    menu.style.top  = (rect.bottom + window.scrollY + 4) + 'px';
+}
+
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('#empChipMenu') && !e.target.closest('.emp-status-chip')) {
+        const menu = document.getElementById('empChipMenu');
+        if (menu) menu.style.display = 'none';
+        _empActiveChip = null;
+    }
+});
+
+function _empChipDateNeighbour(dateStr, delta) {
+    const d = new Date(dateStr);
+    d.setDate(d.getDate() + delta);
+    return d.toISOString().slice(0, 10);
+}
+
+function empChipDelete() {
+    if (!_empActiveChip) return;
+    document.getElementById('empChipMenu').style.display = 'none';
+    removeEmpStatus(_empActiveChip.dataset.entryIds, _empActiveChip);
+}
+
+function empChipGrow(side) {
+    if (!_empActiveChip) return;
+    const chip   = _empActiveChip;
+    const empId  = chip.dataset.employeeId;
+    const status = chip.dataset.status;
+    const date   = side === 'start'
+        ? _empChipDateNeighbour(chip.dataset.dateStart, -1)
+        : _empChipDateNeighbour(chip.dataset.dateEnd,    1);
+
+    document.getElementById('empChipMenu').style.display = 'none';
+    fetch('{% url "employee_calendar_set_status" %}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ employee_id: parseInt(empId), date: date, status: status })
+    })
+    .then(r => r.json())
+    .then(data => { if (data.success) location.reload(); else showCalendarToast('Error extending block', 'error'); })
+    .catch(() => showCalendarToast('Error extending block', 'error'));
+}
+
+function empChipShrink(side) {
+    if (!_empActiveChip) return;
+    const chip     = _empActiveChip;
+    const entryIds = chip.dataset.entryIds.split(',').filter(Boolean);
+    // Remove the first or last entry id (they correspond to dates in order)
+    const idToRemove = side === 'start' ? entryIds[0] : entryIds[entryIds.length - 1];
+    if (!idToRemove) return;
+
+    document.getElementById('empChipMenu').style.display = 'none';
+    fetch('/calendar/employee-status/' + idToRemove + '/delete/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    })
+    .then(() => location.reload())
+    .catch(() => showCalendarToast('Error shrinking block', 'error'));
+}
+
+/* ── Remove all days in a merged block ─────────────────────── */
+function removeEmpStatus(entryIds, chipEl) {
+    const ids = String(entryIds).split(',').filter(Boolean);
+    if (!ids.length) return;
+    Promise.all(ids.map(id => fetch('/calendar/employee-status/' + id + '/delete/', {
+        method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    }))).then(() => location.reload())
+    .catch(() => showCalendarToast('Error removing status', 'error'));
+}
+
+function buildEmpChip(entryId, status, label) {
+    const displayLabel = label || EMP_STATUS_LABELS[status] || status;
+    const chip = document.createElement('div');
+    chip.className = 'emp-status-chip emp-status--' + status;
+    chip.dataset.entryIds = entryId;
+    chip.dataset.status = status;
+    chip.dataset.statusDisplay = displayLabel;
+    chip.title = displayLabel;
+    chip.innerHTML = displayLabel;
+    chip.addEventListener('click', function(e) { openEmpChipMenu(e, chip); });
+    return chip;
+}
+
+/* ── Set status via AJAX ───────────────────────────────────── */
+function empSetStatus(cell, employeeId, date, status) {
+    fetch('{% url "employee_calendar_set_status" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify({ employee_id: parseInt(employeeId), date: date, status: status })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            showCalendarToast('Error saving status', 'error');
+        }
+    })
+    .catch(() => showCalendarToast('Error saving status', 'error'));
+}
+
+/* ── Employee person list (add / remove) ───────────────────── */
+const EMP_LOCATION = '{{ emp_location|escapejs }}';
+
+// ── Reorder employee rows (drag) ─────────────────────────────────────────────
+let empDragRow = null;
+function handleEmpRowDragStart(e) {
+    if (e.target.closest('.emp-status-chip')) { e.preventDefault(); return; }
+    empDragRow = e.currentTarget; empDragRow.classList.add('emp-row-dragging');
+    e.dataTransfer.effectAllowed = 'move';
+}
+function handleEmpRowDragEnd() { if (empDragRow) empDragRow.classList.remove('emp-row-dragging'); empDragRow = null; }
+function handleEmpRowDragOver(e) { if (empDragRow) e.preventDefault(); }
+function handleEmpRowDrop(e) {
+    if (!empDragRow) return;
+    const target = e.currentTarget;
+    if (target === empDragRow) return;
+    e.preventDefault();
+    target.parentNode.insertBefore(empDragRow, target);
+    const order = Array.from(document.querySelectorAll('#empMonthWeeks .emp-week-block:first-child .emp-lane-row')).map(r => r.dataset.employeeId);
+    fetch('/calendar/employee/reorder/', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ order })
+    }).then(() => location.reload());
+}
+
+// ── Recurring rules ──────────────────────────────────────────────────────────
+function openEmpRulesModal() {
+    const m = document.getElementById('empRulesModal');
+    if (m) m.classList.add('show');
+    if (typeof loadEmpRuleWeek === 'function') loadEmpRuleWeek();
+}
+
+function openEmpRulesModalFor(empId) {
+    const sel = document.getElementById('empRuleEmployee');
+    if (sel) sel.value = empId;
+    openEmpRulesModal();
+}
+
+const EMP_RULES_DATA = JSON.parse(document.getElementById('empRulesData').textContent || '{}');
+function loadEmpRuleWeek() {
+    const empId = document.getElementById('empRuleEmployee').value;
+    const rules = EMP_RULES_DATA[empId] || {};
+    document.querySelectorAll('#empRuleWeek .emp-rule-day-status').forEach(sel => {
+        sel.value = rules[sel.dataset.weekday] || '';
+    });
+}
+function saveEmpWeekRules() {
+    const empId = document.getElementById('empRuleEmployee').value;
+    const days = {};
+    document.querySelectorAll('#empRuleWeek .emp-rule-day-status').forEach(sel => {
+        days[sel.dataset.weekday] = sel.value;
+    });
+    fetch('/calendar/employee-rule/set-week/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+        body: JSON.stringify({ employee_id: empId, days })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showCalendarToast('Rules saved — reloading', 'success');
+            setTimeout(() => location.reload(), 500);
+        } else {
+            showCalendarToast(data.error || 'Error saving rules', 'error');
+        }
+    })
+    .catch(() => showCalendarToast('Error saving rules', 'error'));
 }
 
 </script>

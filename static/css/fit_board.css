@@ -3,6 +3,654 @@
     max-width: 1800px;
 }
 
+/* ── Calendar page-level tabs (Fit Board / Employee Calendar) ── */
+.cal-page-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 0;
+}
+
+.cal-page-tab {
+    padding: 6px 18px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.15s, border-color 0.15s;
+    border-radius: 4px 4px 0 0;
+}
+
+.cal-page-tab:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.cal-page-tab.active {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+}
+
+.cal-tab-pane {
+    display: none;
+}
+
+.cal-tab-pane.active {
+    display: block;
+}
+
+#fitBoardTab.active {
+    display: flex;
+    align-items: stretch;
+    gap: 24px;
+}
+
+/* ── Employee Calendar ─────────────────────────────────────── */
+.emp-empty-notice {
+    padding: 32px 20px;
+    text-align: center;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.emp-empty-notice i {
+    display: block;
+    font-size: 2rem;
+    margin-bottom: 10px;
+    opacity: 0.5;
+}
+
+.emp-cal-layout {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+}
+
+.emp-cal-grid {
+    flex: 1;
+    min-width: 0;
+}
+
+.emp-month-weeks {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.emp-week-block {
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--bg-primary);
+}
+
+/* Header row (day names) */
+.emp-header-row {
+    display: grid;
+    grid-template-columns: 130px repeat(7, 1fr);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.emp-corner {
+    padding: 4px 8px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-right: 1px solid var(--border-color);
+}
+
+.emp-col-header {
+    padding: 4px 6px;
+    text-align: center;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    border-right: 1px solid var(--border-color);
+}
+
+.emp-col-header:last-child {
+    border-right: none;
+}
+
+.emp-col-header .emp-col-date {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.emp-col-header.today {
+    background: rgba(var(--primary-rgb, 74, 144, 217), 0.08);
+}
+
+.emp-col-header.today .emp-col-date {
+    color: var(--primary-color);
+}
+
+/* Employee lane rows */
+.emp-lane-row {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    border-top: 1px solid var(--border-color);
+    min-height: 44px;
+}
+
+.emp-lane-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    position: relative;
+}
+
+.emp-row-dragging {
+    opacity: 0.5;
+}
+
+.emp-grip {
+    cursor: grab;
+    margin-right: 6px;
+    opacity: 0.5;
+}
+
+.emp-lane-label {
+    padding: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    border-right: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.emp-day-cell {
+    padding: 4px;
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s;
+    position: relative;
+    grid-row: 1;
+    cursor: pointer;
+}
+
+.emp-day-cell:last-child {
+    border-right: none;
+}
+
+.emp-day-cell.in-month:hover {
+    background: var(--bg-hover);
+}
+
+.emp-day-cell.drag-over {
+    background: rgba(var(--primary-rgb, 74, 144, 217), 0.12);
+    outline: 2px dashed var(--primary-color);
+}
+
+.emp-day-cell.today {
+    background: rgba(var(--primary-rgb, 74, 144, 217), 0.06);
+}
+
+/* Status chips inside cells — overlay segments that can span days */
+.emp-status-chip {
+    grid-row: 1;
+    margin: 4px;
+    z-index: 2;
+    min-height: 28px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #fff;
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 4px;
+    text-align: center;
+    letter-spacing: 0.01em;
+    transition: filter 0.15s;
+    position: relative;
+}
+
+.emp-status-chip:hover {
+    filter: brightness(1.1);
+    cursor: pointer;
+}
+
+/* ── Chip action popover ─────────────────────────────────────── */
+.emp-chip-menu {
+    position: absolute;
+    z-index: 9000;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    padding: 6px 8px;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 200px;
+}
+
+.emp-chip-menu-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-align: center;
+    padding: 0 4px 2px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.emp-chip-menu-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+}
+
+.emp-chip-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+}
+
+.emp-chip-menu-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--primary-color);
+}
+
+.emp-chip-menu-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.emp-chip-menu-btn--del {
+    color: var(--danger-color, #e74c3c);
+    border-color: rgba(231, 76, 60, 0.35);
+}
+
+.emp-chip-menu-btn--del:hover:not(:disabled) {
+    background: rgba(231, 76, 60, 0.1);
+    border-color: var(--danger-color, #e74c3c);
+    color: var(--danger-color, #e74c3c);
+}
+
+/* Status colours — vivid for the drag palette */
+.emp-status--office {
+    background: #4a90d9;
+}
+
+.emp-status--showroom {
+    background: #3a7bd5;
+}
+
+.emp-status--workshop {
+    background: #5d6d7e;
+}
+
+.emp-status--wfh {
+    background: #9b59b6;
+}
+
+.emp-status--off {
+    background: #27ae60;
+}
+
+.emp-status--sick {
+    background: #e74c3c;
+}
+
+.emp-status--holiday {
+    background: #1abc9c;
+}
+
+.emp-status--training {
+    background: #f39c12;
+}
+
+/* Subtle tints for grid chips — override vivid base above */
+.emp-status-chip.emp-status--office {
+    background: rgba(74, 144, 217, 0.6);
+    border-color: rgba(74, 144, 217, 0.8);
+    color: #7db8ee;
+}
+
+.emp-status-chip.emp-status--showroom {
+    background: rgba(58, 123, 213, 0.6);
+    border-color: rgba(58, 123, 213, 0.8);
+    color: #6da0e8;
+}
+
+.emp-status-chip.emp-status--workshop {
+    background: rgba(93, 109, 126, 0.6);
+    border-color: rgba(93, 109, 126, 0.8);
+    color: #9aacba;
+}
+
+.emp-status-chip.emp-status--wfh {
+    background: rgba(155, 89, 182, 0.6);
+    border-color: rgba(155, 89, 182, 0.8);
+    color: #c48fe0;
+}
+
+.emp-status-chip.emp-status--off {
+    background: rgba(39, 174, 96, 0.6);
+    border-color: rgba(39, 174, 96, 0.8);
+    color: #52c47e;
+}
+
+.emp-status-chip.emp-status--sick {
+    background: rgba(231, 76, 60, 0.6);
+    border-color: rgba(231, 76, 60, 0.8);
+    color: #f08070;
+}
+
+.emp-status-chip.emp-status--holiday {
+    background: rgba(26, 188, 156, 0.6);
+    border-color: rgba(26, 188, 156, 0.8);
+    color: #42d4b8;
+}
+
+.emp-status-chip.emp-status--training {
+    background: rgba(243, 156, 18, 0.6);
+    border-color: rgba(243, 156, 18, 0.8);
+    color: #f5b840;
+}
+
+/* ── Employee status panel (right-hand side — matches .schedule-panel) ─ */
+.emp-status-panel {
+    display: none;   /* hidden by default; shown when emp tab is active */
+    flex-shrink: 0;
+    width: 220px;
+    align-self: flex-start;
+    position: sticky;
+    top: 12px;
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    box-shadow: -2px 0 12px rgba(0,0,0,0.12);
+}
+
+#empCalTab.active .emp-status-panel {
+    display: block;
+}
+
+.emp-status-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 14px 10px;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    z-index: 1;
+}
+
+.emp-status-panel-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.emp-status-panel-body {
+    padding: 12px 10px 4px;
+}
+
+.emp-status-section-title {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    padding-bottom: 5px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.emp-status-palette {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+.emp-palette-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #fff;
+    cursor: grab;
+    user-select: none;
+    transition: box-shadow 0.1s, opacity 0.1s;
+}
+
+.emp-palette-chip:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.22);
+    opacity: 0.9;
+}
+
+.emp-palette-chip.dragging {
+    opacity: 0.5;
+    cursor: grabbing;
+}
+
+.emp-palette-note {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    padding: 4px 2px;
+}
+
+/* ── Recurring rule chips & list ──────────────────────────── */
+.emp-status-chip--rule {
+    opacity: 0.75;
+    border-style: dashed;
+}
+.emp-chip-rule-icon {
+    font-size: 0.65rem;
+    margin-left: 4px;
+    opacity: 0.9;
+}
+.emp-rules-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 14px;
+}
+.emp-rules-add-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 2px 4px;
+    border-radius: 4px;
+}
+.emp-rules-add-btn:hover {
+    color: var(--primary-color);
+    background: var(--bg-hover);
+}
+
+.emp-rules-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.emp-rule-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 0.78rem;
+    padding: 3px 0;
+}
+
+.emp-rule-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.emp-rule-edit-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.emp-rule-edit-btn:hover {
+    color: var(--primary-color);
+    background: var(--bg-hover);
+}
+
+/* ── Per-employee weekly rule editor ──────────────────────── */
+.emp-rule-week {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 10px 0;
+}
+
+.emp-rule-day-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.emp-rule-day-name {
+    width: 90px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding-left: 4px;
+}
+
+.emp-rule-day-status {
+    flex: 1;
+}
+
+.emp-rule-save-week {
+    width: 100%;
+}
+
+/* ── Location notice in employee tab ─────────────────────── */
+.emp-location-notice {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    padding: 6px 10px 10px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+/* ── Employee person list in status panel ───────────────────── */
+.emp-person-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.emp-person-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    font-size: 0.8rem;
+    color: var(--text-primary);
+}
+
+.emp-person-name {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+}
+
+.emp-person-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 0 2px;
+    border-radius: 4px;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: color 0.15s, background 0.15s;
+}
+
+.emp-person-remove:hover {
+    color: var(--danger-color);
+    background: var(--danger-subtle);
+}
+
+.emp-person-add {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 2px;
+}
+
+.emp-person-input {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+}
+
+.emp-person-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
 /* ── Page-level calendar toolbar ───────────────────────────── */
 .cal-toolbar {
     display: flex;
@@ -103,9 +751,7 @@
 
 /* ── Schedule panel (inline push) ─────────────────────────── */
 .cal-with-panel {
-    display: flex;
-    align-items: stretch;
-    gap: 24px;
+    display: block;
 }
 
 .schedule-panel {
@@ -1390,20 +2036,16 @@ body.light-mode .job-name {
     gap: 10px;
 }
 
-.btn-move {
+.btn-info {
     background-color: var(--info-color);
-    color: var(--text-primary);
-}
-
-.btn-move:hover {
-    background-color: #4ab0c8;
+    color: var(--text-on-color);
+    border: 1px solid var(--info-color);
 }
 
 /* Modal styling */
 .modal-select {
     width: 100%;
-    padding: 10px;
-    margin-bottom: 16px;
+    padding: 8px;
     background-color: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
@@ -1411,15 +2053,14 @@ body.light-mode .job-name {
 }
 
 /* Search results dropdown */
-.search-results {
-    max-height: 300px;
+    /* max-height: 300px;
     overflow-y: auto;
     background-color: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     margin-top: -10px;
     box-shadow: var(--shadow-md);
-}
+} */
 
 .search-result-item {
     padding: 12px;
@@ -2076,12 +2717,17 @@ body.light-mode .job-name {
     min-height: 30px;
 }
 
-/* ── Info button variants (calendar pages only) ──────────── */
-.btn-info {
-    background-color: var(--info-color);
-    color: var(--text-on-color);
-    border: 1px solid var(--info-color);
+/* Modal styling */
+.modal-select {
+    width: 100%;
+    padding: 8px;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
 }
+
+/* Search results dropdown */
 
 .btn-info:hover {
     background-color: var(--info-hover);
@@ -2400,14 +3046,14 @@ body.light-mode .job-name {
     color: var(--text-primary);
 }
 
-/* ── Span badge (kept for backward compat) ──────────────────── */
-.wk-span-badge {
-    display: none;
-}
+/* ── Span badge (hidden, kept for backward compat) ────────────── */
 
 /* Spin animation for sync button */
 @keyframes spin { to { transform: rotate(360deg); } }
-.spin { animation: spin 0.8s linear infinite; display: inline-block; }
+.spin {
+    animation: spin 0.8s linear infinite;
+    display: inline-block;
+}
 
 .wk-indicators {
     display: flex;
@@ -2563,11 +3209,40 @@ body.light-mode .job-name {
     background: rgba(239, 68, 68, 0.1);
 }
 
-#deliveryDetailModal .autocomplete-dropdown { position: absolute; top: 100%; left: 0; right: 0; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; max-height: 200px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
-#deliveryDetailModal .autocomplete-item { padding: 8px 12px; cursor: pointer; font-size: .85rem; border-bottom: 1px solid var(--border-color); color: var(--text-primary); }
-#deliveryDetailModal .autocomplete-item:last-child { border-bottom: none; }
-#deliveryDetailModal .autocomplete-item:hover { background: var(--bg-secondary); }
-#deliveryDetailModal .autocomplete-item .sale-num { font-weight: 700; color: var(--primary-color); }
+#deliveryDetailModal .autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+#deliveryDetailModal .autocomplete-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+}
+
+#deliveryDetailModal .autocomplete-item:last-child {
+    border-bottom: none;
+}
+
+#deliveryDetailModal .autocomplete-item:hover {
+    background: var(--bg-secondary);
+}
+
+#deliveryDetailModal .autocomplete-item .sale-num {
+    font-weight: 700;
+    color: var(--primary-color);
+}
 
 /* ── Summary fitter dropdown ────────────────────────────────── */
 .summary-fitter-select {
@@ -2670,8 +3345,13 @@ body.light-mode .job-name {
 }
 
 /* Designer name colour matches event type */
-.wk-sales-card[data-event-type="showroom_cover"] .wk-sales-designer { color: #2196f3; }
-.wk-sales-card[data-event-type="unavailable"] .wk-sales-designer { color: var(--danger-color); }
+.wk-sales-card[data-event-type="showroom_cover"] .wk-sales-designer {
+    color: #2196f3;
+}
+
+.wk-sales-card[data-event-type="unavailable"] .wk-sales-designer {
+    color: var(--danger-color);
+}
 
 .wk-sales-customer {
     flex: 1;
@@ -2694,9 +3374,17 @@ body.light-mode .job-name {
     text-overflow: ellipsis;
 }
 
-.wk-sales-type-appointment { color: #9c74c8; }
-.wk-sales-type-showroom_cover { color: #2196f3; }
-.wk-sales-type-unavailable { color: var(--danger-color); }
+.wk-sales-type-appointment {
+    color: #9c74c8;
+}
+
+.wk-sales-type-showroom_cover {
+    color: #2196f3;
+}
+
+.wk-sales-type-unavailable {
+    color: var(--danger-color);
+}
 
 .wk-sales-line2 {
     display: flex;
@@ -2859,9 +3547,17 @@ body.light-mode .job-name {
     flex: 1 1 auto;
 }
 
-.wk-log-info .wk-log-msg { color: var(--text-primary); }
-.wk-log-success .wk-log-msg { color: var(--success-color); }
-.wk-log-error .wk-log-msg { color: var(--danger-color, #e05260); }
+.wk-log-info .wk-log-msg {
+    color: var(--text-primary);
+}
+
+.wk-log-success .wk-log-msg {
+    color: var(--success-color);
+}
+
+.wk-log-error .wk-log-msg {
+    color: var(--danger-color, #e05260);
+}
 
 .wk-sync-log-history {
     border-top: 1px solid var(--border-color);
@@ -2887,9 +3583,17 @@ body.light-mode .job-name {
     padding-left: 8px;
 }
 
-.wk-sync-log-history-row.wk-sync-status-success { border-left-color: var(--success-color); }
-.wk-sync-log-history-row.wk-sync-status-warning { border-left-color: var(--warning-color, #e0a23a); }
-.wk-sync-log-history-row.wk-sync-status-error { border-left-color: var(--danger-color, #e05260); }
+.wk-sync-log-history-row.wk-sync-status-success {
+    border-left-color: var(--success-color);
+}
+
+.wk-sync-log-history-row.wk-sync-status-warning {
+    border-left-color: var(--warning-color, #e0a23a);
+}
+
+.wk-sync-log-history-row.wk-sync-status-error {
+    border-left-color: var(--danger-color, #e05260);
+}
 
 .wk-sync-hist-time {
     flex: 0 0 auto;
@@ -3006,4 +3710,3 @@ body.light-mode .job-name {
 .cal-autocomplete-muted {
     color: var(--text-muted);
 }
-

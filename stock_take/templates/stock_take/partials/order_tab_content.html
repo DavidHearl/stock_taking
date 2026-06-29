@@ -5767,6 +5767,33 @@ function toggleWorkflowAccordion() {
     if (btn) btn.classList.toggle('open');
 }
 
+// Waiting period progress bar
+(function () {
+    const el = document.querySelector('.wf-waiting-progress');
+    if (!el) return;
+    const started = new Date(el.dataset.started + 'T00:00:00');
+    const totalDays = parseInt(el.dataset.days, 10);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const elapsed = Math.floor((today - started) / msPerDay);
+    const daysIn = Math.max(0, Math.min(elapsed, totalDays));
+    const pct = totalDays > 0 ? Math.min(100, (daysIn / totalDays) * 100) : 0;
+    const fill = document.getElementById('wf-waiting-fill');
+    const label = document.getElementById('wf-waiting-day-label');
+    if (fill) {
+        fill.style.width = pct.toFixed(1) + '%';
+        if (daysIn >= totalDays) {
+            fill.style.background = 'var(--danger-color)';
+        } else if (pct >= 80) {
+            fill.style.background = 'var(--warning-color)';
+        } else if (pct >= 50) {
+            fill.style.background = 'var(--info-color)';
+        }
+    }
+    if (label) label.textContent = 'Day ' + daysIn;
+})();
+
 function toggleStageTasks() {
     const content = document.getElementById('stage-tasks-content');
     const toggle = document.querySelector('.stage-tasks-toggle');

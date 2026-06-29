@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% load static custom_filters %}
 
-{% block title %}Users - Admin{% endblock %}
+{% block title %}Users & Roles - Admin{% endblock %}
 
-{% block page_title %}<i class="bi bi-people-fill"></i> Users{% endblock %}
+{% block page_title %}Users &amp; Roles{% endblock %}
 
 {% block nav_admin_users_active %}active{% endblock %}
 
@@ -14,46 +14,101 @@
 
 {% block content %}
 <div class="admin-page">
-    <p class="page-subtitle">Manage user accounts and role assignments — {{ users|length }} total users</p>
+    <!-- Roles -->
+    <h2 class="admin-section-title">Roles</h2>
+    <p class="page-subtitle">Manage user accounts, locations and roles — {{ users|length }} total users</p>
 
+    {% if roles_full %}
     <div class="admin-card">
         <div class="admin-table-wrapper">
-            <table class="admin-table admin-users-table">
+            <table class="admin-table roles-list-table">
                 <thead>
                     <tr>
-                        <th>Username</th>
-                        <th>Email</th>
-                        <th>Name</th>
                         <th>Role</th>
-                        <th>Site Roles</th>
-                        <th style="text-align:center;">Staff</th>
-                        <th style="text-align:center;">Active</th>
-                        <th>Last Login</th>
+                        <th>Description</th>
+                        <th style="text-align:center;">Users</th>
+                        <th style="text-align:center;">Page Rules</th>
                         <th style="text-align: center;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                {% for group in role_groups %}
-                {% if group.users %}
-                    <tr class="users-group-header">
-                        <td colspan="9">
-                            {% if group.role %}
-                            <span class="role-tag {{ group.role.name }}">{{ group.role.get_name_display }}</span>
-                            {% else %}
-                            <span class="role-tag none">No Role Assigned</span>
-                            {% endif %}
-                            <span class="users-group-count">({{ group.users|length }} user{{ group.users|length|pluralize }})</span>
+                    {% for role in roles_full %}
+                    <tr>
+                        <td><span class="role-badge {{ role.name }}">{{ role.get_name_display }}</span></td>
+                        <td>{{ role.description|default:"No description" }}</td>
+                        <td style="text-align:center;">{{ role.users.count }}</td>
+                        <td style="text-align:center;">{{ role.page_permissions.count }}</td>
+                        <td style="text-align:center;">
+                            <a href="{% url 'admin_role_edit' role.id %}" class="btn-edit-role"><i class="bi bi-pencil"></i> Edit Permissions</a>
                         </td>
                     </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <div class="admin-card">
+        <div class="admin-card-body">
+            <div class="empty-state-block">
+                <i class="bi bi-shield-lock"></i>
+                <h3>No Roles Configured</h3>
+                <p>Create the default roles to get started: Admin, Accounting, Director, User, and Franchise.</p>
+                <form method="post" style="margin-top: 20px;">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="create_defaults">
+                    <button type="submit" class="btn-create-defaults"><i class="bi bi-plus-circle"></i> Create Default Roles</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ── Users ─────────────────────────────────────────────── -->
+    <h2 class="admin-section-title">Users</h2>
+    <div class="users-location-filter">
+        <label for="locationFilter">Location</label>
+        <select id="locationFilter" class="form-control" onchange="filterLocations(this.value)">
+            <option value="">All Locations</option>
+            {% for group in location_groups %}
+            <option value="{{ group.location }}">{{ group.location }} ({{ group.users|length }})</option>
+            {% endfor %}
+        </select>
+    </div>
+    {% for group in location_groups %}
+    <div class="users-location-block" data-location="{{ group.location }}">
+        <h3 class="users-location-title">
+            {{ group.location }}
+            <span class="users-group-count">({{ group.users|length }} user{{ group.users|length|pluralize }})</span>
+        </h3>
+        <div class="admin-card">
+            <div class="admin-table-wrapper">
+                <table class="admin-table admin-users-table">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Contact</th>
+                            <th>Name</th>
+                            <th>Role</th>
+                            <th>Site Roles</th>
+                            <th style="text-align:center;">Staff</th>
+                            <th style="text-align:center;">Active</th>
+                            <th>Last Login</th>
+                            <th style="text-align: center;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                     {% for u in group.users %}
                     <tr>
                         <td class="col-username">
-                            <span class="user-badge">
-                                <i class="bi bi-person-circle"></i>
-                                {{ u.username }}
-                            </span>
+                            <span class="user-badge">{% if u.first_name and u.last_name %}{{ u.first_name|lower }}.{{ u.last_name|lower }}{% else %}{{ u.username }}{% endif %}</span>
                         </td>
-                        <td class="col-email">{{ u.email|default:"—" }}</td>
+                        <td class="col-contact">
+                            <button type="button" class="btn-show-details"
+                                onclick="openContactDetails('{{ u.email|escapejs }}', '{{ u.profile.phone|escapejs }}')">
+                                <i class="bi bi-person-vcard"></i> Show Details
+                            </button>
+                        </td>
                         <td>{{ u.first_name }} {{ u.last_name|default:"" }}</td>
                         <td>
                             <form method="post" style="display: inline;">
@@ -91,65 +146,28 @@
                             {% endwith %}
                         </td>
                         <td style="text-align:center;">
-                            {% if u.is_staff %}
-                                <span class="status-badge status-active"><i class="bi bi-check-lg"></i></span>
-                            {% else %}
-                                <span class="status-badge status-inactive"><i class="bi bi-x-lg"></i></span>
-                            {% endif %}
+                            {% if u.is_staff %}<span class="status-badge status-active"><i class="bi bi-check-lg"></i></span>
+                            {% else %}<span class="status-badge status-inactive"><i class="bi bi-x-lg"></i></span>{% endif %}
                         </td>
                         <td style="text-align:center;">
-                            {% if u.is_active %}
-                                <span class="status-badge status-active"><i class="bi bi-check-lg"></i></span>
-                            {% else %}
-                                <span class="status-badge status-inactive"><i class="bi bi-x-lg"></i></span>
-                            {% endif %}
+                            {% if u.is_active %}<span class="status-badge status-active"><i class="bi bi-check-lg"></i></span>
+                            {% else %}<span class="status-badge status-inactive"><i class="bi bi-x-lg"></i></span>{% endif %}
                         </td>
                         <td>{{ u.last_login|date:"d M Y H:i"|default:"Never" }}</td>
                         <td style="text-align: center;">
-                            <div style="display:flex; align-items:center; justify-content:center; gap:6px; flex-wrap:wrap;">
-                            <button type="button" class="btn-impersonate btn-edit-user" title="Edit {{ u.username }}"
-                                onclick="openEditUser({{ u.id }}, '{{ u.username|escapejs }}', '{{ u.first_name|escapejs }}', '{{ u.last_name|escapejs }}', '{{ u.email|escapejs }}')">
-                                <i class="bi bi-pencil"></i>
+                            <button type="button" class="btn-impersonate btn-manage-user" title="Manage {{ u.username }}"
+                                onclick="openManageUser({{ u.id }}, '{{ u.username|escapejs }}', '{{ u.first_name|escapejs }}', '{{ u.last_name|escapejs }}', '{{ u.email|escapejs }}', '{{ u.profile.phone|escapejs }}', '{{ u.profile.selected_location|escapejs }}', {{ u.is_active|yesno:'true,false' }}, {% if u != request.user and u != request.real_user %}true{% else %}false{% endif %})">
+                                <i class="bi bi-three-dots"></i> Manage
                             </button>
-                            {% if u != request.user and u != request.real_user %}
-                            <form method="POST" action="{% url 'impersonate_start' u.id %}" style="display: inline; margin: 0;">
-                                {% csrf_token %}
-                                <button type="submit" class="btn-impersonate" title="View as {{ u.username }}">
-                                    <i class="bi bi-eye"></i> Impersonate
-                                </button>
-                            </form>
-                            <form method="POST" style="display:inline; margin:0;">
-                                {% csrf_token %}
-                                <input type="hidden" name="action" value="toggle_active">
-                                <input type="hidden" name="user_id" value="{{ u.id }}">
-                                <button type="submit" class="btn-impersonate {% if u.is_active %}btn-warn{% else %}btn-activate{% endif %}"
-                                    title="{% if u.is_active %}Deactivate {{ u.username }}{% else %}Activate {{ u.username }}{% endif %}">
-                                    {% if u.is_active %}<i class="bi bi-person-slash"></i> Deactivate
-                                    {% else %}<i class="bi bi-person-check"></i> Activate{% endif %}
-                                </button>
-                            </form>
-                            <form method="POST" style="display:inline; margin:0;"
-                                onsubmit="return confirm('Permanently delete {{ u.username }}? This cannot be undone.');">
-                                {% csrf_token %}
-                                <input type="hidden" name="action" value="delete_user">
-                                <input type="hidden" name="user_id" value="{{ u.id }}">
-                                <button type="submit" class="btn-impersonate btn-danger-sm" title="Delete {{ u.username }}">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </form>
-                            {% else %}
-                            <span style="font-size: 0.75rem; color: var(--text-muted);">—</span>
-                            {% endif %}
-                            </div>
                         </td>
                     </tr>
                     {% endfor %}
-                {% endif %}
-                {% endfor %}
-                </tbody>
-            </table>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
+    {% endfor %}
 </div>
 
 <!-- Add Site Role Modal -->
@@ -196,52 +214,147 @@
     </div>
 </div>
 
-<div class="modal" id="editUserModal">
-    <div class="modal-overlay" onclick="closeModal('editUserModal')"></div>
+<!-- Manage User Modal (edit / impersonate / deactivate / delete) -->
+<div class="modal" id="manageUserModal">
+    <div class="modal-overlay" onclick="closeModal('manageUserModal')"></div>
     <div class="modal-dialog" style="width: 480px;">
         <div class="modal-content">
             <div class="modal-header">
-                <h3><i class="bi bi-pencil"></i> Edit User</h3>
-                <button type="button" class="modal-close" onclick="closeModal('editUserModal')">✕</button>
+                <h3><i class="bi bi-person-gear"></i> Manage User</h3>
+                <button type="button" class="modal-close" onclick="closeModal('manageUserModal')">✕</button>
             </div>
-            <form method="POST" id="editUserForm">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="edit_user">
-                <input type="hidden" name="user_id" id="edit_user_id">
-                <div class="modal-body">
-                    <p id="editUserSubtitle" style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;"></p>
+            <div class="modal-body">
+                <p id="manageUserSubtitle" style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;"></p>
+
+                <!-- Edit details -->
+                <form method="POST" id="editUserForm">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="edit_user">
+                    <input type="hidden" name="user_id" id="edit_user_id">
                     <div style="display:flex; flex-direction:column; gap:12px;">
                         <div>
-                            <label style="font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary); display:block; margin-bottom:4px;">First Name</label>
+                            <label class="manage-label">First Name</label>
                             <input type="text" name="first_name" id="edit_first_name" class="form-control">
                         </div>
                         <div>
-                            <label style="font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary); display:block; margin-bottom:4px;">Last Name</label>
+                            <label class="manage-label">Last Name</label>
                             <input type="text" name="last_name" id="edit_last_name" class="form-control">
                         </div>
                         <div>
-                            <label style="font-size:0.75rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary); display:block; margin-bottom:4px;">Email</label>
+                            <label class="manage-label">Email</label>
                             <input type="email" name="email" id="edit_email" class="form-control">
                         </div>
+                        <div>
+                            <label class="manage-label">Phone</label>
+                            <input type="text" name="phone" id="edit_phone" class="form-control">
+                        </div>
+                        <div>
+                            <label class="manage-label">Location</label>
+                            <select name="location" id="edit_location" class="form-control">
+                                <option value="">— No Location —</option>
+                                {% for s in available_locations %}
+                                <option value="{{ s }}">{{ s }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Save Changes</button>
                     </div>
+                </form>
+
+                <hr style="margin:18px 0; border:none; border-top:1px solid var(--border-color);">
+
+                <!-- Other actions -->
+                <div id="manageUserActions" style="display:flex; flex-direction:column; gap:10px;">
+                    <form method="POST" action="" id="impersonateForm" style="margin:0;">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-secondary" style="width:100%;"><i class="bi bi-eye"></i> Impersonate</button>
+                    </form>
+                    <form method="POST" style="margin:0;">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="toggle_active">
+                        <input type="hidden" name="user_id" id="toggle_user_id">
+                        <button type="submit" class="btn btn-secondary" id="toggleActiveBtn" style="width:100%;"></button>
+                    </form>
+                    <form method="POST" id="deleteUserForm" style="margin:0;"
+                        onsubmit="return confirm('Permanently delete this user? This cannot be undone.');">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="delete_user">
+                        <input type="hidden" name="user_id" id="delete_user_id">
+                        <button type="submit" class="btn btn-danger" style="width:100%;"><i class="bi bi-trash"></i> Delete User</button>
+                    </form>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('editUserModal')">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Contact Details Modal -->
+<div class="modal" id="contactDetailsModal">
+    <div class="modal-overlay" onclick="closeModal('contactDetailsModal')"></div>
+    <div class="modal-dialog" style="width: 420px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="bi bi-person-vcard"></i> Contact Details</h3>
+                <button type="button" class="modal-close" onclick="closeModal('contactDetailsModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="contact-line">
+                    <span class="contact-label">Email</span>
+                    <span class="contact-value" id="contactEmail">—</span>
+                    <button type="button" class="contact-copy" onclick="copyContact('contactEmail', this)" title="Copy"><i class="bi bi-clipboard"></i></button>
                 </div>
-            </form>
+                <div class="contact-line">
+                    <span class="contact-label">Phone</span>
+                    <span class="contact-value" id="contactPhone">—</span>
+                    <button type="button" class="contact-copy" onclick="copyContact('contactPhone', this)" title="Copy"><i class="bi bi-clipboard"></i></button>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
-function openEditUser(userId, username, firstName, lastName, email) {
+function openManageUser(userId, username, firstName, lastName, email, phone, location, isActive, canManage) {
     document.getElementById('edit_user_id').value = userId;
     document.getElementById('edit_first_name').value = firstName;
     document.getElementById('edit_last_name').value = lastName;
     document.getElementById('edit_email').value = email;
-    document.getElementById('editUserSubtitle').textContent = 'Editing: ' + username;
-    openModal('editUserModal');
+    document.getElementById('edit_phone').value = phone;
+    document.getElementById('edit_location').value = location;
+    document.getElementById('toggle_user_id').value = userId;
+    document.getElementById('delete_user_id').value = userId;
+    document.getElementById('manageUserSubtitle').textContent = 'Managing: ' + username;
+    document.getElementById('impersonateForm').action = '/admin-panel/impersonate/' + userId + '/';
+    const toggleBtn = document.getElementById('toggleActiveBtn');
+    toggleBtn.innerHTML = isActive
+        ? '<i class="bi bi-person-slash"></i> Deactivate'
+        : '<i class="bi bi-person-check"></i> Activate';
+    // Hide impersonate/deactivate/delete for self
+    document.getElementById('manageUserActions').style.display = canManage ? 'flex' : 'none';
+    openModal('manageUserModal');
+}
+
+function openContactDetails(email, phone) {
+    document.getElementById('contactEmail').textContent = email || '—';
+    document.getElementById('contactPhone').textContent = phone || '—';
+    openModal('contactDetailsModal');
+}
+
+function copyContact(spanId, btn) {
+    const text = document.getElementById(spanId).textContent;
+    if (!text || text === '—') return;
+    navigator.clipboard.writeText(text).then(function () {
+        const icon = btn.querySelector('i');
+        const prev = icon.className;
+        icon.className = 'bi bi-check-lg';
+        setTimeout(function () { icon.className = prev; }, 1200);
+    });
+}
+
+function filterLocations(loc) {
+    document.querySelectorAll('.users-location-block').forEach(function (block) {
+        block.style.display = (!loc || block.dataset.location === loc) ? '' : 'none';
+    });
 }
 
 function openAddSiteRole(userId, username) {

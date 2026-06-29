@@ -516,6 +516,12 @@ urlpatterns = [
     path('calendar/provisional-appointment/', views.create_provisional_appointment, name='create_provisional_appointment'),
     path('calendar/block/create/', views.create_calendar_block, name='create_calendar_block'),
     path('calendar/block/<int:block_id>/delete/', views.delete_calendar_block, name='delete_calendar_block'),
+    path('calendar/employee-status/set/', views.employee_calendar_set_status, name='employee_calendar_set_status'),
+    path('calendar/employee-status/<int:entry_id>/delete/', views.employee_calendar_delete_status, name='employee_calendar_delete_status'),
+    path('calendar/employee-rule/set/', views.employee_calendar_set_rule, name='employee_calendar_set_rule'),
+    path('calendar/employee-rule/<int:rule_id>/delete/', views.employee_calendar_delete_rule, name='employee_calendar_delete_rule'),
+    path('calendar/employee-rule/set-week/', views.employee_calendar_set_week_rules, name='employee_calendar_set_week_rules'),
+    path('calendar/employee/reorder/', views.employee_calendar_reorder, name='employee_calendar_reorder'),
 
     # Sales Appointments
     path('calendar/sales/add/', views.add_sales_appointment, name='add_sales_appointment'),

@@ -89,6 +89,10 @@ def admin_users(request):
             except (User.DoesNotExist, Role.DoesNotExist):
                 messages.error(request, "Invalid user or role")
 
+        elif action == 'create_defaults':
+            _create_default_roles()
+            messages.success(request, "Default roles created successfully.")
+
         elif action == 'toggle_active':
             try:
                 target_user = User.objects.get(id=user_id)
@@ -121,6 +125,10 @@ def admin_users(request):
                 target_user.last_name = request.POST.get('last_name', '').strip()
                 target_user.email = request.POST.get('email', '').strip()
                 target_user.save(update_fields=['first_name', 'last_name', 'email'])
+                profile = target_user.profile
+                profile.phone = request.POST.get('phone', '').strip()
+                profile.selected_location = request.POST.get('location', '').strip()
+                profile.save(update_fields=['phone', 'selected_location'])
                 messages.success(request, f"Details updated for {target_user.username}.")
             except User.DoesNotExist:
                 messages.error(request, "User not found.")
@@ -176,31 +184,34 @@ def admin_users(request):
     for sr in site_roles_qs:
         user_site_roles_map.setdefault(sr.user_id, []).append(sr)
 
-    # Group users by role
+    # Group users by their selected location
     from collections import OrderedDict
-    role_groups = OrderedDict()
-    # Add groups for each defined role in order
-    for role in roles.order_by('name'):
-        role_groups[role.id] = {
-            'role': role,
-            'users': [],
-        }
-    # Add a group for users with no role
-    role_groups[None] = {
-        'role': None,
-        'users': [],
-    }
+    location_groups = OrderedDict()
     for u in users:
-        role_id = u.profile.role_id if hasattr(u, 'profile') and u.profile else None
-        if role_id in role_groups:
-            role_groups[role_id]['users'].append(u)
-        else:
-            role_groups[None]['users'].append(u)
+        loc = ''
+        if hasattr(u, 'profile') and u.profile:
+            loc = (u.profile.selected_location or '').strip()
+        key = loc or 'No Location'
+        location_groups.setdefault(key, []).append(u)
+    # Sort: named locations alphabetically, "No Location" last
+    sorted_groups = []
+    for key in sorted(location_groups.keys(), key=lambda k: (k == 'No Location', k.lower())):
+        group_users = sorted(
+            location_groups[key],
+            key=lambda u: (
+                (u.profile.role.name.lower() if hasattr(u, 'profile') and u.profile and u.profile.role else 'zzz'),
+                u.username.lower(),
+            ),
+        )
+        sorted_groups.append({'location': key, 'users': group_users})
+
+    roles_full = Role.objects.prefetch_related('page_permissions', 'users').all()
 
     context = {
         'users': users,
         'roles': roles,
-        'role_groups': list(role_groups.values()),
+        'roles_full': roles_full,
+        'location_groups': sorted_groups,
         'user_site_roles_map': user_site_roles_map,
         'site_role_choices': UserSiteRole.SITE_ROLE_CHOICES,
     }
@@ -216,22 +227,11 @@ def admin_templates(request):
 
 @staff_required
 def admin_roles(request):
-    """Admin roles management page - list all roles."""
-    roles = Role.objects.prefetch_related('page_permissions', 'users').all()
-
-    if request.method == 'POST':
-        action = request.POST.get('action')
-
-        if action == 'create_defaults':
-            _create_default_roles()
-            messages.success(request, "Default roles created successfully")
-            return redirect('admin_roles')
-
-    context = {
-        'roles': roles,
-        'page_sections': PAGE_SECTIONS,
-    }
-    return render(request, 'stock_take/admin_roles.html', context)
+    """Roles are now managed from the combined Users & Roles page."""
+    if request.method == 'POST' and request.POST.get('action') == 'create_defaults':
+        _create_default_roles()
+        messages.success(request, "Default roles created successfully")
+    return redirect('admin_users')
 
 
 @staff_required

@@ -216,10 +216,10 @@ class TaskCompletionAdmin(admin.ModelAdmin):
 
 @admin.register(Fitter)
 class FitterAdmin(admin.ModelAdmin):
-    list_display = ['name', 'email', 'phone', 'hourly_rate', 'active']
-    search_fields = ['name', 'email', 'phone']
-    list_filter = ['active']
-    list_editable = ['hourly_rate', 'active']
+    list_display = ['name', 'location', 'email', 'phone', 'hourly_rate', 'active']
+    search_fields = ['name', 'email', 'phone', 'location']
+    list_filter = ['active', 'location']
+    list_editable = ['hourly_rate', 'active', 'location']
 
 
 @admin.register(FactoryWorker)
