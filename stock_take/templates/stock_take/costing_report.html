@@ -3,6 +3,7 @@
 {% load humanize %}
 
 {% block title %}Costing Report{% endblock %}
+{% block page_title %}Costing Report{% endblock %}
 
 {% block nav_costing_report_active %}active{% endblock %}
 
@@ -10,21 +11,32 @@
 <link rel="stylesheet" href="{% static 'css/costing_report.css' %}">
 {% endblock %}
 
+{% block page_actions %}
+<a href="{% url 'costing_report_pdf' %}" class="btn-save costing-pdf-btn">
+    <i class="bi bi-file-earmark-pdf"></i> Download PDF
+</a>
+{% endblock %}
+
 {% block content %}
-<div class="page-content">
-    <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: var(--sp-3);">
-        <div>
-            <h1><i class="bi bi-calculator"></i> Costing Report</h1>
-            <p class="text-muted">Analysis of job costing for completed orders</p>
-        </div>
-        <a href="{% url 'costing_report_pdf' %}" class="btn-save" style="text-decoration: none;">
-            <i class="bi bi-file-earmark-pdf"></i> Download PDF
-        </a>
-    </div>
+<div class="page-content costing-report-page">
 
     <!-- Summary Statistics Cards -->
     <div class="costing-stats-overview">
-        <div class="costing-stat-card">
+        <div class="costing-stat-card clickable" role="button" tabindex="0"
+             onclick="openCostingModal('completedJobsModal')"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCostingModal('completedJobsModal');}">
+            <div class="costing-stat-icon blue">
+                <i class="bi bi-list-check"></i>
+            </div>
+            <div class="costing-stat-content">
+                <span class="costing-stat-value">{{ analysis_stats.count }}</span>
+                <span class="costing-stat-label">Completed Jobs</span>
+            </div>
+            <i class="bi bi-arrows-angle-expand costing-stat-explore"></i>
+        </div>
+        <div class="costing-stat-card clickable" role="button" tabindex="0"
+             onclick="openCostingModal('fullyCostedModal')"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCostingModal('fullyCostedModal');}">
             <div class="costing-stat-icon green">
                 <i class="bi bi-check-circle"></i>
             </div>
@@ -32,37 +44,38 @@
                 <span class="costing-stat-value">{{ stats.fully_costed_count }}</span>
                 <span class="costing-stat-label">Fully Costed</span>
             </div>
-        </div>
-        <div class="costing-stat-card">
-            <div class="costing-stat-icon amber">
-                <i class="bi bi-clock-history"></i>
-            </div>
-            <div class="costing-stat-content">
-                <span class="costing-stat-value">{{ stats.partially_costed_count }}</span>
-                <span class="costing-stat-label">Partially Costed</span>
-            </div>
-        </div>
-        <div class="costing-stat-card">
-            <div class="costing-stat-icon blue">
-                <i class="bi bi-percent"></i>
-            </div>
-            <div class="costing-stat-content">
-                <span class="costing-stat-value">{{ stats.costing_completion_rate|floatformat:1 }}%</span>
-                <span class="costing-stat-label">Completion Rate</span>
-            </div>
-        </div>
-        <div class="costing-stat-card">
-            <div class="costing-stat-icon purple">
-                <i class="bi bi-graph-up-arrow"></i>
-            </div>
-            <div class="costing-stat-content">
-                <span class="costing-stat-value">{{ stats.avg_profit_margin|floatformat:1 }}%</span>
-                <span class="costing-stat-label">Avg Profit Margin</span>
-            </div>
+            <i class="bi bi-arrows-angle-expand costing-stat-explore"></i>
         </div>
         <div class="costing-stat-card">
             <div class="costing-stat-icon info">
                 <i class="bi bi-currency-pound"></i>
+            </div>
+            <div class="costing-stat-content">
+                <span class="costing-stat-value">£{{ analysis_stats.total_revenue|floatformat:0|intcomma }}</span>
+                <span class="costing-stat-label">Total Revenue</span>
+            </div>
+        </div>
+        <div class="costing-stat-card">
+            <div class="costing-stat-icon green">
+                <i class="bi bi-graph-up-arrow"></i>
+            </div>
+            <div class="costing-stat-content">
+                <span class="costing-stat-value">£{{ analysis_stats.total_profit|floatformat:0|intcomma }}</span>
+                <span class="costing-stat-label">Total Profit</span>
+            </div>
+        </div>
+        <div class="costing-stat-card">
+            <div class="costing-stat-icon purple">
+                <i class="bi bi-percent"></i>
+            </div>
+            <div class="costing-stat-content">
+                <span class="costing-stat-value">{{ analysis_stats.overall_margin|floatformat:1 }}%</span>
+                <span class="costing-stat-label">Overall Margin</span>
+            </div>
+        </div>
+        <div class="costing-stat-card">
+            <div class="costing-stat-icon amber">
+                <i class="bi bi-cash-stack"></i>
             </div>
             <div class="costing-stat-content">
                 <span class="costing-stat-value">£{{ stats.avg_sale_value|floatformat:0|intcomma }}</span>
@@ -70,6 +83,185 @@
             </div>
         </div>
     </div>
+
+    {% if analysis_stats.count > 0 %}
+    <!-- ===================== Profitability Analysis ===================== -->
+    <div class="costing-section-head">
+        <h2><i class="bi bi-graph-up-arrow"></i> Profitability Analysis</h2>
+        <p class="text-muted">
+            {{ analysis_stats.count }} completed jobs &middot;
+            overall margin <strong>{{ analysis_stats.overall_margin|floatformat:1 }}%</strong> &middot;
+            {{ analysis_stats.estimated_count }} include estimated labour
+            <span class="costing-est-note" title="Where installation or manufacturing costs are not yet recorded, they are estimated at 10% / 5% of net revenue.">
+                <i class="bi bi-info-circle"></i>
+            </span>
+        </p>
+    </div>
+
+    <div class="costing-breakdown-grid">
+        {% for bd in breakdowns %}
+        <div class="costing-card">
+            <div class="costing-card-head">
+                <h3><i class="bi {{ bd.icon }}"></i> Profit by {{ bd.title }}</h3>
+            </div>
+            <div class="costing-card-body costing-card-body--table">
+                <table class="costing-breakdown-table">
+                    <thead>
+                        <tr>
+                            <th>{{ bd.title }}</th>
+                            <th class="text-center">Jobs</th>
+                            <th class="text-end">Avg Sale</th>
+                            <th class="text-end">Avg Profit</th>
+                            <th class="costing-margin-col">Margin</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in bd.rows %}
+                        <tr>
+                            <td class="costing-dim-label" title="{{ r.label }}">{{ r.label }}</td>
+                            <td class="text-center">{{ r.count }}</td>
+                            <td class="text-end">£{{ r.avg_revenue|floatformat:0|intcomma }}</td>
+                            <td class="text-end">£{{ r.avg_profit|floatformat:0|intcomma }}</td>
+                            <td>
+                                <div class="costing-margin-cell">
+                                    <div class="costing-margin-bar">
+                                        <div class="costing-margin-fill {% if r.margin < 0 %}neg{% elif r.margin < 20 %}low{% elif r.margin < 40 %}mid{% else %}high{% endif %}"
+                                             style="width: {% if r.margin > 0 %}{{ r.margin|floatformat:0 }}{% else %}0{% endif %}%;"></div>
+                                    </div>
+                                    <span class="costing-margin-val {% if r.margin < 0 %}neg{% endif %}">{{ r.margin|floatformat:1 }}%</span>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Product Range (explorable) full-width card -->
+    <div class="costing-card costing-range-card">
+        <div class="costing-card-head">
+            <h3><i class="bi bi-collection"></i> Profit by Product Range</h3>
+            <span class="text-muted costing-card-hint">Click a range to explore its sales</span>
+        </div>
+        <div class="costing-card-body costing-card-body--table">
+            <table class="costing-breakdown-table costing-range-table">
+                <thead>
+                    <tr>
+                        <th>Product Range</th>
+                        <th class="text-center">Jobs</th>
+                        <th class="text-end">Total Revenue</th>
+                        <th class="text-end">Avg Sale</th>
+                        <th class="text-end">Avg Profit</th>
+                        <th class="costing-margin-col">Margin</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in range_breakdown %}
+                    <tr class="costing-range-row" onclick="toggleRangeJobs('range-{{ forloop.counter }}')">
+                        <td class="costing-dim-label" title="{{ r.label }}">
+                            <i class="bi bi-chevron-right costing-range-chevron" id="chev-range-{{ forloop.counter }}"></i>
+                            {{ r.label }}
+                        </td>
+                        <td class="text-center">{{ r.count }}</td>
+                        <td class="text-end">£{{ r.revenue|floatformat:0|intcomma }}</td>
+                        <td class="text-end">£{{ r.avg_revenue|floatformat:0|intcomma }}</td>
+                        <td class="text-end">£{{ r.avg_profit|floatformat:0|intcomma }}</td>
+                        <td>
+                            <div class="costing-margin-cell">
+                                <div class="costing-margin-bar">
+                                    <div class="costing-margin-fill {% if r.margin < 0 %}neg{% elif r.margin < 20 %}low{% elif r.margin < 40 %}mid{% else %}high{% endif %}"
+                                         style="width: {% if r.margin > 0 %}{{ r.margin|floatformat:0 }}{% else %}0{% endif %}%;"></div>
+                                </div>
+                                <span class="costing-margin-val {% if r.margin < 0 %}neg{% endif %}">{{ r.margin|floatformat:1 }}%</span>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr class="costing-range-detail" id="range-{{ forloop.counter }}" hidden>
+                        <td colspan="6">
+                            <table class="costing-range-jobs">
+                                <thead>
+                                    <tr>
+                                        <th>Sale</th>
+                                        <th>Customer</th>
+                                        <th class="text-end">Revenue</th>
+                                        <th class="text-end">Profit</th>
+                                        <th class="text-end">Margin</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for j in r.jobs %}
+                                    <tr>
+                                        <td><a href="{% url 'order_details' j.order.id %}">{{ j.order.sale_number }}</a></td>
+                                        <td>{{ j.order.first_name }} {{ j.order.last_name }}</td>
+                                        <td class="text-end">£{{ j.revenue|floatformat:0|intcomma }}</td>
+                                        <td class="text-end {% if j.profit < 0 %}profit-negative{% else %}profit-positive{% endif %}">£{{ j.profit|floatformat:0|intcomma }}</td>
+                                        <td class="text-end {% if j.margin < 0 %}profit-negative{% elif j.margin < 20 %}profit-warning{% else %}profit-positive{% endif %}">{{ j.margin|floatformat:1 }}%</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="costing-analysis-row">
+        <div class="costing-card">
+            <div class="costing-card-head">
+                <h3><i class="bi bi-bar-chart-steps"></i> Margin Distribution</h3>
+            </div>
+            <div class="costing-card-body">
+                {% for b in margin_distribution %}
+                <div class="costing-dist-item">
+                    <div class="costing-dist-label">
+                        <span>{{ b.label }}</span>
+                        <span>{{ b.count }} jobs ({{ b.pct|floatformat:0 }}%)</span>
+                    </div>
+                    <div class="costing-dist-track">
+                        <div class="costing-dist-fill {{ b.cls }}" style="width: {{ b.bar|floatformat:0 }}%;"></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="costing-card">
+            <div class="costing-card-head">
+                <h3><i class="bi bi-trophy"></i> Most &amp; Least Profitable Jobs</h3>
+            </div>
+            <div class="costing-card-body">
+                <h4 class="costing-mini-head green"><i class="bi bi-arrow-up-circle"></i> Top performers</h4>
+                <ul class="costing-rank-list">
+                    {% for j in top_jobs %}
+                    <li>
+                        <a href="{% url 'order_details' j.order.id %}">{{ j.order.sale_number }}</a>
+                        <span class="costing-rank-name">{{ j.order.first_name }} {{ j.order.last_name }}</span>
+                        <span class="costing-rank-margin pos">{{ j.margin|floatformat:1 }}%</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% if bottom_jobs %}
+                <h4 class="costing-mini-head red"><i class="bi bi-arrow-down-circle"></i> Lowest margin</h4>
+                <ul class="costing-rank-list">
+                    {% for j in bottom_jobs %}
+                    <li>
+                        <a href="{% url 'order_details' j.order.id %}">{{ j.order.sale_number }}</a>
+                        <span class="costing-rank-name">{{ j.order.first_name }} {{ j.order.last_name }}</span>
+                        <span class="costing-rank-margin {% if j.margin < 20 %}neg{% else %}pos{% endif %}">{{ j.margin|floatformat:1 }}%</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Cost vs Revenue Breakdown Bars (for fully costed) -->
     {% if stats.fully_costed_count > 0 %}
@@ -81,7 +273,7 @@
             
             <div class="cost-bar-item">
                 <div class="cost-bar-label">
-                    <span><i class="bi bi-box-seam" style="color: #3b82f6;"></i> Materials</span>
+                    <span><i class="bi bi-box-seam ic-materials"></i> Materials</span>
                     <span>£{{ stats.avg_materials_cost|floatformat:0|intcomma }} ({{ stats.materials_pct_of_revenue|floatformat:1 }}%)</span>
                 </div>
                 <div class="cost-bar-track">
@@ -93,7 +285,7 @@
             
             <div class="cost-bar-item">
                 <div class="cost-bar-label">
-                    <span><i class="bi bi-tools" style="color: #8b5cf6;"></i> Installation</span>
+                    <span><i class="bi bi-tools ic-installation"></i> Installation</span>
                     <span>£{{ stats.avg_installation_cost|floatformat:0|intcomma }} ({{ stats.installation_pct_of_revenue|floatformat:1 }}%)</span>
                 </div>
                 <div class="cost-bar-track">
@@ -105,7 +297,7 @@
             
             <div class="cost-bar-item">
                 <div class="cost-bar-label">
-                    <span><i class="bi bi-gear" style="color: #6b7280;"></i> Manufacturing</span>
+                    <span><i class="bi bi-gear ic-manufacturing"></i> Manufacturing</span>
                     <span>£{{ stats.avg_manufacturing_cost|floatformat:0|intcomma }} ({{ stats.manufacturing_pct_of_revenue|floatformat:1 }}%)</span>
                 </div>
                 <div class="cost-bar-track">
@@ -117,7 +309,7 @@
             
             <div class="cost-bar-item">
                 <div class="cost-bar-label">
-                    <span><i class="bi bi-graph-up-arrow" style="color: #10b981;"></i> Profit</span>
+                    <span><i class="bi bi-graph-up-arrow ic-profit"></i> Profit</span>
                     <span>£{{ stats.avg_profit|floatformat:0|intcomma }} ({{ stats.avg_profit_margin|floatformat:1 }}%)</span>
                 </div>
                 <div class="cost-bar-track">
@@ -270,7 +462,7 @@
                             <td>£{{ stats.avg_manufacturing_cost|floatformat:0|intcomma }}</td>
                         </tr>
                         <tr class="total-row">
-                            <td>Total ACost</td>
+                            <td>Total Cost</td>
                             <td><strong>£{{ stats.avg_total_cost|floatformat:0|intcomma }}</strong></td>
                         </tr>
                         <tr>
@@ -297,7 +489,7 @@
                             <td>£{{ stats.median_manufacturing_cost|floatformat:0|intcomma }}</td>
                         </tr>
                         <tr class="total-row">
-                            <td>Total Average Cost</td>
+                            <td>Total Median Cost</td>
                             <td><strong>£{{ stats.median_total_cost|floatformat:0|intcomma }}</strong></td>
                         </tr>
                         <tr>
@@ -468,7 +660,7 @@
             </div>
             {% else %}
             <div class="costing-empty-state">
-                <i class="bi bi-check-all" style="color: #10b981;"></i>
+                <i class="bi bi-check-all ic-profit"></i>
                 <p>All completed orders are fully costed!</p>
             </div>
             {% endif %}
@@ -476,7 +668,132 @@
     </div>
 </div>
 
+<!-- ===================== Explore Modals ===================== -->
+<div class="modal-overlay" id="completedJobsModal" onclick="if(event.target===this)closeCostingModal('completedJobsModal')">
+    <div class="modal-content modal--lg">
+        <div class="modal-header">
+            <h3><i class="bi bi-list-check"></i> Completed Jobs ({{ all_jobs|length }})</h3>
+            <button type="button" class="modal-close" onclick="closeCostingModal('completedJobsModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="costing-table-container">
+                <table class="costing-table">
+                    <thead>
+                        <tr>
+                            <th>Sale</th>
+                            <th>Customer</th>
+                            <th>Range</th>
+                            <th>Door</th>
+                            <th class="text-end">Revenue</th>
+                            <th class="text-end">Cost</th>
+                            <th class="text-end">Profit</th>
+                            <th class="text-end">Margin</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for j in all_jobs %}
+                        <tr>
+                            <td><a href="{% url 'order_details' j.order.id %}">{{ j.order.sale_number }}</a></td>
+                            <td>{{ j.order.first_name }} {{ j.order.last_name }}</td>
+                            <td>{{ j.range_name }}</td>
+                            <td>{{ j.door_type }}</td>
+                            <td class="text-end">£{{ j.revenue|floatformat:0|intcomma }}</td>
+                            <td class="text-end">£{{ j.total_cost|floatformat:0|intcomma }}{% if j.estimated %}<span class="costing-est-flag" title="Installation/manufacturing estimated">*</span>{% endif %}</td>
+                            <td class="text-end {% if j.profit < 0 %}profit-negative{% else %}profit-positive{% endif %}">£{{ j.profit|floatformat:0|intcomma }}</td>
+                            <td class="text-end {% if j.margin < 0 %}profit-negative{% elif j.margin < 20 %}profit-warning{% else %}profit-positive{% endif %}">{{ j.margin|floatformat:1 }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p class="costing-modal-note">* Installation/manufacturing costs estimated at 10% / 5% of net revenue where not yet recorded.</p>
+        </div>
+    </div>
+</div>
+
+<div class="modal-overlay" id="fullyCostedModal" onclick="if(event.target===this)closeCostingModal('fullyCostedModal')">
+    <div class="modal-content modal--lg">
+        <div class="modal-header">
+            <h3><i class="bi bi-check-circle"></i> Fully Costed Jobs ({{ fully_costed|length }})</h3>
+            <button type="button" class="modal-close" onclick="closeCostingModal('fullyCostedModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            {% if fully_costed %}
+            <div class="costing-table-container">
+                <table class="costing-table">
+                    <thead>
+                        <tr>
+                            <th>Sale</th>
+                            <th>Customer</th>
+                            <th>Fit Date</th>
+                            <th class="text-end">Revenue</th>
+                            <th class="text-end">Materials</th>
+                            <th class="text-end">Install</th>
+                            <th class="text-end">Mfg</th>
+                            <th class="text-end">Total Cost</th>
+                            <th class="text-end">Profit</th>
+                            <th class="text-end">Margin</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in fully_costed %}
+                        <tr>
+                            <td><a href="{% url 'order_details' item.order.id %}">{{ item.order.sale_number }}</a></td>
+                            <td>{{ item.order.first_name }} {{ item.order.last_name }}</td>
+                            <td>{{ item.order.fit_date|date:"d/m/Y" }}</td>
+                            <td class="text-end">£{{ item.revenue|floatformat:0|intcomma }}</td>
+                            <td class="text-end">£{{ item.materials_cost|floatformat:0|intcomma }}</td>
+                            <td class="text-end">£{{ item.installation_cost|floatformat:0|intcomma }}</td>
+                            <td class="text-end">£{{ item.manufacturing_cost|floatformat:0|intcomma }}</td>
+                            <td class="text-end">£{{ item.total_cost|floatformat:0|intcomma }}</td>
+                            <td class="text-end {% if item.profit < 0 %}profit-negative{% else %}profit-positive{% endif %}">£{{ item.profit|floatformat:0|intcomma }}</td>
+                            <td class="text-end {% if item.profit_margin < 0 %}profit-negative{% elif item.profit_margin < 20 %}profit-warning{% else %}profit-positive{% endif %}">{{ item.profit_margin|floatformat:1 }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="costing-empty-state">
+                <i class="bi bi-clipboard-x"></i>
+                <p>No fully costed orders yet.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
 <script>
+function openCostingModal(id) {
+    const m = document.getElementById(id);
+    if (m) m.classList.add('active');
+}
+
+function closeCostingModal(id) {
+    const m = document.getElementById(id);
+    if (m) m.classList.remove('active');
+}
+
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+        document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
+    }
+});
+
+function toggleRangeJobs(id) {
+    const detail = document.getElementById(id);
+    const chev = document.getElementById('chev-' + id);
+    if (!detail) return;
+    const isHidden = detail.hasAttribute('hidden');
+    if (isHidden) {
+        detail.removeAttribute('hidden');
+        if (chev) chev.classList.add('open');
+    } else {
+        detail.setAttribute('hidden', '');
+        if (chev) chev.classList.remove('open');
+    }
+}
+
 function filterCostingTables() {
     const searchTerm = document.getElementById('costingSearch').value.toLowerCase().trim();
     

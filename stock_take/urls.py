@@ -19,7 +19,8 @@ from .invoice_views import invoices_list, invoice_detail, sync_invoices_stream, 
 from .ticket_views import tickets_list, ticket_detail, ticket_update_status, ticket_edit, ticket_delete
 from .claim_views import claim_service, claim_upload, claim_delete, claim_api_upload, claim_download_zip, claim_file_download, claim_search_api
 from .gallery_views import gallery, gallery_upload, gallery_delete, gallery_update, gallery_customer_orders, gallery_rotate
-from .upload_views import fitter_upload, upload_staging, upload_staging_publish, upload_staging_reject
+from .upload_views import fitter_upload, upload_staging_publish, upload_staging_reject
+from .schedule_views import fitter_schedule
 from .cad_views import cad_db_upload, cad_db_download, cad_db_status
 from .profile_views import user_profile, user_profile_save, user_change_password
 from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_status, xero_api_test, xero_create_customer, xero_customer_search, xero_check_contact, xero_gl_codes, xero_save_gl_codes
@@ -641,11 +642,13 @@ urlpatterns = [
     path('gallery/<int:image_id>/rotate/', gallery_rotate, name='gallery_rotate'),
     path('gallery/customer/<int:customer_id>/orders/', gallery_customer_orders, name='gallery_customer_orders'),
 
-    # Public fitter upload + authenticated staging
+    # Public fitter upload + authenticated staging (review lives in the Gallery)
     path('upload/', fitter_upload, name='fitter_upload'),
-    path('upload/staging/', upload_staging, name='upload_staging'),
     path('upload/staging/<int:submission_id>/publish/', upload_staging_publish, name='upload_staging_publish'),
     path('upload/staging/<int:submission_id>/reject/', upload_staging_reject, name='upload_staging_reject'),
+
+    # Fitter schedule
+    path('schedule/', fitter_schedule, name='fitter_schedule'),
 
     # Xero Integration
     path('xero/connect/', xero_connect, name='xero_connect'),

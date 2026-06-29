@@ -1980,6 +1980,7 @@ class Fitter(models.Model):
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text='Hourly rate for this fitter')
     active = models.BooleanField(default=True)
     location = models.CharField(max_length=100, blank=True, default='', help_text='Branch / office location (e.g. Belfast, Dublin)')
+    user = models.OneToOneField(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='fitter_profile', help_text='Linked login account for this fitter (used for the Schedule page)')
     created_at = models.DateTimeField(auto_now_add=True)
     
     def __str__(self):
@@ -2762,6 +2763,7 @@ class Role(models.Model):
         ('director', 'Director'),
         ('user', 'User'),
         ('franchise', 'Franchise'),
+        ('fitter', 'Fitter'),
     ]
 
     name = models.CharField(max_length=20, choices=ROLE_CHOICES, unique=True)

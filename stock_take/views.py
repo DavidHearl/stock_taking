@@ -1543,9 +1543,9 @@ def global_search_api(request):
 @login_required
 def reports_index(request):
     """Single landing page listing all available reports."""
-    return render(request, 'stock_take/reports_index.html', {
-        'role_perms': getattr(request, 'role_perms', {}),
-    })
+    # role_perms (and is_role_admin) are supplied by the user_permissions
+    # context processor; don't override them here with an empty dict.
+    return render(request, 'stock_take/reports_index.html')
 
 @login_required
 def material_report(request):
@@ -12633,6 +12633,7 @@ def calendar_view(request):
         })
 
     context = {
+        'current_year': current_year,
         'current_month': current_month,
         'month_name': month_name,
         'month_days': month_days,
@@ -12976,337 +12977,6 @@ def employee_calendar_reorder(request):
         except (TypeError, ValueError):
             continue
     return JsonResponse({'success': True})
-
-
-@login_required
-def calendar_weekly(request):
-    """Display weekly calendar with fit appointments and PO expected deliveries."""
-    from datetime import datetime, timedelta
-
-    today = timezone.now().date()
-
-    # Determine the target date from query params
-    year = int(request.GET.get('year', today.year))
-    month = int(request.GET.get('month', today.month))
-    day = int(request.GET.get('day', today.day))
-
-    try:
-        target = datetime(year, month, day).date()
-    except ValueError:
-        target = today
-
-    # Calculate Monday–Saturday of the week containing target
-    week_start = target - timedelta(days=target.weekday())  # Monday
-    week_end = week_start + timedelta(days=5)               # Saturday
-
-    # Navigation
-    prev_week = week_start - timedelta(days=7)
-    next_week = week_start + timedelta(days=7)
-
-    # Fit appointments this week
-    # ── Propagate AnthillSale fit_dates → Orders that don't have one yet ──
-    anthill_with_fit = AnthillSale.objects.filter(
-        fit_date__gte=week_start, fit_date__lte=week_end,
-        order__isnull=False,
-    ).select_related('order')
-    for sale in anthill_with_fit:
-        if sale.order and not sale.order.fit_date:
-            sale.order.fit_date = sale.fit_date
-            sale.order.save(update_fields=['fit_date'])
-
-    # Auto-create or update FitAppointment for orders with fit_date this week
-    orders_without_appt = (
-        Order.objects
-        .filter(fit_date__gte=week_start, fit_date__lte=week_end, job_finished=False)
-        .exclude(id__in=FitAppointment.objects.filter(
-            fit_date__gte=week_start, fit_date__lte=week_end
-        ).values_list('order_id', flat=True))
-    )
-    for order in orders_without_appt:
-        # Check if an older appointment exists on a different date — update it
-        existing = FitAppointment.objects.filter(order=order).order_by('-id').first()
-        if existing:
-            existing.fit_date = order.fit_date
-            existing.save(update_fields=['fit_date'])
-        else:
-            FitAppointment.objects.create(
-                order=order,
-                fit_date=order.fit_date,
-                fitter='R',  # Default fitter
-            )
-
-    # Remove duplicate FitAppointments (keep the latest per order)
-    _seen_order_ids = set()
-    for appt in FitAppointment.objects.filter(
-        fit_date__gte=week_start, fit_date__lte=week_end, order__isnull=False
-    ).order_by('-id'):
-        if appt.order_id in _seen_order_ids:
-            appt.delete()
-        else:
-            _seen_order_ids.add(appt.order_id)
-
-    appointments = list(
-        FitAppointment.objects
-        .filter(fit_date__gte=week_start, fit_date__lte=week_end)
-        .select_related('order', 'remedial')
-        .order_by('fit_date', 'fitter')
-    )
-
-    # Attach payment info (sale value / paid / outstanding) from linked AnthillSale
-    # Join by sale_number == anthill_activity_id (order FK is not populated)
-    sale_numbers = [a.order.sale_number for a in appointments if a.order]
-    if sale_numbers:
-        _sale_rows = (
-            AnthillSale.objects
-            .filter(anthill_activity_id__in=sale_numbers)
-            .annotate(payments_sum=Sum('payments__amount'))
-            .values('id', 'anthill_activity_id', 'sale_value', 'payments_sum',
-                     'range_name', 'door_type', 'source', 'contract_number',
-                     'assigned_to_name', 'discount')
-        )
-        # Fallback sale value when AnthillSale.sale_value is missing/zero:
-        # sum the distinct linked Xero invoice totals (the invoiced amount).
-        # This keeps the calendar coherent for sales that haven't had their
-        # value synced from Anthill but do have payments/invoices.
-        from .models import AnthillPayment
-        _invoiced = {}   # activity_id -> {invoice_key: invoice_total}
-        for pr in (
-            AnthillPayment.objects
-            .filter(sale__anthill_activity_id__in=sale_numbers, ignored=False)
-            .values('sale__anthill_activity_id', 'xero_invoice_id', 'invoice_total', 'id')
-        ):
-            key = pr['sale__anthill_activity_id']
-            inv_total = pr['invoice_total'] or Decimal('0')
-            inv_key = pr['xero_invoice_id'] or f"_p{pr['id']}"
-            _invoiced.setdefault(key, {})[inv_key] = inv_total
-        _invoiced_total = {k: sum(v.values()) for k, v in _invoiced.items()}
-
-        _fin_map = {}
-        for row in _sale_rows:
-            sv = row['sale_value'] or Decimal('0')
-            pt = row['payments_sum'] or Decimal('0')
-            disc = row['discount'] or Decimal('0')
-            key = row['anthill_activity_id']
-            # Fall back to the invoiced total (then to amount paid) when no
-            # sale value has been synced for this record.
-            estimated = False
-            if sv <= 0:
-                fallback = _invoiced_total.get(key, Decimal('0')) or pt
-                if fallback > 0:
-                    sv = fallback
-                    estimated = True
-            # A single Anthill order id can match multiple sale records. Keep the
-            # one with the highest sale value so a populated record is never
-            # clobbered by a later zero/blank duplicate (root cause of missing
-            # values on the calendar).
-            existing = _fin_map.get(key)
-            if existing is not None and sv <= existing['sale_value']:
-                continue
-            _fin_map[key] = {
-                'sale_value': sv,
-                'payments_total': pt,
-                'outstanding': sv - pt,
-                'value_estimated': estimated,
-                'anthill_sale_pk': row['id'],
-                'range_name': row['range_name'] or '',
-                'door_type': row['door_type'] or '',
-                'source': row['source'] or '',
-                'contract_number': row['contract_number'] or '',
-                'assigned_to_name': row['assigned_to_name'] or '',
-                'discount': disc,
-            }
-        for appt in appointments:
-            if appt.order:
-                fin = _fin_map.get(appt.order.sale_number)
-                # The order's own Total (Inc VAT) is the authoritative sale value
-                # (synced from WorkGuru and shown on the Financial Summary). Use it
-                # first so the calendar matches the sale page; only fall back to the
-                # Anthill value or the invoice estimate when the order has no total.
-                order_total = appt.order.total_value_inc_vat or Decimal('0')
-                if order_total > 0:
-                    if fin is None:
-                        fin = {
-                            'sale_value': order_total,
-                            'payments_total': Decimal('0'),
-                            'outstanding': order_total,
-                            'value_estimated': False,
-                            'anthill_sale_pk': None,
-                            'range_name': '', 'door_type': '', 'source': '',
-                            'contract_number': '', 'assigned_to_name': '',
-                            'discount': Decimal('0'),
-                        }
-                    else:
-                        fin = dict(fin)
-                        fin['sale_value'] = order_total
-                        fin['outstanding'] = order_total - fin['payments_total']
-                        fin['value_estimated'] = False
-                appt.fin = fin
-
-                # Linked purchase orders + their statuses for this order
-                _pos = []
-                _seen_po = set()
-                for _pp in appt.order.po_projects.select_related('purchase_order').all():
-                    _po = _pp.purchase_order
-                    if not _po or _po.workguru_id in _seen_po:
-                        continue
-                    _seen_po.add(_po.workguru_id)
-                    _pos.append({
-                        'number': _po.display_number or _po.number or str(_po.workguru_id),
-                        'status': (_po.status or 'Draft').strip(),
-                        'supplier': _po.supplier_name or '',
-                    })
-                appt.pos_json = json.dumps(_pos)
-
-    # Group appointments by date → fitter
-    # Multi-day appointments get their own spanning rows; single-day go into columns.
-    week_day_list = [week_start + timedelta(days=i) for i in range(6)]
-    week_dates_set = set(week_day_list)
-    day_index = {d: i for i, d in enumerate(week_day_list)}
-    fitter_codes = [code for code, name in FitAppointment.FITTER_CHOICES]
-    fitter_names = {code: name for code, name in FitAppointment.FITTER_CHOICES}
-    # Assign grid column positions to ALL appointments (unified flat layout)
-    fitter_appts = {}   # fitter_code -> [appt]  (flat list, each with grid_col)
-    for appt in appointments:
-        duration = getattr(appt, 'fit_duration', 1) or 1
-        fitter = appt.fitter or 'R'
-        appt.span_total = duration
-        appt.span_day = 1
-        if duration > 1:
-            start_date = appt.fit_date
-            end_date = appt.fit_date + timedelta(days=duration - 1)
-            if start_date not in week_dates_set and end_date not in week_dates_set:
-                continue
-            clamped_start = max(start_date, week_start)
-            clamped_end = min(end_date, week_end)
-            start_col = day_index.get(clamped_start, 0)
-            end_col = day_index.get(clamped_end, 5)
-            appt.grid_col_start = start_col + 1
-            appt.grid_col_end = end_col + 2
-            fitter_appts.setdefault(fitter, []).append(appt)
-        else:
-            if appt.fit_date not in week_dates_set:
-                continue
-            col = day_index[appt.fit_date]
-            appt.grid_col_start = col + 1
-            appt.grid_col_end = col + 2
-            fitter_appts.setdefault(fitter, []).append(appt)
-
-    # Build fitter swim-lane data — only include fitters who have appointments this week
-    fitter_lanes = []
-    for code in fitter_codes:
-        if code not in fitter_appts:
-            continue
-        lane_days = []
-        for d in week_day_list:
-            lane_days.append({
-                'date': d,
-                'is_today': d == today,
-                'date_str': d.strftime('%Y-%m-%d'),
-            })
-        fitter_lanes.append({
-            'code': code,
-            'name': fitter_names[code],
-            'appointments': fitter_appts.get(code, []),
-            'days': lane_days,
-        })
-
-    # PO expected deliveries this week (ordered but not received)
-    po_date_strings = [d.strftime('%Y-%m-%d') for d in week_day_list]
-    pending_pos = (
-        PurchaseOrder.objects
-        .filter(expected_date__in=po_date_strings)
-        .exclude(status__in=['Received', 'Cancelled'])
-        .prefetch_related('projects__order')
-        .order_by('expected_date', 'supplier_name')
-    )
-
-    pos_map = {}
-    for po in pending_pos:
-        try:
-            d = datetime.strptime(po.expected_date, '%Y-%m-%d').date()
-        except (ValueError, TypeError):
-            continue
-        pos_map.setdefault(d, []).append(po)
-
-    # Group POs by supplier per day so same-supplier deliveries share one card
-    pos_groups_map = {}
-    for d, pos_list in pos_map.items():
-        supplier_groups = {}
-        for po in pos_list:
-            sname = po.supplier_name or 'Unknown'
-            supplier_groups.setdefault(sname, []).append(po)
-        pos_groups_map[d] = [
-            {'supplier': sname, 'pos': plist}
-            for sname, plist in supplier_groups.items()
-        ]
-
-    # ── Sales appointments this week ──────────────────────────────
-    from .models import SalesAppointment
-    sales_appointments = (
-        SalesAppointment.objects
-        .filter(appointment_date__gte=week_start, appointment_date__lte=week_end)
-        .order_by('appointment_date', 'appointment_time')
-    )
-    sales_map = {}
-    for sa in sales_appointments:
-        sales_map.setdefault(sa.appointment_date, []).append(sa)
-
-    # Build template-friendly list: one dict per day (for headers, deliveries, sales)
-    week_data = []
-    for d in week_day_list:
-        week_data.append({
-            'date': d,
-            'is_today': d == today,
-            'date_str': d.strftime('%Y-%m-%d'),
-            'pos': pos_map.get(d, []),
-            'pos_groups': pos_groups_map.get(d, []),
-            'sales': sales_map.get(d, []),
-        })
-
-    # Get last Anthill sync timestamp
-    anthill_sync = SyncLog.objects.filter(script_name='anthill_fit_dates').first()
-    recent_syncs = list(
-        SyncLog.objects.filter(script_name='anthill_fit_dates')[:10]
-    )
-
-    # Outstanding balance summary — unique appointments only
-    total_sale_value = Decimal('0')
-    total_paid = Decimal('0')
-    total_outstanding = Decimal('0')
-    total_fits = 0
-    fits_with_balance = 0
-    for appt in appointments:
-        if appt.order and hasattr(appt, 'fin') and appt.fin:
-            total_fits += 1
-            total_sale_value += appt.fin['sale_value']
-            total_paid += appt.fin['payments_total']
-            outs = appt.fin['outstanding']
-            total_outstanding += outs
-            if outs > 0:
-                fits_with_balance += 1
-
-    context = {
-        'week_data': week_data,
-        'fitter_lanes': fitter_lanes,
-        'week_start': week_start,
-        'week_end': week_end,
-        'prev_week': prev_week,
-        'next_week': next_week,
-        'today': today,
-        'current_year': week_start.year,
-        'current_month': week_start.month,
-        'fitters': list(zip(fitter_codes, [fitter_names[c] for c in fitter_codes])),
-        'designers': Designer.objects.all().order_by('name'),
-        'last_anthill_sync': anthill_sync,
-        'recent_syncs': recent_syncs,
-        'total_sale_value': total_sale_value,
-        'total_paid': total_paid,
-        'total_outstanding': total_outstanding,
-        'total_fits': total_fits,
-        'fits_with_balance': fits_with_balance,
-    }
-
-    return render(request, 'stock_take/calendar_weekly.html', context)
 
 
 @login_required
@@ -16220,7 +15890,7 @@ def costing_report(request):
     today = date.today()
     all_orders = Order.objects.filter(
         Q(job_finished=True) | Q(fit_date__lte=today) | Q(fully_costed=True)
-    ).prefetch_related('timesheets').distinct()
+    ).select_related('designer').prefetch_related('timesheets', 'anthill_sale').distinct()
     
     # Calculate actual costs from timesheets for each order
     orders_with_costs = []
@@ -16254,6 +15924,12 @@ def costing_report(request):
         has_manufacturing = manufacturing_cost > 0
         is_fully_costed = order.fully_costed  # Use explicit checkbox instead of auto-detection
         
+        # Categorisation dimensions for profitability analysis
+        sale = next(iter(order.anthill_sale.all()), None)
+        designer_name = order.designer.name if order.designer else 'Unassigned'
+        range_name = (sale.range_name.strip() if sale and sale.range_name else '') or 'Unknown'
+        door_type = (sale.door_type.strip() if sale and sale.door_type else '') or 'Unknown'
+
         orders_with_costs.append({
             'order': order,
             'materials_cost': materials_cost,
@@ -16267,6 +15943,10 @@ def costing_report(request):
             'has_installation': has_installation,
             'has_manufacturing': has_manufacturing,
             'is_fully_costed': is_fully_costed,
+            'order_type': order.get_order_type_display(),
+            'designer_name': designer_name,
+            'range_name': range_name,
+            'door_type': door_type,
         })
     
     # Separate fully costed and partially costed
@@ -16391,10 +16071,125 @@ def costing_report(request):
     all_revenues = [float(o['revenue']) for o in orders_with_costs if float(o['revenue']) > 0]
     stats['avg_sale_value'] = sum(all_revenues) / len(all_revenues) if all_revenues else 0
 
+    # ============================================================
+    # Profitability analysis across ALL completed jobs.
+    # Mirrors the sale Financial Summary: where installation or
+    # manufacturing costs are not recorded, they are estimated at
+    # 10% / 5% of net revenue so every completed job can be analysed.
+    # ============================================================
+    analysis = []
+    for o in orders_with_costs:
+        revenue = float(o['revenue'])
+        if revenue <= 0:
+            continue
+        materials = float(o['materials_cost'])
+        installation = float(o['installation_cost'])
+        manufacturing = float(o['manufacturing_cost'])
+        estimated = False
+        if installation <= 0:
+            installation = revenue * 0.10
+            estimated = True
+        if manufacturing <= 0:
+            manufacturing = revenue * 0.05
+            estimated = True
+        a_total_cost = materials + installation + manufacturing
+        a_profit = revenue - a_total_cost
+        a_margin = (a_profit / revenue * 100) if revenue > 0 else 0
+        analysis.append({
+            'order': o['order'],
+            'revenue': revenue,
+            'materials': materials,
+            'installation': installation,
+            'manufacturing': manufacturing,
+            'total_cost': a_total_cost,
+            'profit': a_profit,
+            'margin': a_margin,
+            'estimated': estimated,
+            'order_type': o['order_type'],
+            'designer_name': o['designer_name'],
+            'range_name': o['range_name'],
+            'door_type': o['door_type'],
+        })
+
+    def _aggregate(items, key, with_jobs=False):
+        groups = {}
+        for it in items:
+            k = it.get(key) or 'Unknown'
+            g = groups.setdefault(k, {'label': k, 'count': 0, 'revenue': 0.0, 'profit': 0.0, 'cost': 0.0, 'jobs': []})
+            g['count'] += 1
+            g['revenue'] += it['revenue']
+            g['profit'] += it['profit']
+            g['cost'] += it['total_cost']
+            if with_jobs:
+                g['jobs'].append(it)
+        rows = []
+        for g in groups.values():
+            g['margin'] = (g['profit'] / g['revenue'] * 100) if g['revenue'] > 0 else 0
+            g['avg_profit'] = g['profit'] / g['count'] if g['count'] else 0
+            g['avg_revenue'] = g['revenue'] / g['count'] if g['count'] else 0
+            if with_jobs:
+                g['jobs'].sort(key=lambda j: j['margin'], reverse=True)
+            rows.append(g)
+        rows.sort(key=lambda r: r['margin'], reverse=True)
+        return rows
+
+    # Product range is explorable (each row expands to its individual sales)
+    range_breakdown = _aggregate(analysis, 'range_name', with_jobs=True)
+    breakdowns = [
+        {'key': 'door_type', 'title': 'Door Type', 'icon': 'bi-door-open', 'rows': _aggregate(analysis, 'door_type')},
+        {'key': 'designer_name', 'title': 'Designer', 'icon': 'bi-person-badge', 'rows': _aggregate(analysis, 'designer_name')},
+    ]
+
+    # Margin distribution buckets: Loss, <40%, then 10% bands up to 80%+
+    margin_distribution = [
+        {'label': 'Loss (<0%)', 'min': -1e9, 'max': 0, 'count': 0, 'cls': 'danger'},
+        {'label': '0\u201340%', 'min': 0, 'max': 40, 'count': 0, 'cls': 'warning'},
+        {'label': '40\u201350%', 'min': 40, 'max': 50, 'count': 0, 'cls': 'info'},
+        {'label': '50\u201360%', 'min': 50, 'max': 60, 'count': 0, 'cls': 'info'},
+        {'label': '60\u201370%', 'min': 60, 'max': 70, 'count': 0, 'cls': 'primary'},
+        {'label': '70\u201380%', 'min': 70, 'max': 80, 'count': 0, 'cls': 'success'},
+        {'label': '80%+', 'min': 80, 'max': 1e9, 'count': 0, 'cls': 'success'},
+    ]
+    for it in analysis:
+        m = it['margin']
+        for b in margin_distribution:
+            if b['min'] <= m < b['max']:
+                b['count'] += 1
+                break
+    max_bucket = max((b['count'] for b in margin_distribution), default=0) or 1
+    for b in margin_distribution:
+        b['pct'] = (b['count'] / len(analysis) * 100) if analysis else 0
+        b['bar'] = b['count'] / max_bucket * 100
+
+    # Top / bottom performers by margin
+    sorted_jobs = sorted(analysis, key=lambda x: x['margin'], reverse=True)
+    top_jobs = sorted_jobs[:5]
+    bottom_jobs = list(reversed(sorted_jobs[-5:])) if len(sorted_jobs) > 5 else []
+
+    # Full completed-jobs list for the "explore" modal (highest revenue first)
+    all_jobs = sorted(analysis, key=lambda x: x['revenue'], reverse=True)
+
+    analysis_stats = {
+        'count': len(analysis),
+        'total_revenue': sum(a['revenue'] for a in analysis),
+        'total_profit': sum(a['profit'] for a in analysis),
+        'estimated_count': sum(1 for a in analysis if a['estimated']),
+    }
+    analysis_stats['overall_margin'] = (
+        analysis_stats['total_profit'] / analysis_stats['total_revenue'] * 100
+    ) if analysis_stats['total_revenue'] > 0 else 0
+
     return render(request, 'stock_take/costing_report.html', {
         'fully_costed': fully_costed,
         'partially_costed': partially_costed,
         'stats': stats,
+        'range_breakdown': range_breakdown,
+        'breakdowns': breakdowns,
+        'margin_distribution': margin_distribution,
+        'top_jobs': top_jobs,
+        'bottom_jobs': bottom_jobs,
+        'all_jobs': all_jobs,
+        'analysis_stats': analysis_stats,
     })
 
 

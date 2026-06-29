@@ -158,9 +158,8 @@ def fitter_upload(request):
     return redirect('fitter_upload')
 
 
-@login_required
-def upload_staging(request):
-    """Authenticated review queue for fitter uploads."""
+def get_pending_submissions():
+    """Pending fitter uploads annotated with customer/order match suggestions."""
     pending = list(
         FitterUploadSubmission.objects.filter(status=FitterUploadSubmission.STATUS_PENDING)
         .prefetch_related('photos')
@@ -174,9 +173,7 @@ def upload_staging(request):
         if sub.sale_number:
             sub.order_match = Order.objects.select_related('customer').filter(sale_number__iexact=sub.sale_number).first()
 
-    return render(request, 'stock_take/upload_staging.html', {
-        'pending_submissions': pending,
-    })
+    return pending
 
 
 @login_required
@@ -185,7 +182,7 @@ def upload_staging_publish(request, submission_id):
     submission = get_object_or_404(FitterUploadSubmission, id=submission_id)
     if submission.status != FitterUploadSubmission.STATUS_PENDING:
         messages.warning(request, 'This submission has already been reviewed.')
-        return redirect('upload_staging')
+        return redirect('gallery')
 
     customer = None
     order = None
@@ -203,7 +200,7 @@ def upload_staging_publish(request, submission_id):
 
     if not customer:
         messages.error(request, 'Please choose a customer before publishing to gallery.')
-        return redirect('upload_staging')
+        return redirect('gallery')
 
     created = 0
     for photo in submission.photos.all():
@@ -234,7 +231,7 @@ def upload_staging_publish(request, submission_id):
     submission.save(update_fields=['status', 'linked_customer', 'linked_order', 'reviewed_by', 'reviewed_at'])
 
     messages.success(request, f'Published {created} photo(s) to Gallery.')
-    return redirect('upload_staging')
+    return redirect('gallery')
 
 
 @login_required
@@ -247,4 +244,4 @@ def upload_staging_reject(request, submission_id):
         submission.reviewed_at = timezone.now()
         submission.save(update_fields=['status', 'reviewed_by', 'reviewed_at'])
         messages.info(request, 'Submission rejected.')
-    return redirect('upload_staging')
+    return redirect('gallery')

@@ -3,7 +3,7 @@ Context processors for role-based access control.
 Adds user permissions and navigation visibility to every template context.
 """
 
-from .models import PAGE_SECTIONS, PAGE_CHOICES, Ticket, AnthillSale, OrderValidationRequest
+from .models import PAGE_SECTIONS, PAGE_CHOICES, Ticket, AnthillSale, OrderValidationRequest, Fitter
 from .permissions import get_user_permissions
 from django.core.cache import cache
 
@@ -21,6 +21,7 @@ def user_permissions(request):
             'nav_sections': [],
             'current_location': '',
             'available_locations': [],
+            'linked_fitter': None,
         }
 
     perms = get_user_permissions(request.user)
@@ -82,6 +83,12 @@ def user_permissions(request):
         ).count()
         cache.set(_val_cache_key, unread_validation_count, 60)
 
+    # Fitter linked to this account (drives the Schedule nav item)
+    try:
+        linked_fitter = Fitter.objects.filter(user=request.user).first()
+    except Exception:
+        linked_fitter = None
+
     return {
         'role_perms': perms,
         'user_role': role.name if role else None,
@@ -90,6 +97,7 @@ def user_permissions(request):
         'nav_sections': nav_sections,
         'current_location': current_location,
         'available_locations': available_locations,
+        'linked_fitter': linked_fitter,
         # Ticket counts for nav badges
         'open_ticket_count': nav_counts['open_ticket_count'],
         'unread_ticket_count': nav_counts['unread_ticket_count'],

@@ -53,10 +53,15 @@ def gallery(request):
 
     images = images.order_by('-uploaded_at')
 
+    # Pending fitter uploads are reviewed inline at the top of the gallery.
+    from .upload_views import get_pending_submissions
+    pending_submissions = get_pending_submissions()
+
     return render(request, 'stock_take/gallery.html', {
         'images': images,
         'search': search,
         'filter_type': filter_type,
+        'pending_submissions': pending_submissions,
     })
 
 

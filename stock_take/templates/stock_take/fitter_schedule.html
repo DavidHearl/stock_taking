@@ -1,0 +1,153 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Fitter Schedule - {{ block.super }}{% endblock %}
+
+{% block nav_schedule_active %}active{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="{% static 'css/fitter_schedule.css' %}">
+{% endblock %}
+
+{% block content %}
+<div class="schedule-wrap">
+
+    <div class="schedule-header">
+        <div class="schedule-title">
+            <h1>{% if is_admin %}Fitter Schedule{% else %}My Schedule{% endif %}</h1>
+            <span class="schedule-fitter">{{ fitter.name }}</span>
+        </div>
+        <span class="schedule-count">{{ appointment_count }} job{{ appointment_count|pluralize }}</span>
+    </div>
+
+    {% if is_admin and fitter_options %}
+    <form method="get" class="schedule-fitter-picker">
+        <input type="hidden" name="week" value="{{ week_offset }}">
+        <label for="fitterSelect"><i class="bi bi-person-badge"></i> Fitter</label>
+        <select name="fitter" id="fitterSelect" onchange="this.form.submit()">
+            {% for f in fitter_options %}
+            <option value="{{ f.id }}" {% if f.id == selected_fitter_id %}selected{% endif %}>{{ f.name }}</option>
+            {% endfor %}
+        </select>
+    </form>
+    {% endif %}
+
+    <div class="schedule-weeknav">
+        <a href="?week={{ prev_week }}{% if is_admin %}&fitter={{ selected_fitter_id }}{% endif %}" class="weeknav-btn" aria-label="Previous week">
+            <i class="bi bi-chevron-left"></i>
+        </a>
+        <div class="weeknav-label">
+            <span class="weeknav-range">{{ week_start|date:'d M' }} – {{ week_end|date:'d M Y' }}</span>
+            {% if not is_current_week %}
+            <a href="?week=0{% if is_admin %}&fitter={{ selected_fitter_id }}{% endif %}" class="weeknav-today">Back to this week</a>
+            {% else %}
+            <span class="weeknav-current">This week</span>
+            {% endif %}
+        </div>
+        <a href="?week={{ next_week }}{% if is_admin %}&fitter={{ selected_fitter_id }}{% endif %}" class="weeknav-btn" aria-label="Next week">
+            <i class="bi bi-chevron-right"></i>
+        </a>
+    </div>
+
+    <div class="schedule-list">
+        {% for day in days %}
+        <div class="day-card {% if day.is_today %}is-today{% endif %} {% if not day.appointments %}is-empty{% endif %}">
+        <div class="day-label {% if day.is_today %}is-today{% endif %}">
+            <span class="day-label-name">{{ day.date|date:'l' }}</span>
+            <span class="day-label-date">{{ day.date|date:'d M' }}{% if day.is_today %} · Today{% endif %}</span>
+        </div>
+
+        {% if day.appointments %}
+            {% for entry in day.appointments %}
+            <div class="job {% if entry.appt.is_fully_completed %}is-complete{% endif %} {% if entry.appt.is_provisional %}is-provisional{% endif %}">
+                <div class="job-top">
+                    <span class="job-name">{{ entry.appt.customer_name }}</span>
+                    {% if entry.appt.order %}
+                    <span class="job-sale">{{ entry.appt.order.sale_number }}</span>
+                    {% elif entry.appt.remedial %}
+                    <span class="job-sale">{{ entry.appt.remedial.remedial_number }}</span>
+                    {% endif %}
+                </div>
+
+                {% if entry.is_multi_day or entry.appt.is_provisional or entry.appt.is_fully_completed %}
+                <div class="job-tags">
+                    {% if entry.is_multi_day %}<span class="tag">Day {{ entry.day_index }} of {{ entry.total_days }}</span>{% endif %}
+                    {% if entry.appt.is_provisional %}<span class="tag is-provisional">Provisional</span>{% endif %}
+                    {% if entry.appt.is_fully_completed %}<span class="tag is-complete">Complete</span>{% endif %}
+                </div>
+                {% endif %}
+
+                {% if entry.address %}
+                <a class="job-line" href="https://www.google.com/maps/search/?api=1&query={{ entry.address|urlencode }}" target="_blank" rel="noopener">
+                    <i class="bi bi-geo-alt-fill"></i><span>{{ entry.address }}</span>
+                </a>
+                {% endif %}
+                {% if entry.phone %}
+                <a class="job-line" href="tel:{{ entry.phone }}">
+                    <i class="bi bi-telephone-fill"></i><span>{{ entry.phone }}</span>
+                </a>
+                {% endif %}
+
+                {% if entry.appt.notes %}
+                <div class="job-line job-line-note"><i class="bi bi-sticky"></i><span>{{ entry.appt.notes }}</span></div>
+                {% endif %}
+
+                {% if entry.order %}
+                <label class="job-upload">
+                    <i class="bi bi-camera-fill"></i><span>Upload Photos</span>
+                    <input type="file" accept="image/*" multiple onchange="uploadJobPhotos(this, {{ entry.order.id }})">
+                    <span class="job-upload-status" aria-live="polite"></span>
+                </label>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% else %}
+        <div class="day-none">No jobs</div>
+        {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+</div>
+
+<script>
+(function () {
+    const CSRF = '{{ csrf_token }}';
+
+    window.uploadJobPhotos = function (input, orderId) {
+        if (!input.files || !input.files.length) return;
+        const label = input.closest('.job-upload');
+        const status = label ? label.querySelector('.job-upload-status') : null;
+        if (label) label.classList.add('is-uploading');
+        if (status) { status.textContent = 'Uploading…'; status.className = 'job-upload-status is-busy'; }
+
+        const fd = new FormData();
+        for (const f of input.files) fd.append('images', f);
+        fd.append('order_id', orderId);
+
+        fetch("{% url 'gallery_upload' %}", {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF },
+            body: fd,
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (label) label.classList.remove('is-uploading');
+            if (data && data.success) {
+                const n = data.count || input.files.length;
+                if (status) { status.textContent = `${n} photo${n === 1 ? '' : 's'} uploaded`; status.className = 'job-upload-status is-ok'; }
+            } else {
+                if (status) { status.textContent = (data && data.error) || 'Upload failed'; status.className = 'job-upload-status is-err'; }
+            }
+            input.value = '';
+        })
+        .catch(() => {
+            if (label) label.classList.remove('is-uploading');
+            if (status) { status.textContent = 'Upload failed'; status.className = 'job-upload-status is-err'; }
+            input.value = '';
+        });
+    };
+})();
+</script>
+{% endblock %}
+
