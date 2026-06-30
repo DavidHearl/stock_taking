@@ -1541,6 +1541,39 @@ def sale_coversheet_save(request, pk):
 
 
 @login_required
+def sale_coversheet_set_fit_days(request, pk):
+    """Persist only the cover sheet ``fit_days`` value.
+
+    Lets the Sale Details card edit the fit duration without rewriting the whole
+    cover sheet, keeping it in sync with the cover sheet's Fit Days slider.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+
+    sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)
+    coversheet = _get_or_create_sale_coversheet(sale, request.user)
+
+    raw = (request.POST.get('fit_days') or '').strip()
+    if raw == '':
+        new_value = None
+    else:
+        try:
+            parsed = Decimal(raw)
+        except (InvalidOperation, TypeError):
+            return JsonResponse({'success': False, 'error': 'Invalid fit days value'}, status=400)
+        if parsed < Decimal('0.5') or parsed > Decimal('5.0'):
+            return JsonResponse({'success': False, 'error': 'Fit days must be between 0.5 and 5'}, status=400)
+        new_value = parsed.quantize(Decimal('0.1'))
+
+    if coversheet.fit_days != new_value:
+        coversheet.fit_days = new_value
+        coversheet.updated_by = request.user
+        coversheet.save(update_fields=['fit_days', 'updated_by', 'updated_at'])
+
+    return JsonResponse({'success': True, 'fit_days': str(new_value) if new_value is not None else ''})
+
+
+@login_required
 def sale_coversheet_pdf(request, pk):
     sale = get_object_or_404(AnthillSale.objects.select_related('customer', 'order'), pk=pk)
     coversheet = _get_or_create_sale_coversheet(sale, request.user)
@@ -2457,6 +2490,22 @@ def sale_detail(request, pk):
     _status = (sale.status or '').lower()
     context['hero_sale_badge_text'] = (sale.status or 'unknown').upper()
     context['hero_sale_badge_class'] = 'active' if _status in ('open', 'won') else ('danger' if _status in ('dead', 'cancelled') else 'inactive')
+
+    # Fitter + days required for the hero card. Days come from the cover sheet
+    # (the single source the calendar derives a job's duration from); the fitter
+    # comes from the linked fit appointment (the calendar's own assignment), so
+    # the sale detail, cover sheet and calendar always show the same values.
+    coversheet = context.get('coversheet')
+    context['hero_fit_days'] = coversheet.fit_days if coversheet else None
+    hero_fitter = ''
+    if sale.order:
+        appt = (
+            sale.order.fit_appointments.filter(fit_date=sale.order.fit_date).first()
+            or sale.order.fit_appointments.order_by('fit_date').first()
+        )
+        if appt:
+            hero_fitter = appt.get_fitter_display()
+    context['hero_fitter'] = hero_fitter
 
     return render(request, 'stock_take/sale_detail.html', context)
 

@@ -25,9 +25,9 @@
 
     <!-- ===== CUSTOMER HERO CARD ===== -->
     {% if sale.customer %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer.name hero_customer_pk=sale.customer.pk hero_phone=sale.customer.phone hero_email=sale.customer.email hero_address_1=sale.customer.address_1 hero_address_2=sale.customer.address_2 hero_city=sale.customer.city hero_postcode=sale.customer.postcode hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class hero_collapsible_details=True hero_fit_date=order.fit_date hero_value_paid=hero_value_paid hero_value_total=hero_value_total hero_next_step=order.workflow_progress.current_stage.name %}
+        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer.name hero_customer_pk=sale.customer.pk hero_phone=sale.customer.phone hero_email=sale.customer.email hero_address_1=sale.customer.address_1 hero_address_2=sale.customer.address_2 hero_city=sale.customer.city hero_postcode=sale.customer.postcode hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class hero_collapsible_details=True hero_fit_date=order.fit_date hero_value_paid=hero_value_paid hero_value_total=hero_value_total hero_next_step=order.workflow_progress.current_stage.name hero_fitter=hero_fitter hero_fit_days=hero_fit_days %}
     {% else %}
-        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer_name hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class hero_collapsible_details=True hero_fit_date=order.fit_date hero_value_paid=hero_value_paid hero_value_total=hero_value_total hero_next_step=order.workflow_progress.current_stage.name %}
+        {% include 'stock_take/partials/entity_hero_card.html' with hero_name=sale.customer_name hero_created_at=sale.created_at hero_updated_at=sale.updated_at hero_save_fn="saveSale()" hero_badge_text=hero_sale_badge_text hero_badge_class=hero_sale_badge_class hero_collapsible_details=True hero_fit_date=order.fit_date hero_value_paid=hero_value_paid hero_value_total=hero_value_total hero_next_step=order.workflow_progress.current_stage.name hero_fitter=hero_fitter hero_fit_days=hero_fit_days %}
     {% endif %}
 
     <!-- ===== TAB BAR ===== -->
@@ -65,7 +65,7 @@
                     <div class="card-body padded">
                         <div id="save-notification" class="save-notification" style="display:none;"></div>
                         <div class="info-display">
-                            {% include "stock_take/partials/sale_details_card_body.html" with sd_sale=sale sd_editable=True sd_order_editable=True %}
+                            {% include "stock_take/partials/sale_details_card_body.html" with sd_sale=sale sd_editable=True sd_order_editable=True sd_show_fit_team=True %}
                         </div>
                     </div>
                 </div>
@@ -1016,6 +1016,45 @@
                 }
             }
 
+            // ── Fit duration two-way sync (cover sheet slider ⇄ Sale Details) ──
+            function fitDurationLabel(v) {
+                const n = parseFloat(v);
+                if (isNaN(n)) return 'Not set';
+                return n + ' day' + (n === 1 ? '' : 's');
+            }
+
+            // Cover sheet slider → Sale Details display.
+            function mirrorFitDaysToSaleDetails(v) {
+                const txt = document.getElementById('sdFitDurationVal');
+                const sel = document.getElementById('sdFitDurationSelect');
+                const missing = isNaN(parseFloat(v));
+                if (txt) {
+                    txt.textContent = fitDurationLabel(v);
+                    txt.classList.toggle('field-value-missing', missing);
+                }
+                if (sel) sel.value = missing ? '' : String(parseFloat(v));
+            }
+
+            // Sale Details select → cover sheet slider.
+            function syncFitDaysFromSaleDetails() {
+                const sel = document.getElementById('sdFitDurationSelect');
+                if (!sel) return;
+                const slider = document.getElementById('id_fit_days');
+                if (slider && sel.value !== '') {
+                    slider.value = sel.value;
+                    updateFitDaysValue();
+                }
+            }
+
+            (function initFitDaysSync() {
+                const slider = document.getElementById('id_fit_days');
+                if (slider) {
+                    slider.addEventListener('input', function () {
+                        mirrorFitDaysToSaleDetails(slider.value);
+                    });
+                }
+            })();
+
             function toggleElectricsNotes() {
                 const check = document.getElementById('id_electrics_utilities_required');
                 const row = document.getElementById('electricsNotesRow');
@@ -1364,6 +1403,7 @@
             const SALE_SAVE_URL = "{% url 'sale_save' sale.pk %}";
             const SALE_ORDER_FIELDS_URL = "{% url 'sale_save_order_fields' sale.pk %}";
             const SALE_COMPLETE_URL = "{% url 'sale_complete' sale.pk %}";
+            const SALE_COVERSHEET_FIT_DAYS_URL = "{% url 'sale_coversheet_set_fit_days' sale.pk %}";
             const ORDER_ID = {% if order %}{{ order.id }}{% else %}null{% endif %};
             const INVOICE_DETAIL_URL = "{% url 'invoices_list' %}";
 
@@ -1433,6 +1473,18 @@
                         body: JSON.stringify(saleData),
                     })
                 ];
+
+                // Persist the cover sheet fit duration edited from the Sale Details card.
+                const fitDaysSel = document.getElementById('sdFitDurationSelect');
+                if (fitDaysSel && typeof SALE_COVERSHEET_FIT_DAYS_URL !== 'undefined') {
+                    const fd = new FormData();
+                    fd.append('fit_days', fitDaysSel.value);
+                    saves.push(fetch(SALE_COVERSHEET_FIT_DAYS_URL, {
+                        method: 'POST',
+                        headers: {'X-CSRFToken': CSRF_TOKEN},
+                        body: fd,
+                    }));
+                }
 
                 if (ORDER_ID) {
                     const orderData = {};
