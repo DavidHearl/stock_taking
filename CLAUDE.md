@@ -2,6 +2,10 @@
 
 Sliderobes Atlas — internal ops platform (Django 5.2). These are the standing rules for working on this codebase. Follow existing patterns over inventing new ones; this file documents what's already established so it stays consistent as the site grows.
 
+## Git workflow
+
+- **Push directly to `main`.** The dev environment runs against main, so all changes go there immediately so the user can review them live. Do not create feature branches or PRs unless explicitly asked.
+
 ## Running things
 
 ```bash
