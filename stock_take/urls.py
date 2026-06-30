@@ -424,7 +424,6 @@ urlpatterns = [
     path('stock-take/pnx-item/<int:pnx_item_id>/update/', views.update_pnx_item, name='update_pnx_item'),
     path('stock-take/update-pnx-dimensions/', views.update_pnx_dimensions, name='update_pnx_dimensions'),
     path('stock-take/add-board-item/', views.add_board_item, name='add_board_item'),
-    path('stock-take/boards-po/<int:boards_po_id>/reimport-pnx/', views.reimport_pnx, name='reimport_pnx'),
     path('stock-take/pnx-item/<int:pnx_item_id>/update-received/', views.update_pnx_received, name='update_pnx_received'),
     path('stock-take/update-pnx-batch/', views.update_pnx_batch, name='update_pnx_batch'),
     path('stock-take/update-os-doors-batch/', views.update_os_doors_batch, name='update_os_doors_batch'),
