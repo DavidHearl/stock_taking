@@ -80,8 +80,6 @@ URL_TO_PAGE = {
     'purchase_order_receive': 'purchase_order_details',
     'suppliers_list': 'suppliers',
     'supplier_detail': 'supplier_details',
-    'boards_summary': 'boards_summary',
-    'os_doors_summary': 'os_doors_summary',
     'material_shortage': 'material_shortage',
     'raumplus_storage': 'raumplus_storage',
 
