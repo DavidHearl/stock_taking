@@ -89,3 +89,4 @@ snake_case, descriptive, verb-led names (`backfill_invoice_price_history.py`, `c
 - Don't add per-view permission checks — that's the middleware's job.
 - Don't introduce a new frontend framework, ORM pattern, or base model class without flagging it as a deliberate architectural change first.
 - Don't keep appending to `views.py` or `purchase_order_views.py`.
+- Don't use an excessive ammount of icons/emojis.
