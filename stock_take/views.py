@@ -6771,10 +6771,15 @@ def update_sale_info(request, order_id):
             order.order_date = datetime.strptime(data['order_date'], '%Y-%m-%d').date()
         else:
             order.order_date = None
-        if data.get('fit_date'):
-            order.fit_date = datetime.strptime(data['fit_date'], '%Y-%m-%d').date()
-        else:
-            order.fit_date = None
+        fit_date_changed = False
+        new_fit_date = None
+        if 'fit_date' in data:
+            if data.get('fit_date'):
+                new_fit_date = datetime.strptime(data['fit_date'], '%Y-%m-%d').date()
+            else:
+                new_fit_date = None
+            fit_date_changed = order.fit_date != new_fit_date
+            order.fit_date = new_fit_date
         
         # Update total value inc VAT
         if data.get('total_value_inc_vat'):
@@ -6783,6 +6788,17 @@ def update_sale_info(request, order_id):
             order.total_value_exc_vat = order.total_value_inc_vat / Decimal('1.2')
         
         order.save()
+
+        # The sale-detail page is the source of truth for the fit date. Push any
+        # change straight to the linked calendar appointment(s) and AnthillSale so
+        # the calendar agrees immediately, instead of waiting for the lazy
+        # reconcile that only runs when the calendar is next rendered.
+        if fit_date_changed and new_fit_date is not None:
+            order.fit_appointments.exclude(fit_date=new_fit_date).update(fit_date=new_fit_date)
+            _anthill_sale = order.anthill_sale.first()
+            if _anthill_sale and _anthill_sale.fit_date != new_fit_date:
+                _anthill_sale.fit_date = new_fit_date
+                _anthill_sale.save(update_fields=['fit_date'])
         
         return JsonResponse({'success': True})
     except Exception as e:
@@ -12055,6 +12071,24 @@ def calendar_view(request):
     else:
         prev_month = datetime(current_year, current_month - 1, 1).date()
     
+    # Reconcile any FitAppointment whose date has drifted from its linked order.
+    # The order's fit_date is what the sale-detail page displays, so it is the
+    # source of truth for the calendar. Calendar drag/add paths keep the order and
+    # appointment in step, but non-calendar paths (order edit form, cover-sheet
+    # save, the nightly Anthill fit_date sync) update the order/sale without
+    # touching the existing appointment — leaving the calendar card and its detail
+    # modal showing a stale date. Snap them back to the order's fit_date here so the
+    # calendar and the sale detail always agree.
+    stale_appointments = (
+        FitAppointment.objects
+        .filter(order__isnull=False, order__fit_date__isnull=False, order__job_finished=False)
+        .exclude(fit_date=F('order__fit_date'))
+        .select_related('order')
+    )
+    for stale in stale_appointments:
+        stale.fit_date = stale.order.fit_date
+        stale.save(update_fields=['fit_date'])
+
     # Get all appointments for this month
     # Auto-create FitAppointment for orders with fit_date but no appointment
     orders_without_appt = (
@@ -12071,9 +12105,22 @@ def calendar_view(request):
             fitter='R',  # Default fitter
         )
 
+    # Visible grid range — the month grid shows leading/trailing days from the
+    # adjacent months to fill the first and last weeks. Load appointments across
+    # that whole range (not just the current month) so jobs dragged onto those
+    # adjacent-month cells still render in place.
+    grid_start = first_day - timedelta(days=first_day.weekday())  # Monday on/before 1st
+    last_day = next_month - timedelta(days=1)
+    grid_weeks = 0
+    for _w in range(6):
+        if grid_start + timedelta(days=7 * _w) > last_day:
+            break
+        grid_weeks += 1
+    grid_end = grid_start + timedelta(days=7 * grid_weeks - 1)
+
     appointments = list(FitAppointment.objects.filter(
-        fit_date__year=current_year,
-        fit_date__month=current_month
+        fit_date__gte=grid_start,
+        fit_date__lte=grid_end
     ).select_related('order', 'remedial').prefetch_related('order__po_projects__purchase_order'))
 
     # Attach payment info (sale value / paid / outstanding) from linked AnthillSale.
@@ -12263,8 +12310,6 @@ def calendar_view(request):
             lane_name_map[c] = _choice_names.get(c, c)
     fitter_color_map = {c: NEUTRAL_FITTER_COLOR for c in lane_codes}
 
-    grid_start = first_day - timedelta(days=first_day.weekday())  # Monday on/before 1st
-    last_day = next_month - timedelta(days=1)
     month_weeks = []
     for _w in range(6):
         wk_start = grid_start + timedelta(days=7 * _w)

@@ -499,6 +499,9 @@
             </dialog>
 
             <!-- Add Manual Payment Modal -->
+            {{ available_locations|json_script:"manualLocationsData" }}
+            {{ current_location|json_script:"manualCurrentLocationData" }}
+            {{ request.user.get_full_name|default:request.user.username|json_script:"manualCurrentUserData" }}
             <dialog id="addManualPaymentModal">
                 <div class="manual-modal-header">
                     <div class="manual-modal-title">
@@ -508,42 +511,10 @@
                     <button class="manual-modal-close" onclick="closeAddManualModal()"><i class="bi bi-x-lg"></i></button>
                 </div>
                 <div class="manual-modal-body">
-                    <div class="sale-modal-section">
-                        <label class="sale-modal-label">
-                            <i class="bi bi-clipboard"></i> Paste from Atlas (optional)
-                        </label>
-                        <textarea id="anthillPasteArea" rows="4"
-                            placeholder="Paste the payment table from Atlas here and click Parse..."
-                            class="sale-paste-textarea"></textarea>
-                        <div class="sale-modal-btn-row">
-                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="parseAnthillPaste()">
-                                <i class="bi bi-magic"></i> Parse
-                            </button>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearManualRows()">
-                                <i class="bi bi-x"></i> Clear rows
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="sale-modal-table-wrap">
-                        <table class="manual-entry-table">
-                            <thead>
-                                <tr>
-                                    <th>Type</th>
-                                    <th>Date</th>
-                                    <th>Location</th>
-                                    <th>User</th>
-                                    <th>Amount (£)</th>
-                                    <th>Status</th>
-                                    <th></th>
-                                </tr>
-                            </thead>
-                            <tbody id="manualEntryBody"></tbody>
-                        </table>
-                    </div>
+                    <div id="manualEntryBody" class="manual-pay-list"></div>
                     <div class="sale-modal-footer">
                         <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addManualRow()">
-                            <i class="bi bi-plus"></i> Add Row
+                            <i class="bi bi-plus"></i> Add Payment
                         </button>
                         <button type="button" class="btn btn-sm btn-success" id="saveManualBtn" onclick="saveManualPayments()" disabled>
                             <i class="bi bi-check-lg"></i> Save Payments
@@ -1131,106 +1102,103 @@
             });
 
             function addManualRow(data) {
-                const tbody = document.getElementById('manualEntryBody');
+                const wrap = document.getElementById('manualEntryBody');
                 const d = data || {};
-                const inputStyle = '';
-                const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td><input class="manual-input" type="text" placeholder="e.g. Deposit" value="${escHtml(d.type||'')}"></td>
-                    <td><input class="manual-input" type="text" placeholder="dd/mm/yy HH:MM" value="${escHtml(d.date||'')}"></td>
-                    <td><input class="manual-input" type="text" placeholder="Belfast" value="${escHtml(d.location||'')}"></td>
-                    <td><input class="manual-input" type="text" placeholder="User.Name" value="${escHtml(d.user||'')}"></td>
-                    <td><input class="manual-input" type="number" step="0.01" min="0" placeholder="0.00" value="${escHtml(d.amount||'')}"></td>
-                    <td><input class="manual-input" type="text" placeholder="Confirmed" value="${escHtml(d.status||'')}"></td>
-                    <td class="sale-manual-delete-cell"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove(); updateSaveBtn()"><i class="bi bi-trash"></i></button></td>
+                const card = document.createElement('div');
+                card.className = 'manual-pay-card';
+                card.innerHTML = `
+                    <div class="manual-pay-card-head">
+                        <span class="manual-pay-card-title"><i class="bi bi-cash"></i> Payment</span>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.manual-pay-card').remove(); updateSaveBtn()"><i class="bi bi-trash"></i></button>
+                    </div>
+                    <div class="manual-field-row">
+                        <label class="manual-field-label">Type</label>
+                        <input class="manual-input" data-field="type" type="text" placeholder="e.g. Deposit" value="${escHtml(d.type||'')}">
+                    </div>
+                    <div class="manual-field-row">
+                        <label class="manual-field-label">Date</label>
+                        <input class="manual-input" data-field="date" type="text" placeholder="dd/mm/yy HH:MM" value="${escHtml(d.date||'')}">
+                    </div>
+                    <div class="manual-field-row">
+                        <label class="manual-field-label">Location</label>
+                        <select class="manual-input" data-field="location">${buildManualLocationOptions(d.location)}</select>
+                    </div>
+                    <div class="manual-field-row">
+                        <label class="manual-field-label">User</label>
+                        <input class="manual-input" data-field="user" type="text" placeholder="User.Name" value="${escHtml(d.user||MANUAL_CURRENT_USER||'')}">
+                    </div>
+                    <div class="manual-field-row">
+                        <label class="manual-field-label">Amount (£)</label>
+                        <input class="manual-input" data-field="amount" type="number" step="0.01" min="0" placeholder="0.00" value="${escHtml(d.amount||'')}">
+                    </div>
+                    <div class="manual-field-row">
+                        <label class="manual-field-label">Status</label>
+                        <select class="manual-input" data-field="status">${buildManualStatusOptions(d.status)}</select>
+                    </div>
                 `;
-                tbody.appendChild(tr);
-                tr.querySelectorAll('.manual-input').forEach(el => el.addEventListener('input', updateSaveBtn));
+                wrap.appendChild(card);
+                card.querySelectorAll('.manual-input').forEach(el => {
+                    el.addEventListener('input', updateSaveBtn);
+                    el.addEventListener('change', updateSaveBtn);
+                });
                 updateSaveBtn();
+            }
+
+            const MANUAL_LOCATIONS = JSON.parse(document.getElementById('manualLocationsData')?.textContent || '[]');
+            const MANUAL_CURRENT_LOCATION = JSON.parse(document.getElementById('manualCurrentLocationData')?.textContent || '""');
+            const MANUAL_CURRENT_USER = JSON.parse(document.getElementById('manualCurrentUserData')?.textContent || '""');
+            const MANUAL_STATUSES = ['Confirmed', 'Pending', 'Unconfirmed'];
+
+            function buildManualLocationOptions(selected) {
+                const sel = (selected || MANUAL_CURRENT_LOCATION || '');
+                let opts = '<option value="">— Select location —</option>';
+                MANUAL_LOCATIONS.forEach(loc => {
+                    const isSel = String(loc).toLowerCase() === String(sel).toLowerCase() ? ' selected' : '';
+                    opts += `<option value="${escHtml(loc)}"${isSel}>${escHtml(loc)}</option>`;
+                });
+                if (sel && !MANUAL_LOCATIONS.some(l => String(l).toLowerCase() === String(sel).toLowerCase())) {
+                    opts += `<option value="${escHtml(sel)}" selected>${escHtml(sel)}</option>`;
+                }
+                return opts;
+            }
+
+            function buildManualStatusOptions(selected) {
+                const sel = (selected || 'Confirmed');
+                let opts = '';
+                MANUAL_STATUSES.forEach(s => {
+                    const isSel = s.toLowerCase() === String(sel).toLowerCase() ? ' selected' : '';
+                    opts += `<option value="${escHtml(s)}"${isSel}>${escHtml(s)}</option>`;
+                });
+                if (sel && !MANUAL_STATUSES.some(s => s.toLowerCase() === String(sel).toLowerCase())) {
+                    opts += `<option value="${escHtml(sel)}" selected>${escHtml(sel)}</option>`;
+                }
+                return opts;
             }
 
             function escHtml(str) {
                 return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g, '&#39;');
             }
 
-            function clearManualRows() {
-                document.getElementById('manualEntryBody').innerHTML = '';
-                document.getElementById('anthillPasteArea').value = '';
-                updateSaveBtn();
-            }
-
             function updateSaveBtn() {
-                const rows = document.querySelectorAll('#manualEntryBody tr');
-                document.getElementById('saveManualBtn').disabled = rows.length === 0;
-            }
-
-            function parseAnthillPaste() {
-                const raw = document.getElementById('anthillPasteArea').value;
-                const payments = [];
-                const lines = raw.split('\n');
-
-                let i = 0;
-                while (i < lines.length) {
-                    const line = lines[i].trim();
-                    i++;
-                    if (!line) continue;
-
-                    const parts = line.split('\t').map(s => s.trim()).filter(s => s);
-                    if (!parts.length) continue;
-
-                    // Skip header row
-                    if (parts[0].toLowerCase() === 'type') continue;
-
-                    // Skip action lines (edit/delete/receipt etc.)
-                    const actionWords = ['edit', 'delete', 'receipt', 'unconfirm', 'confirm', 'view'];
-                    if (parts.every(p => actionWords.includes(p.toLowerCase()))) continue;
-                    if (parts.some(p => actionWords.includes(p.toLowerCase())) && parts.length <= 6) continue;
-
-                    // Check if it has an amount (£X.XX)
-                    const amountPart = parts.find(p => /^£[\d,]+(\.\d+)?$/.test(p));
-                    if (!amountPart) {
-                        // Could be a status line (e.g. "Confirmed") for the previous payment
-                        if (payments.length > 0 && !payments[payments.length - 1].status && parts.length === 1) {
-                            payments[payments.length - 1].status = parts[0];
-                        }
-                        continue;
-                    }
-
-                    // Find the date field
-                    const dateIdx = parts.findIndex(p => /^\d{2}\/\d{2}\/\d{2,4}/.test(p));
-                    if (dateIdx < 0) continue;
-
-                    const type = parts.slice(0, dateIdx).join(' ');
-                    const date = parts[dateIdx];
-                    const location = parts[dateIdx + 1] || '';
-                    const user = parts[dateIdx + 2] || '';
-                    const amount = amountPart.replace(/[£,]/g, '');
-
-                    payments.push({ type, date, location, user, amount, status: '' });
-                }
-
-                if (!payments.length) {
-                    document.getElementById('manualSaveMsg').style.color = 'var(--text-secondary)';
-                    document.getElementById('manualSaveMsg').textContent = 'No payments found in pasted text.';
-                    return;
-                }
-                document.getElementById('manualSaveMsg').textContent = '';
-                document.getElementById('manualEntryBody').innerHTML = '';
-                payments.forEach(p => addManualRow(p));
+                const cards = document.querySelectorAll('#manualEntryBody .manual-pay-card');
+                document.getElementById('saveManualBtn').disabled = cards.length === 0;
             }
 
             function saveManualPayments() {
-                const rows = document.querySelectorAll('#manualEntryBody tr');
+                const cards = document.querySelectorAll('#manualEntryBody .manual-pay-card');
                 const payments = [];
-                rows.forEach(tr => {
-                    const inputs = tr.querySelectorAll('input');
+                cards.forEach(card => {
+                    const get = (f) => {
+                        const el = card.querySelector(`[data-field="${f}"]`);
+                        return el ? el.value.trim() : '';
+                    };
                     payments.push({
-                        type: inputs[0].value.trim(),
-                        date: inputs[1].value.trim(),
-                        location: inputs[2].value.trim(),
-                        user: inputs[3].value.trim(),
-                        amount: inputs[4].value.trim(),
-                        status: inputs[5].value.trim(),
+                        type: get('type'),
+                        date: get('date'),
+                        location: get('location'),
+                        user: get('user'),
+                        amount: get('amount'),
+                        status: get('status'),
                     });
                 });
 
