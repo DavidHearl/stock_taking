@@ -2061,6 +2061,120 @@ def _build_customer_payment_pool(current_sale):
     }
 
 
+def _orders_financials(orders):
+    """Single source of truth for per-order fit financials.
+
+    Shared by the fit calendar and the weekly operations report so the two can
+    never disagree. Given an iterable of ``Order`` objects, returns a dict keyed
+    by ``order.sale_number`` whose values are::
+
+        {'sale_value': effective (post-discount) value,
+         'payments_total': amount paid,
+         'outstanding': balance still owed,
+         'value_estimated': bool}
+
+    The figures are derived exactly the way the sale-detail page is: the stored
+    ``AnthillSale.balance_payable`` when it is reliable, otherwise the live
+    customer payment pool (which handles cross-sale credits), otherwise the
+    order's own inc-VAT total. ``None`` is returned for an order with no value.
+    """
+    orders = [o for o in orders if o is not None]
+    result = {}
+    if not orders:
+        return result
+
+    sale_numbers = [o.sale_number for o in orders if o.sale_number]
+
+    # Stored Anthill figures, keyed by sale number. Keep the highest-value row
+    # when several sale records share an Anthill order id so a populated value
+    # isn't clobbered by a zero.
+    _fin_map = {}
+    if sale_numbers:
+        for row in (AnthillSale.objects
+                    .filter(anthill_activity_id__in=sale_numbers)
+                    .values('anthill_activity_id', 'sale_value', 'discount',
+                            'balance_payable', 'paid_in_full')):
+            key = row['anthill_activity_id']
+            sv = row['sale_value'] or Decimal('0')
+            existing = _fin_map.get(key)
+            if existing is not None and sv <= existing['sale_value']:
+                continue
+            _fin_map[key] = {
+                'sale_value': sv,
+                'discount': row['discount'] or Decimal('0'),
+                'balance_payable': row['balance_payable'],
+                'paid_in_full': row['paid_in_full'],
+            }
+
+    # When a sale's stored value is missing/zero its balance was computed against
+    # zero and is unreliable — recompute via the customer payment pool instead.
+    _unreliable_nums = {
+        o.sale_number for o in orders
+        if o.sale_number and (
+            _fin_map.get(o.sale_number) is None
+            or _fin_map[o.sale_number]['sale_value'] <= 0
+        )
+    }
+    _pool_fin = {}
+    if _unreliable_nums:
+        _pool_cache = {}
+        for _s in (AnthillSale.objects
+                   .filter(anthill_activity_id__in=_unreliable_nums)
+                   .select_related('customer', 'order')):
+            if not _s.customer_id:
+                continue
+            if _s.customer_id not in _pool_cache:
+                _pool_cache[_s.customer_id] = _build_customer_payment_pool(_s) or False
+            pool = _pool_cache[_s.customer_id]
+            if not pool:
+                continue
+            for e in pool['entries']:
+                aid = e['sale'].anthill_activity_id
+                if aid and e['effective_value'] > 0:
+                    _pool_fin[aid] = {
+                        'effective_value': e['effective_value'],
+                        'outstanding': e['outstanding'],
+                    }
+
+    for o in orders:
+        sn = o.sale_number
+        order_total = o.total_value_inc_vat or Decimal('0')
+
+        pooled = _pool_fin.get(sn)
+        if pooled is not None:
+            result[sn] = {
+                'sale_value': pooled['effective_value'],
+                'payments_total': pooled['effective_value'] - pooled['outstanding'],
+                'outstanding': pooled['outstanding'],
+                'value_estimated': False,
+            }
+            continue
+
+        row = _fin_map.get(sn)
+        if row is None:
+            result[sn] = {
+                'sale_value': order_total,
+                'payments_total': Decimal('0'),
+                'outstanding': order_total,
+                'value_estimated': False,
+            } if order_total > 0 else None
+            continue
+
+        base_value = row['sale_value'] or order_total
+        effective_value = base_value - row['discount']
+        balance = row['balance_payable']
+        outstanding = effective_value if balance is None else balance
+        paid = effective_value - outstanding
+        result[sn] = {
+            'sale_value': effective_value,
+            'payments_total': paid,
+            'outstanding': outstanding,
+            'value_estimated': base_value <= 0,
+        }
+
+    return result
+
+
 @login_required
 def sale_create_order(request, pk):
     """Create a new Order pre-filled from an AnthillSale, link it, then redirect to the order tab."""

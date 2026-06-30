@@ -1262,71 +1262,12 @@ def dashboard_weekly_summary(request):
     next_week_start = this_week_start + timedelta(days=7)
     next_week_end   = next_week_start + timedelta(days=6)
 
-    # Per-sale total of linked (non-ignored) payments — reused throughout.
-    payments_subquery = Subquery(
-        AnthillPayment.objects.filter(sale=OuterRef('pk'), ignored=False)
-        .values('sale').annotate(total=Sum('amount')).values('total'),
-        output_field=DecimalField(max_digits=14, decimal_places=2),
-    )
-
-    # ── Xero sync ─────────────────────────────────────────────────────────────
-    # Before computing payment figures, pull the latest payments from Xero for
-    # every job fitting in the 3-week window and link any that aren't recorded
-    # yet, so the report's payment data is accurate. No-ops if Xero is offline.
-    xero_sync_qs = (AnthillSale.objects
-                    .filter(fit_date__gte=last_week_start, fit_date__lte=next_week_end, sale_value__gt=0)
-                    .exclude(status__in=['cancelled', 'dead'])
-                    .annotate(total_paid=Coalesce(
-                        payments_subquery, Value(Decimal('0')),
-                        output_field=DecimalField(max_digits=14, decimal_places=2))))
-    if contract_prefix:
-        xero_sync_qs = xero_sync_qs.filter(contract_number__istartswith=contract_prefix)
-    sales_to_sync = [
-        s for s in xero_sync_qs
-        if s.contract_number and (
-            ((s.sale_value or Decimal('0')) - 2 * (s.discount or Decimal('0')) - (s.total_paid or Decimal('0')))
-            >= Decimal('1')
-        )
-    ]
-    payments_linked = _sync_xero_payments_for_sales(sales_to_sync)
-
-    def _week_sales(start, end):
-        qs = (AnthillSale.objects
-              .filter(fit_date__gte=start, fit_date__lte=end, sale_value__gt=0)
-              .exclude(status__in=['cancelled', 'dead'])
-              .annotate(total_paid=Coalesce(
-                  payments_subquery, Value(Decimal('0')),
-                  output_field=DecimalField(max_digits=14, decimal_places=2))))
-        if contract_prefix:
-            qs = qs.filter(contract_number__istartswith=contract_prefix)
-        total = Decimal('0')
-        collected = Decimal('0')
-        outstanding = Decimal('0')
-        count = 0
-        for row in qs.values('sale_value', 'discount', 'total_paid'):
-            count += 1
-            sv = row['sale_value'] or Decimal('0')
-            net = max(sv - 2 * (row['discount'] or Decimal('0')), Decimal('0'))
-            paid = min(row['total_paid'] or Decimal('0'), net)
-            total += sv
-            collected += paid
-            outstanding += (net - paid)
-        return {
-            'total': float(total),
-            'count': count,
-            'collected': float(collected),
-            'outstanding': float(outstanding),
-        }
-
-    last_week_sales = _week_sales(last_week_start, last_week_end)
-    this_week_sales = _week_sales(this_week_start, this_week_end)
-    next_week_sales = _week_sales(next_week_start, next_week_end)
-
-    # Helper: map order ids -> comma-joined fitter display names (handles multi-fitter jobs)
     from .models import FitAppointment as _FitAppointment
+    from .customer_views import _orders_financials
     _fitter_name_map = dict(_FitAppointment.FITTER_CHOICES)
 
     def _fitters_for_orders(order_ids):
+        """Map order ids -> comma-joined fitter display names (multi-fitter jobs)."""
         result = {}
         if not order_ids:
             return result
@@ -1339,52 +1280,160 @@ def dashboard_weekly_summary(request):
                 names.append(name)
         return {oid: ', '.join(v) for oid, v in result.items()}
 
-    # Per-day breakdown for this week
+    # ── Source of truth: the fit calendar ────────────────────────────────────
+    # Every fit in the report comes from a FitAppointment (the calendar) — NOT
+    # from Order.fit_date / AnthillSale.fit_date, which can drift. One job == one
+    # order; multi-fitter / multi-day appointments collapse to a single job, so
+    # nothing is ever double-counted.
+    window_appts = (_FitAppointment.objects
+                    .filter(fit_date__gte=last_week_start, fit_date__lte=next_week_end,
+                            order__isnull=False)
+                    .select_related('order'))
+    jobs_by_order = {}
+    for appt in window_appts:
+        order = appt.order
+        if not order:
+            continue
+        rec = jobs_by_order.get(order.id)
+        fitter_name = _fitter_name_map.get(appt.fitter, appt.fitter)
+        if rec is None:
+            jobs_by_order[order.id] = {
+                'order': order,
+                'fit_date': appt.fit_date,
+                'fitters': [fitter_name] if fitter_name else [],
+            }
+        else:
+            if appt.fit_date < rec['fit_date']:
+                rec['fit_date'] = appt.fit_date
+            if fitter_name and fitter_name not in rec['fitters']:
+                rec['fitters'].append(fitter_name)
+
+    # Contract numbers (for the location filter + the table "Contract" column),
+    # keyed by the order's Anthill sale number.
+    _job_sale_numbers = [r['order'].sale_number for r in jobs_by_order.values() if r['order'].sale_number]
+    contract_by_sale = {}
+    if _job_sale_numbers:
+        for row in (AnthillSale.objects
+                    .filter(anthill_activity_id__in=_job_sale_numbers)
+                    .values('anthill_activity_id', 'contract_number')):
+            cn = row['contract_number'] or ''
+            if row['anthill_activity_id'] not in contract_by_sale or cn:
+                contract_by_sale[row['anthill_activity_id']] = cn
+
+    # Location scoping: keep only jobs whose linked Anthill contract matches the
+    # selected location's prefix (when one is configured).
+    if contract_prefix:
+        _pref = contract_prefix.upper()
+        jobs_by_order = {
+            oid: rec for oid, rec in jobs_by_order.items()
+            if (contract_by_sale.get(rec['order'].sale_number, '') or '').upper().startswith(_pref)
+        }
+
+    # ── Xero sync for the visible jobs ───────────────────────────────────────
+    # Pull the latest Xero payments for the jobs on the calendar and link any not
+    # yet recorded, so balances are fresh before we read them. _sync_xero_…
+    # recalculates each affected customer's stored balance. No-op if Xero offline.
+    _sales_to_sync = [
+        s for s in (AnthillSale.objects
+                    .filter(order_id__in=jobs_by_order.keys(), sale_value__gt=0)
+                    .exclude(status__in=['cancelled', 'dead']))
+        if (s.balance_payable is None or s.balance_payable >= Decimal('1'))
+    ]
+    payments_linked = _sync_xero_payments_for_sales(_sales_to_sync) if _sales_to_sync else 0
+
+    # ── Per-job financials (single source of truth, identical to the calendar) ─
+    _job_orders = [r['order'] for r in jobs_by_order.values()]
+    fin_by_sale = _orders_financials(_job_orders)
+
+    remedial_order_ids = set(
+        Remedial.objects
+        .filter(original_order_id__in=jobs_by_order.keys())
+        .values_list('original_order_id', flat=True)
+    ) if jobs_by_order else set()
+
+    def _week_of(d):
+        if d < this_week_start:
+            return 'last'
+        if d <= this_week_end:
+            return 'this'
+        return 'next'
+
+    jobs = []
+    for oid, rec in jobs_by_order.items():
+        order = rec['order']
+        fin = fin_by_sale.get(order.sale_number) if order.sale_number else None
+        if fin:
+            value = float(fin['sale_value'] or 0)
+            owed = max(float(fin['outstanding'] or 0), 0.0)
+            paid = min(max(float(fin['payments_total'] or 0), 0.0), value)
+        else:
+            value = float(order.total_value_inc_vat or 0)
+            owed = value
+            paid = 0.0
+        if owed < 10:
+            pay_key, pay_label = 'paid', 'Paid in Full'
+        elif paid >= 10:
+            pay_key, pay_label = 'part', 'Part Paid'
+        else:
+            pay_key, pay_label = 'unpaid', 'Unpaid'
+        jobs.append({
+            'order_id':    oid,
+            'order':       order,
+            'customer':    order.customer_name or '-',
+            'contract':    contract_by_sale.get(order.sale_number, '') or (order.sale_number or '-'),
+            'date':        rec['fit_date'],
+            'week':        _week_of(rec['fit_date']),
+            'fitter':      ', '.join(rec['fitters']) or '-',
+            'value':       value,
+            'paid':        paid,
+            'outstanding': owed,
+            'remedial':    oid in remedial_order_ids,
+            'pay_key':     pay_key,
+            'pay_label':   pay_label,
+        })
+    jobs.sort(key=lambda j: j['date'])
+
+    def _week_summary(week_key):
+        total = collected = outstanding = 0.0
+        count = 0
+        for j in jobs:
+            if j['week'] != week_key:
+                continue
+            count += 1
+            total += j['value']
+            collected += j['paid']
+            outstanding += j['outstanding']
+        return {'total': total, 'count': count, 'collected': collected, 'outstanding': outstanding}
+
+    last_week_sales = _week_summary('last')
+    this_week_sales = _week_summary('this')
+    next_week_sales = _week_summary('next')
+
+    # Per-day breakdown (this week + last week), bucketed from the same jobs.
     day_labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
     day_sales = {
-        i: {
-            'label': day_labels[i],
+        i: {'label': day_labels[i],
             'date': (this_week_start + timedelta(days=i)).strftime('%d %b'),
-            'total': 0.0,
-            'count': 0,
-            'jobs': [],
-        }
+            'total': 0.0, 'count': 0, 'jobs': []}
         for i in range(7)
     }
-    # Per-day breakdown for this week — sourced from Orders (the scheduled fits)
-    # so the chart matches the Materials Readiness table below it.
-    this_week_order_qs = (Order.objects
-                          .filter(fit_date__gte=this_week_start, fit_date__lte=this_week_end)
-                          .order_by('fit_date'))
-    for o in this_week_order_qs.values('fit_date', 'total_value_inc_vat',
-                                       'sale_number', 'first_name', 'last_name'):
-        idx = o['fit_date'].weekday()
-        val = float(o['total_value_inc_vat'] or 0)
-        day_sales[idx]['total'] += val
-        day_sales[idx]['count'] += 1
-        day_sales[idx]['jobs'].append({
-            'customer': (f"{o['first_name'] or ''} {o['last_name'] or ''}").strip() or '-',
-            'contract': o['sale_number'] or '-',
-            'value': val,
-        })
-
-    # Per-day breakdown for last week
     last_day_sales = {
-        i: {
-            'label': day_labels[i],
+        i: {'label': day_labels[i],
             'date': (last_week_start + timedelta(days=i)).strftime('%d %b'),
-            'total': 0.0,
-            'count': 0,
-        }
+            'total': 0.0, 'count': 0}
         for i in range(7)
     }
-    last_week_day_qs = (Order.objects
-                        .filter(fit_date__gte=last_week_start, fit_date__lte=last_week_end)
-                        .order_by('fit_date'))
-    for o in last_week_day_qs.values('fit_date', 'total_value_inc_vat'):
-        idx = o['fit_date'].weekday()
-        last_day_sales[idx]['total'] += float(o['total_value_inc_vat'] or 0)
-        last_day_sales[idx]['count'] += 1
+    for j in jobs:
+        idx = j['date'].weekday()
+        if j['week'] == 'this':
+            day_sales[idx]['total'] += j['value']
+            day_sales[idx]['count'] += 1
+            day_sales[idx]['jobs'].append({
+                'customer': j['customer'], 'contract': j['contract'], 'value': j['value'],
+            })
+        elif j['week'] == 'last':
+            last_day_sales[idx]['total'] += j['value']
+            last_day_sales[idx]['count'] += 1
 
     # ── Stock ─────────────────────────────────────────────────────────────────
     stock_items_qs = StockItem.objects.filter(tracking_type__in=['stock', 'non-stock'], quantity__gt=0)
@@ -1402,25 +1451,27 @@ def dashboard_weekly_summary(request):
                       .count())
 
     # ── Outstanding payments ──────────────────────────────────────────────────
+    # Bulletproof: read the stored balance_payable — the SAME figure the sale
+    # page and calendar persist (it accounts for cross-sale credits). Never
+    # re-derive sale_value − payments here, which ignored credits and was wrong.
     outstanding_qs = (AnthillSale.objects
                       .filter(sale_value__gt=0)
-                      .exclude(status='cancelled')
-                      .annotate(total_paid=Coalesce(
-                          payments_subquery, Value(Decimal('0')),
-                          output_field=DecimalField(max_digits=14, decimal_places=2))))
+                      .exclude(status='cancelled'))
     if contract_prefix:
         outstanding_qs = outstanding_qs.filter(contract_number__istartswith=contract_prefix)
     total_outstanding = Decimal('0')
     outstanding_count = 0
     top_debtors_all = []
     for row in outstanding_qs.values('order_id', 'customer_name', 'contract_number', 'fit_date',
-                                     'sale_value', 'discount', 'total_paid'):
-        owed = max(
-            (row['sale_value'] or Decimal('0'))
-            - 2 * (row['discount'] or Decimal('0'))
-            - (row['total_paid'] or Decimal('0')),
-            Decimal('0'),
-        )
+                                     'sale_value', 'discount', 'balance_payable', 'paid_in_full'):
+        if row['paid_in_full']:
+            owed = Decimal('0')
+        elif row['balance_payable'] is not None:
+            owed = max(row['balance_payable'], Decimal('0'))
+        else:
+            # No stored balance yet — treat the effective (post-discount) value
+            # as fully outstanding rather than guessing from payment sums.
+            owed = max((row['sale_value'] or Decimal('0')) - (row['discount'] or Decimal('0')), Decimal('0'))
         if owed >= Decimal('10'):
             total_outstanding += owed
             outstanding_count += 1
@@ -1429,7 +1480,7 @@ def dashboard_weekly_summary(request):
                 'customer':    row['customer_name'] or '-',
                 'contract':    row['contract_number'] or '-',
                 'fit_date':    row['fit_date'].strftime('%d %b %Y') if row['fit_date'] else 'TBC',
-                'sale_value':  float(row['sale_value'] or 0),
+                'sale_value':  float((row['sale_value'] or Decimal('0')) - (row['discount'] or Decimal('0'))),
                 'outstanding': float(owed),
             })
     top_debtors = sorted(top_debtors_all, key=lambda x: x['outstanding'], reverse=True)[:10]
@@ -1438,34 +1489,21 @@ def dashboard_weekly_summary(request):
     for d in top_debtors:
         d['fitter'] = _debtor_fitters.get(d['order_id'], '-') or '-'
 
-    # Collections due this week (jobs fitting this week with a remaining balance)
-    this_week_collect_qs = (AnthillSale.objects
-                            .filter(fit_date__gte=this_week_start, fit_date__lte=this_week_end, sale_value__gt=0)
-                            .exclude(status__in=['cancelled', 'dead'])
-                            .annotate(total_paid=Coalesce(
-                                payments_subquery, Value(Decimal('0')),
-                                output_field=DecimalField(max_digits=14, decimal_places=2))))
-    if contract_prefix:
-        this_week_collect_qs = this_week_collect_qs.filter(contract_number__istartswith=contract_prefix)
+    # Collections due this week (jobs fitting this week with a remaining balance),
+    # sourced from the same calendar-driven job list as everything else.
     this_week_outstanding = Decimal('0')
     this_week_collections = []
-    for s in this_week_collect_qs.values('customer_name', 'contract_number', 'fit_date',
-                                         'sale_value', 'discount', 'total_paid'):
-        owed = max(
-            (s['sale_value'] or Decimal('0'))
-            - 2 * (s['discount'] or Decimal('0'))
-            - (s['total_paid'] or Decimal('0')),
-            Decimal('0'),
-        )
-        if owed >= Decimal('1'):
-            this_week_outstanding += owed
-            this_week_collections.append({
-                'customer':   s['customer_name'] or '-',
-                'contract':   s['contract_number'] or '-',
-                'fit_date':   s['fit_date'].strftime('%a %d %b') if s['fit_date'] else '',
-                'sale_value': float(s['sale_value'] or 0),
-                'outstanding': float(owed),
-            })
+    for j in jobs:
+        if j['week'] != 'this' or j['outstanding'] < 1:
+            continue
+        this_week_outstanding += Decimal(str(j['outstanding']))
+        this_week_collections.append({
+            'customer':    j['customer'],
+            'contract':    j['contract'],
+            'fit_date':    j['date'].strftime('%a %d %b'),
+            'sale_value':  j['value'],
+            'outstanding': j['outstanding'],
+        })
 
     # ── Purchase orders ───────────────────────────────────────────────────────
     pending_qs = PurchaseOrder.objects.filter(status__in=['Approved', 'Ordered', 'Sent'])
@@ -1506,51 +1544,22 @@ def dashboard_weekly_summary(request):
             recv_total += (po['total'] or Decimal('0'))
     po_status_breakdown.append({'status': 'Received', 'count': recv_count, 'total': float(recv_total)})
 
-    # ── Shared per-order lookups (fitter, remedial flag, money due) ───────────
-    window_order_ids = set(
-        AnthillSale.objects
-        .filter(fit_date__gte=last_week_start, fit_date__lte=next_week_end, order__isnull=False)
-        .values_list('order_id', flat=True)
-    )
-    window_order_ids |= set(
-        Order.objects
-        .filter(fit_date__gte=this_week_start, fit_date__lte=next_week_end)
-        .values_list('id', flat=True)
-    )
-
-    fitter_by_order = _fitters_for_orders(window_order_ids)
-
-    remedial_order_ids = set()
-    if window_order_ids:
-        remedial_order_ids = set(
-            Remedial.objects
-            .filter(original_order_id__in=window_order_ids)
-            .values_list('original_order_id', flat=True)
-        )
-
-    # Outstanding balance per linked order (for the "money due" columns)
-    money_qs = (AnthillSale.objects
-                .filter(fit_date__gte=last_week_start, fit_date__lte=next_week_end,
-                        sale_value__gt=0, order__isnull=False)
-                .exclude(status__in=['cancelled', 'dead'])
-                .annotate(total_paid=Coalesce(
-                    payments_subquery, Value(Decimal('0')),
-                    output_field=DecimalField(max_digits=14, decimal_places=2))))
-    if contract_prefix:
-        money_qs = money_qs.filter(contract_number__istartswith=contract_prefix)
-    outstanding_by_order = {}
-    for r in money_qs.values('order_id', 'sale_value', 'discount', 'total_paid'):
-        net = max((r['sale_value'] or Decimal('0')) - 2 * (r['discount'] or Decimal('0')), Decimal('0'))
-        owed = max(net - (r['total_paid'] or Decimal('0')), Decimal('0'))
-        outstanding_by_order[r['order_id']] = float(owed)
-
-    # ── Materials readiness (this week + next week fits) ─────────────────────
-    fitting_orders = (Order.objects
-                      .filter(fit_date__gte=this_week_start, fit_date__lte=next_week_end, job_finished=False)
-                      .select_related('boards_po')
-                      .order_by('fit_date'))
+    # ── Materials readiness (this + next week fits, from the calendar) ────────
+    # Driven by the same calendar jobs as the rest of the report; we just join in
+    # each order's boards / OS-doors PO status. Finished jobs need no chasing.
+    _mat_order_ids = [j['order_id'] for j in jobs if j['week'] in ('this', 'next')]
+    _mat_orders = {
+        o.id: o for o in (Order.objects
+                          .filter(id__in=_mat_order_ids)
+                          .select_related('boards_po'))
+    }
     materials_rows = []
-    for order in fitting_orders:
+    for j in jobs:
+        if j['week'] not in ('this', 'next'):
+            continue
+        order = _mat_orders.get(j['order_id'])
+        if not order or order.job_finished:
+            continue
         # Boards
         boards_status = 'not_required' if order.boards_not_required else 'no_po'
         if not order.boards_not_required:
@@ -1586,16 +1595,16 @@ def dashboard_weekly_summary(request):
         materials_rows.append({
             'order_id':        order.id,
             'sale_number':     order.sale_number or '-',
-            'customer':        order.customer_name or '-',
-            'fit_date':        order.fit_date.strftime('%a %d %b') if order.fit_date else '',
-            'fit_week':        'this' if order.fit_date and order.fit_date <= this_week_end else 'next',
+            'customer':        j['customer'],
+            'fit_date':        j['date'].strftime('%a %d %b'),
+            'fit_week':        j['week'],
             'boards_status':   boards_status,
             'os_doors_status': os_doors_status,
             'all_items_ordered': order.all_items_ordered,
             'ready':           ready,
-            'value':           float(order.total_value_inc_vat or 0),
-            'fitter':          fitter_by_order.get(order.id, '-') or '-',
-            'money_due':       outstanding_by_order.get(order.id),
+            'value':           j['value'],
+            'fitter':          j['fitter'],
+            'money_due':       j['outstanding'] if j['outstanding'] > 0 else None,
         })
     materials_not_ready = sum(1 for r in materials_rows if not r['ready'])
 
@@ -1632,52 +1641,32 @@ def dashboard_weekly_summary(request):
             'status_label': status_label,
         })
 
-    # ── Payment status (jobs fitting last/this/next week) ─────────────────────
+    # ── Payment status (the calendar's last/this/next-week fits) ─────────────
+    # Built from the same job list as everything else, so the figures here match
+    # the chapter stat chips, the day charts and the calendar exactly.
     payment_status_rows = []
     paid_in_full = 0
     part_paid = 0
     unpaid = 0
-    pay_window_qs = (AnthillSale.objects
-                     .filter(fit_date__gte=last_week_start, fit_date__lte=next_week_end, sale_value__gt=0)
-                     .exclude(status__in=['cancelled', 'dead'])
-                     .annotate(total_paid=Coalesce(
-                         payments_subquery, Value(Decimal('0')),
-                         output_field=DecimalField(max_digits=14, decimal_places=2)))
-                     .order_by('fit_date'))
-    if contract_prefix:
-        pay_window_qs = pay_window_qs.filter(contract_number__istartswith=contract_prefix)
-    for s in pay_window_qs.values('order_id', 'customer_name', 'contract_number', 'fit_date',
-                                  'sale_value', 'discount', 'total_paid'):
-        net = max((s['sale_value'] or Decimal('0')) - 2 * (s['discount'] or Decimal('0')), Decimal('0'))
-        paid = s['total_paid'] or Decimal('0')
-        owed = max(net - paid, Decimal('0'))
-        if owed < Decimal('10'):
-            pkey, plabel = 'paid', 'Paid in Full'
+    for j in jobs:
+        if j['pay_key'] == 'paid':
             paid_in_full += 1
-        elif paid >= Decimal('10'):
-            pkey, plabel = 'part', 'Part Paid'
+        elif j['pay_key'] == 'part':
             part_paid += 1
         else:
-            pkey, plabel = 'unpaid', 'Unpaid'
             unpaid += 1
-        if s['fit_date'] and s['fit_date'] < this_week_start:
-            pweek = 'last'
-        elif s['fit_date'] and s['fit_date'] <= this_week_end:
-            pweek = 'this'
-        else:
-            pweek = 'next'
         payment_status_rows.append({
-            'customer':    s['customer_name'] or '-',
-            'contract':    s['contract_number'] or '-',
-            'fit_date':    s['fit_date'].strftime('%a %d %b') if s['fit_date'] else '',
-            'week':        pweek,
-            'sale_value':  float(net),
-            'paid':        float(paid),
-            'outstanding': float(owed),
-            'pay_key':     pkey,
-            'pay_label':   plabel,
-            'fitter':      fitter_by_order.get(s['order_id'], '-') or '-',
-            'remedial':    s['order_id'] in remedial_order_ids,
+            'customer':    j['customer'],
+            'contract':    j['contract'],
+            'fit_date':    j['date'].strftime('%a %d %b'),
+            'week':        j['week'],
+            'sale_value':  j['value'],
+            'paid':        j['paid'],
+            'outstanding': j['outstanding'],
+            'pay_key':     j['pay_key'],
+            'pay_label':   j['pay_label'],
+            'fitter':      j['fitter'],
+            'remedial':    j['remedial'],
         })
 
     # ── Auto-generated insights ────────────────────────────────────────────────

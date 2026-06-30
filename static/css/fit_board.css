@@ -2284,6 +2284,12 @@ body.light-mode .job-name {
     margin: 4px;
     align-self: start;
     min-height: 0;
+    /* Grid items default to min-width:auto (content width) which makes a
+       card refuse to shrink and overflow its day column when the grid
+       narrows (e.g. when the Job List panel opens). min-width:0 lets the
+       card shrink and the inner ellipsis on .job-name take effect. */
+    min-width: 0;
+    overflow: hidden;
 }
 
 /* Multi-day continuation edges — flatten where a bar crosses the week edge */
@@ -2550,6 +2556,9 @@ body.light-mode .job-name {
     z-index: 1;
     margin: 8px 8px 0;
     min-height: 52px;
+    /* Allow the card to shrink below its content width instead of
+       overflowing the day column when the grid narrows. */
+    min-width: 0;
 }
 
 /* Single-row weekly cards: header fills the taller card so the content
@@ -3640,4 +3649,77 @@ body.light-mode .job-name {
 }
 .cal-autocomplete-muted {
     color: var(--text-muted);
+}
+
+/* ══ Responsive: Fit Board & Employee Calendar ══════════════════
+   Strategy: progressively shrink the fixed label gutters so the day
+   columns stay usable.  Below the minimum comfortable width the whole
+   grid scrolls horizontally (calendar-container already has
+   overflow-x: auto) rather than squashing cells to nothing.
+   ─────────────────────────────────────────────────────────────── */
+
+/* Hard floor: force horizontal scroll before columns become unusable */
+.month-weeks  { min-width: 700px; }
+.weekly-grid  { min-width: 640px; }
+.emp-cal-grid { min-width: 640px; }
+
+/* ── 1400 px: very slightly tighter label gutter ──────────────── */
+@media (max-width: 1400px) {
+    /* Monthly swim-lane */
+    .mw-header-row { grid-template-columns: 110px repeat(7, 1fr); }
+    .mw-lane        { grid-template-columns: 110px 1fr; }
+}
+
+/* ── 1200 px: noticeably smaller gutter, cards slightly denser ── */
+@media (max-width: 1200px) {
+    /* Monthly swim-lane */
+    .mw-header-row { grid-template-columns: 90px repeat(7, 1fr); }
+    .mw-lane        { grid-template-columns: 90px 1fr; }
+    .mw-lane-label  { font-size: 0.57rem; padding: 4px 5px; }
+
+    /* Weekly swim-lane */
+    .swim-header-row                      { grid-template-columns: 120px repeat(6, 1fr); }
+    .fitter-lane, .swim-section-body      { grid-template-columns: 120px 1fr; }
+    .fitter-lane-label                    { font-size: 0.65rem; padding: 4px 8px; }
+
+    /* Employee calendar */
+    .emp-header-row { grid-template-columns: 110px repeat(7, 1fr); }
+    .emp-lane-row   { grid-template-columns: 110px 1fr; }
+    .emp-lane-label { font-size: 0.68rem; }
+}
+
+/* ── 900 px: compact mode — smallest gutters, reduced card padding ── */
+@media (max-width: 900px) {
+    /* Monthly swim-lane */
+    .mw-header-row  { grid-template-columns: 72px repeat(7, 1fr); }
+    .mw-lane         { grid-template-columns: 72px 1fr; }
+    .mw-lane-label   { font-size: 0.50rem; padding: 4px 3px; }
+    .mw-col-dayname  { font-size: 0.55rem; }
+    .mw-col-date     { font-size: 0.50rem; }
+
+    /* Job cards inside the monthly grid */
+    .mw-lane-grid > .job-card { margin: 2px; }
+    .job-card                 { padding: 3px 2px; gap: 2px; }
+    .job-name                 { font-size: 0.60rem; }
+    .job-salenum              { font-size: 0.55rem; }
+    .job-balance              { font-size: 0.55rem; padding: 1px 2px; }
+
+    /* Weekly swim-lane */
+    .swim-header-row                 { grid-template-columns: 80px repeat(6, 1fr); }
+    .fitter-lane, .swim-section-body { grid-template-columns: 80px 1fr; }
+    .fitter-lane-label               { font-size: 0.58rem; padding: 4px 5px; }
+    .fitter-lane-grid > .wk-card     { margin: 4px 4px 0; min-height: 44px; }
+    .wk-card-header                  { padding: 5px; }
+    .wk-card-name                    { font-size: 0.65rem; }
+    .wk-card-outstanding             { font-size: 0.55rem; padding: 1px 4px; }
+    .weekly-col-dayname              { font-size: 0.65rem; }
+    .weekly-col-date                 { font-size: 0.60rem; }
+    /* Hide the financial detail rows on weekly cards at this size */
+    .wk-card-fin                     { display: none; }
+
+    /* Employee calendar */
+    .emp-header-row { grid-template-columns: 90px repeat(7, 1fr); }
+    .emp-lane-row   { grid-template-columns: 90px 1fr; }
+    .emp-lane-label { font-size: 0.62rem; padding: 6px; }
+    .emp-col-header { font-size: 0.62rem; }
 }

@@ -12080,115 +12080,16 @@ def calendar_view(request):
     # The sale-detail page is the single source of truth: it allocates the
     # customer's whole payment pool across their sales and persists each sale's
     # outstanding balance to AnthillSale.balance_payable (with paid_in_full).
-    # Here we simply read those stored values rather than re-deriving them, so a
-    # customer who is in credit on one sale isn't shown as owing on another.
-    sale_numbers = [a.order.sale_number for a in appointments if a.order]
-    if sale_numbers:
-        _sale_rows = (
-            AnthillSale.objects
-            .filter(anthill_activity_id__in=sale_numbers)
-            .values('anthill_activity_id', 'sale_value', 'discount',
-                    'balance_payable', 'paid_in_full')
-        )
-        _fin_map = {}
-        for row in _sale_rows:
-            key = row['anthill_activity_id']
-            sv = row['sale_value'] or Decimal('0')
-            # Keep the highest-value record when an Anthill order id matches
-            # several sale rows, so a populated value isn't clobbered by a zero.
-            existing = _fin_map.get(key)
-            if existing is not None and sv <= existing['sale_value']:
-                continue
-            _fin_map[key] = {
-                'sale_value': sv,
-                'discount': row['discount'] or Decimal('0'),
-                'balance_payable': row['balance_payable'],
-                'paid_in_full': row['paid_in_full'],
-            }
+    # _orders_financials reads those stored values (falling back to the live pool
+    # / the order total) — the SAME helper the weekly operations report uses, so
+    # the calendar and the report can never disagree.
+    from .customer_views import _orders_financials
+    _fin_by_sale = _orders_financials([a.order for a in appointments if a.order])
+    for appt in appointments:
+        if not appt.order:
+            continue
+        appt.fin = _fin_by_sale.get(appt.order.sale_number)
 
-        # When a sale's Anthill sale_value is missing (None/0), its stored
-        # balance_payable/paid_in_full were calculated against a zero value and
-        # are therefore unreliable — they can wrongly mark a sale as fully paid
-        # even though the order is only part-paid. For those sales recompute the
-        # figures exactly the way the sale-detail page does, via the customer
-        # payment pool (which falls back to the order's inc-VAT total and also
-        # handles cross-sale credits). Computed once per customer and reused.
-        from .customer_views import _build_customer_payment_pool
-        _unreliable_nums = {
-            a.order.sale_number for a in appointments
-            if a.order and (
-                _fin_map.get(a.order.sale_number) is None
-                or _fin_map[a.order.sale_number]['sale_value'] <= 0
-            )
-        }
-        _pool_fin = {}
-        if _unreliable_nums:
-            _pool_cache = {}
-            for _s in (
-                AnthillSale.objects
-                .filter(anthill_activity_id__in=_unreliable_nums)
-                .select_related('customer', 'order')
-            ):
-                if not _s.customer_id:
-                    continue
-                if _s.customer_id not in _pool_cache:
-                    _pool_cache[_s.customer_id] = _build_customer_payment_pool(_s) or False
-                pool = _pool_cache[_s.customer_id]
-                if not pool:
-                    continue
-                for e in pool['entries']:
-                    aid = e['sale'].anthill_activity_id
-                    if aid and e['effective_value'] > 0:
-                        _pool_fin[aid] = {
-                            'effective_value': e['effective_value'],
-                            'outstanding': e['outstanding'],
-                        }
-
-        for appt in appointments:
-            if not appt.order:
-                continue
-            row = _fin_map.get(appt.order.sale_number)
-            order_total = appt.order.total_value_inc_vat or Decimal('0')
-
-            # Prefer freshly-pooled figures when the stored balance is unreliable.
-            pooled = _pool_fin.get(appt.order.sale_number)
-            if pooled is not None:
-                appt.fin = {
-                    'sale_value': pooled['effective_value'],
-                    'payments_total': pooled['effective_value'] - pooled['outstanding'],
-                    'outstanding': pooled['outstanding'],
-                    'value_estimated': False,
-                }
-                continue
-
-            if row is None:
-                # No synced Anthill sale — fall back to the order's own total.
-                appt.fin = {
-                    'sale_value': order_total,
-                    'payments_total': Decimal('0'),
-                    'outstanding': order_total,
-                    'value_estimated': False,
-                } if order_total > 0 else None
-                continue
-            # Effective (post-discount) value — mirror the sale page, preferring
-            # the synced sale value and falling back to the order's inc-VAT total.
-            base_value = row['sale_value'] or order_total
-            effective_value = base_value - row['discount']
-            balance = row['balance_payable']
-            if balance is None:
-                # Balance not yet recalculated for this sale — treat as fully
-                # outstanding rather than re-deriving the pool logic here.
-                outstanding = effective_value
-            else:
-                outstanding = balance
-            paid = effective_value - outstanding
-            appt.fin = {
-                'sale_value': effective_value,
-                'payments_total': paid,
-                'outstanding': outstanding,
-                'value_estimated': base_value <= 0,
-            }
-    
     # Linked purchase orders per appointment (for the appointment detail modal)
     import json as _json
     for appt in appointments:
