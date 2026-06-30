@@ -15,416 +15,253 @@
 
 {% block content %}
 <div class="dashboard-page">
-    <!-- Edit Mode Toggle -->
-    <button class="widget-edit-toggle" id="widgetEditToggle" onclick="toggleWidgetEditMode()">
-        <i class="bi bi-grid-3x3-gap"></i> Customise
-    </button>
 
-    <!-- Edit Mode Toolbar (visible when editing) -->
-    <div class="widget-edit-toolbar" id="widgetEditToolbar">
-        <span class="widget-edit-toolbar-hint"><i class="bi bi-info-circle"></i> Click a widget to configure &bull; Drag handles to reposition</span>
-        <div class="widget-edit-toolbar-actions">
-            <button class="btn-secondary btn-sm" onclick="openWidgetOverview()"><i class="bi bi-list-ul"></i> Widget Menu</button>
-            <button class="btn-cancel btn-sm" onclick="resetWidgetLayout()"><i class="bi bi-arrow-counterclockwise"></i> Reset</button>
-            <button class="btn-save btn-sm" onclick="saveWidgetLayout()"><i class="bi bi-check-lg"></i> Save Layout</button>
+    <!-- Stock Take Alert (only for ryandodson when pending) -->
+    {% if request.user.username == 'ryandodson' and not hide_stock_take_widget and not stock_take_done_today %}
+    <div class="db-stock-take-alert">
+        <div class="dashboard-card accent-danger widget-pulse-danger">
+            <div class="card-label"><i class="bi bi-clipboard-check" style="color:var(--danger-color);"></i> Stock Take</div>
+            <div class="pulse-warning-icon"><i class="bi bi-exclamation-triangle-fill"></i></div>
+            <div class="card-value">Pending</div>
+            <div class="card-subtext">Not yet completed today</div>
+            <div class="card-action">
+                <a class="card-action-btn" href="{% url 'stock_take_list' %}"><i class="bi bi-box-arrow-up-right"></i> Go to Stock Take</a>
+            </div>
         </div>
     </div>
+    {% endif %}
 
-    <!-- Widget Overview Dialog -->
-    <dialog class="widget-overview-modal" id="widgetOverviewModal">
-        <div class="wom-header">
-            <div class="wom-title"><i class="bi bi-grid-3x3-gap"></i> Widget Menu</div>
-            <button class="wcm-close" onclick="document.getElementById('widgetOverviewModal').close()">&times;</button>
-        </div>
-        <div class="wom-body">
-            <table class="wom-table">
-                <thead>
-                    <tr>
-                        <th class="wom-col-icon"></th>
-                        <th class="wom-col-name">Widget</th>
-                        <th class="wom-col-size">Width</th>
-                        <th class="wom-col-size">Height</th>
-                        <th class="wom-col-variant">Variant</th>
-                        <th class="wom-col-vis">Visible</th>
-                        <th class="wom-col-settings"></th>
-                    </tr>
-                </thead>
-                <tbody id="womTableBody"></tbody>
-            </table>
-        </div>
-        <div class="wom-footer">
-            <button class="btn-cancel btn-sm" onclick="document.getElementById('widgetOverviewModal').close()">Close</button>
-        </div>
-    </dialog>
+    <!-- Stat Cards Row -->
+    <div class="db-stats">
 
-    <!-- Widget Configuration Modal -->
-    <dialog class="widget-config-modal" id="widgetConfigModal">
-        <div class="wcm-header">
-            <div class="wcm-title">
-                <i class="bi bi-gear" id="wcmIcon"></i>
-                <span id="wcmName">Widget Settings</span>
-            </div>
-            <button class="wcm-close" onclick="closeWidgetConfig()">&times;</button>
-        </div>
-        <div class="wcm-body">
-            <!-- Size -->
-            <div class="wcm-section">
-                <div class="wcm-section-label">Size</div>
-                <div class="wcm-size-row">
-                    <div class="wcm-size-group">
-                        <label>Width</label>
-                        <select id="wcmWidth" class="wcm-select" onchange="applyWidgetConfig()"></select>
-                    </div>
-                    <span class="wcm-size-sep">&times;</span>
-                    <div class="wcm-size-group">
-                        <label>Height</label>
-                        <select id="wcmHeight" class="wcm-select" onchange="applyWidgetConfig()"></select>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Variant -->
-            <div class="wcm-section" id="wcmVariantSection">
-                <div class="wcm-section-label">Variant</div>
-                <div class="wcm-variant-group" id="wcmVariant">
-                    <button class="wcm-variant-btn" data-value="compact" onclick="selectOption('variant','compact')">
-                        <div class="wcm-variant-preview wcm-vp-compact">
-                            <span class="wcm-vp-label"></span>
-                            <span class="wcm-vp-value"></span>
-                        </div>
-                        <span class="wcm-variant-name">Compact</span>
-                    </button>
-                    <button class="wcm-variant-btn" data-value="standard" onclick="selectOption('variant','standard')">
-                        <div class="wcm-variant-preview wcm-vp-standard">
-                            <span class="wcm-vp-label"></span>
-                            <span class="wcm-vp-value"></span>
-                            <span class="wcm-vp-sub"></span>
-                        </div>
-                        <span class="wcm-variant-name">Standard</span>
-                    </button>
-                    <button class="wcm-variant-btn" data-value="detailed" onclick="selectOption('variant','detailed')">
-                        <div class="wcm-variant-preview wcm-vp-detailed">
-                            <span class="wcm-vp-label"></span>
-                            <span class="wcm-vp-value"></span>
-                            <span class="wcm-vp-sub"></span>
-                            <div class="wcm-vp-table">
-                                <span class="wcm-vp-row"></span>
-                                <span class="wcm-vp-row"></span>
-                                <span class="wcm-vp-row"></span>
-                            </div>
-                        </div>
-                        <span class="wcm-variant-name">Detailed</span>
-                    </button>
-                </div>
-            </div>
-
-            <!-- Layout -->
-            <div class="wcm-section" id="wcmLayoutSection">
-                <div class="wcm-section-label">Alignment</div>
-                <div class="wcm-option-group" id="wcmLayout">
-                    <button class="wcm-option-btn" data-value="center" onclick="selectOption('layout','center')"><i class="bi bi-text-center"></i> Center</button>
-                    <button class="wcm-option-btn" data-value="left" onclick="selectOption('layout','left')"><i class="bi bi-text-left"></i> Left</button>
-                </div>
-            </div>
-
-            <!-- Visibility -->
-            <div class="wcm-section">
-                <div class="wcm-section-label">Visibility</div>
-                <label class="wcm-toggle-row">
-                    <span>Show this widget</span>
-                    <label class="toggle-switch">
-                        <input type="checkbox" id="wcmVisible" checked onchange="applyWidgetConfig()">
-                        <span class="toggle-slider"></span>
-                    </label>
-                </label>
-            </div>
-        </div>
-        <div class="wcm-footer">
-            <button class="btn-cancel btn-sm" onclick="closeWidgetConfig()">Close</button>
-        </div>
-    </dialog>
-
-    <!-- Widget Grid (12-column system) -->
-    <div class="widget-grid" id="widgetGrid">
-
-        <!-- Stock Take Widget (only shown for ryandodson) -->
-        {% if request.user.username == 'ryandodson' %}
-        {% if hide_stock_take_widget %}
-        <div class="widget widget-hidden" data-widget-id="stock_take" data-default-w="2" data-default-h="3" data-force-hidden="1">
-        {% elif not stock_take_done_today %}
-        <div class="widget" data-widget-id="stock_take" data-default-w="12" data-default-h="8" data-default-c="1" data-default-r="1">
-        {% else %}
-        <div class="widget" data-widget-id="stock_take" data-default-w="2" data-default-h="3">
-        {% endif %}
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="dashboard-card {% if stock_take_done_today %}accent-success{% else %}accent-danger widget-pulse-danger{% endif %}">
-                <div class="card-label"><i class="bi bi-clipboard-check" style="color:{% if stock_take_done_today %}var(--success-color){% else %}var(--danger-color){% endif %};"></i> Stock Take</div>
-                {% if not stock_take_done_today %}<div class="pulse-warning-icon"><i class="bi bi-exclamation-triangle-fill"></i></div>{% endif %}
-                <div class="card-value">{% if stock_take_done_today %}<i class="bi bi-check-circle-fill" style="color:var(--success-color);"></i> Complete{% else %}Pending{% endif %}</div>
-                <div class="card-subtext">{% if stock_take_done_today %}Today's stock take is done{% else %}Not yet completed today{% endif %}</div>
-                <div class="card-action">
-                    <a class="card-action-btn" href="{% url 'stock_take_list' %}"><i class="bi bi-box-arrow-up-right"></i> Go to Stock Take</a>
-                </div>
+        {% if request.user.username == 'ryandodson' and not hide_stock_take_widget and stock_take_done_today %}
+        <div class="dashboard-card accent-success">
+            <div class="card-label"><i class="bi bi-clipboard-check" style="color:var(--success-color);"></i> Stock Take</div>
+            <div class="card-value"><i class="bi bi-check-circle-fill" style="color:var(--success-color);"></i> Complete</div>
+            <div class="card-subtext">Today's stock take is done</div>
+            <div class="card-action">
+                <a class="card-action-btn" href="{% url 'stock_take_list' %}"><i class="bi bi-box-arrow-up-right"></i> View</a>
             </div>
         </div>
         {% endif %}
 
-        <!-- Stat Cards -->
-        <div class="widget" data-widget-id="outstanding" data-default-w="2" data-default-h="3">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="dashboard-card">
-                <h3 class="card-label">Outstanding Balance</h3>
-                <div class="card-value">&pound;{{ total_outstanding_balance }}</div>
-                <div class="card-subtext">{{ outstanding_debtor_count }} debtors remaining
-                    <span class="card-delta">Expected this week: <strong>&pound;{{ expected_this_week }}</strong></span>
-                </div>
-                <div class="widget-preview" id="outstandingPreview"></div>
-                <div class="card-action">
-                    <button class="card-action-btn" onclick="openOutstandingReport()">
-                        <i class="bi bi-bar-chart-line-fill"></i> View Report
-                    </button>
-                </div>
+        <div class="dashboard-card">
+            <h3 class="card-label">Outstanding Balance</h3>
+            <div class="card-value">&pound;{{ total_outstanding_balance }}</div>
+            <div class="card-subtext">{{ outstanding_debtor_count }} debtors remaining
+                <span class="card-delta">Expected this week: <strong>&pound;{{ expected_this_week }}</strong></span>
+            </div>
+            <div class="widget-preview" id="outstandingPreview"></div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openOutstandingReport()">
+                    <i class="bi bi-bar-chart-line-fill"></i> View Report
+                </button>
             </div>
         </div>
 
-        <div class="widget" data-widget-id="sales_after" data-default-w="2" data-default-h="3">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="dashboard-card">
-                <div class="card-label">
-                    Sales After
-                    <div class="dash-cal-wrap" id="salesAfterCalWrap" title="" onclick="this.querySelector('input').showPicker()">
-                        <i class="bi bi-calendar3"></i>
-                        <input type="date" id="salesAfterDate" class="dash-date-overlay"
-                               value="{{ today_str }}" onchange="fetchSalesAfter(); updateCalTitle('salesAfterDate','salesAfterCalWrap')">
-                    </div>
+        <div class="dashboard-card">
+            <div class="card-label">
+                Sales After
+                <div class="dash-cal-wrap" id="salesAfterCalWrap" title="" onclick="this.querySelector('input').showPicker()">
+                    <i class="bi bi-calendar3"></i>
+                    <input type="date" id="salesAfterDate" class="dash-date-overlay"
+                           value="{{ today_str }}" onchange="fetchSalesAfter(); updateCalTitle('salesAfterDate','salesAfterCalWrap')">
                 </div>
-                <div class="card-value" id="salesAfterTotal">&pound;{{ sales_after_total }}</div>
-                <div class="card-subtext" id="salesAfterCount">{{ sales_after_count }} orders from this date</div>
-                <div class="widget-preview" id="salesAfterPreview"></div>
-                <div class="card-action">
-                    <button class="card-action-btn" onclick="openSalesAfterReport()">
-                        <i class="bi bi-bar-chart-line-fill"></i> View Report
-                    </button>
-                </div>
+            </div>
+            <div class="card-value" id="salesAfterTotal">&pound;{{ sales_after_total }}</div>
+            <div class="card-subtext" id="salesAfterCount">{{ sales_after_count }} orders from this date</div>
+            <div class="widget-preview" id="salesAfterPreview"></div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openSalesAfterReport()">
+                    <i class="bi bi-bar-chart-line-fill"></i> View Report
+                </button>
             </div>
         </div>
 
-        <div class="widget" data-widget-id="stock_value" data-default-w="2" data-default-h="3">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="dashboard-card">
-                <div class="card-label">
-                    Stock Value
-                    <div class="dash-cal-wrap" id="stockReportCalWrap" title="" onclick="this.querySelector('input').showPicker()">
-                        <i class="bi bi-calendar3"></i>
-                        <input type="date" id="stockReportDate" class="dash-date-overlay"
-                               value="{{ today_str }}" onchange="updateCalTitle('stockReportDate','stockReportCalWrap')">
-                    </div>
+        <div class="dashboard-card">
+            <div class="card-label">
+                Stock Value
+                <div class="dash-cal-wrap" id="stockReportCalWrap" title="" onclick="this.querySelector('input').showPicker()">
+                    <i class="bi bi-calendar3"></i>
+                    <input type="date" id="stockReportDate" class="dash-date-overlay"
+                           value="{{ today_str }}" onchange="updateCalTitle('stockReportDate','stockReportCalWrap')">
                 </div>
-                <div class="card-value">&pound;{{ total_stock_value }}</div>
-                <div class="card-subtext">{{ stock_item_count }} items in stock
-                    {% if stock_value_7day_delta > 0 %}<span class="card-delta card-delta-positive">&#9650; &pound;{{ stock_value_7day_delta_str }}</span>
-                    {% elif stock_value_7day_delta < 0 %}<span class="card-delta card-delta-negative">&#9660; &pound;{{ stock_value_7day_delta_str }}</span>{% endif %}
-                </div>
-                <div class="widget-preview" id="stockValuePreview"></div>
-                <div class="card-action">
-                    <button class="card-action-btn" onclick="openStockReport('report')">
-                        <i class="bi bi-bar-chart-line-fill"></i> View Report
-                    </button>
-                </div>
+            </div>
+            <div class="card-value">&pound;{{ total_stock_value }}</div>
+            <div class="card-subtext">{{ stock_item_count }} items in stock
+                {% if stock_value_7day_delta > 0 %}<span class="card-delta card-delta-positive">&#9650; &pound;{{ stock_value_7day_delta_str }}</span>
+                {% elif stock_value_7day_delta < 0 %}<span class="card-delta card-delta-negative">&#9660; &pound;{{ stock_value_7day_delta_str }}</span>{% endif %}
+            </div>
+            <div class="widget-preview" id="stockValuePreview"></div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openStockReport('report')">
+                    <i class="bi bi-bar-chart-line-fill"></i> View Report
+                </button>
             </div>
         </div>
 
-        <div class="widget" data-widget-id="week_sales" data-default-w="2" data-default-h="3">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="dashboard-card">
-                <h3 class="card-label">This Week's Sales</h3>
-                <div class="card-value">&pound;{{ this_week_sales }}</div>
-                <div class="card-subtext">Fits scheduled this week
-                    {% if week_delta > 0 %}<span class="card-delta card-delta-positive">&#9650; &pound;{{ week_delta_str }} vs last week</span>
-                    {% elif week_delta < 0 %}<span class="card-delta card-delta-negative">&#9660; &pound;{{ week_delta_str }} vs last week</span>{% endif %}
-                </div>
-                <div class="widget-preview" id="weekSalesPreview"></div>
-                <div class="card-action">
-                    <button class="card-action-btn" onclick="openWeekReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
-                </div>
+        <div class="dashboard-card">
+            <h3 class="card-label">This Week's Sales</h3>
+            <div class="card-value">&pound;{{ this_week_sales }}</div>
+            <div class="card-subtext">Fits scheduled this week
+                {% if week_delta > 0 %}<span class="card-delta card-delta-positive">&#9650; &pound;{{ week_delta_str }} vs last week</span>
+                {% elif week_delta < 0 %}<span class="card-delta card-delta-negative">&#9660; &pound;{{ week_delta_str }} vs last week</span>{% endif %}
+            </div>
+            <div class="widget-preview" id="weekSalesPreview"></div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openWeekReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
             </div>
         </div>
 
-        <div class="widget" data-widget-id="monthly_sales" data-default-w="2" data-default-h="3">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="dashboard-card">
-                <div class="card-label">
-                    <div class="month-switcher-inline">
-                        <button class="month-arrow" onclick="changeMonth(-1)" title="Previous month"><i class="bi bi-chevron-left"></i></button>
-                        <span id="monthLabel"></span>
-                        <button class="month-arrow" id="nextMonthBtn" onclick="changeMonth(1)" title="Next month"><i class="bi bi-chevron-right"></i></button>
-                    </div>
+        <div class="dashboard-card">
+            <div class="card-label">
+                <div class="month-switcher-inline">
+                    <button class="month-arrow" onclick="changeMonth(-1)" title="Previous month"><i class="bi bi-chevron-left"></i></button>
+                    <span id="monthLabel"></span>
+                    <button class="month-arrow" id="nextMonthBtn" onclick="changeMonth(1)" title="Next month"><i class="bi bi-chevron-right"></i></button>
                 </div>
-                <div class="card-value" id="monthlySalesTotal">&pound;{{ monthly_sales_total }}</div>
-                <div class="card-subtext" id="monthlySalesCount">Total monthly sales
-                    {% if month_delta > 0 %}<span class="card-delta card-delta-positive" id="monthlyDelta">&#9650; &pound;{{ month_delta_str }} vs prev month</span>
-                    {% elif month_delta < 0 %}<span class="card-delta card-delta-negative" id="monthlyDelta">&#9660; &pound;{{ month_delta_str }} vs prev month</span>
-                    {% else %}<span class="card-delta" id="monthlyDelta"></span>{% endif %}
-                </div>
-                <div class="widget-preview" id="monthlySalesPreview"></div>
-                <div class="card-action">
-                    <button class="card-action-btn" onclick="openMonthlyReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
-                </div>
+            </div>
+            <div class="card-value" id="monthlySalesTotal">&pound;{{ monthly_sales_total }}</div>
+            <div class="card-subtext" id="monthlySalesCount">Total monthly sales
+                {% if month_delta > 0 %}<span class="card-delta card-delta-positive" id="monthlyDelta">&#9650; &pound;{{ month_delta_str }} vs prev month</span>
+                {% elif month_delta < 0 %}<span class="card-delta card-delta-negative" id="monthlyDelta">&#9660; &pound;{{ month_delta_str }} vs prev month</span>
+                {% else %}<span class="card-delta" id="monthlyDelta"></span>{% endif %}
+            </div>
+            <div class="widget-preview" id="monthlySalesPreview"></div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openMonthlyReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
             </div>
         </div>
 
-        <div class="widget" data-widget-id="avg_sale" data-default-w="2" data-default-h="3">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="dashboard-card">
-                <h3 class="card-label">Average Sale Value</h3>
-                <div class="card-value">&pound;{{ avg_daily_sale }}</div>
-                <div class="card-subtext">Avg daily revenue</div>
-                <div class="widget-preview" id="avgSalePreview"></div>
-                <div class="card-action">
-                    <button class="card-action-btn" onclick="openAvgReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
-                </div>
+        <div class="dashboard-card">
+            <h3 class="card-label">Average Sale Value</h3>
+            <div class="card-value">&pound;{{ avg_daily_sale }}</div>
+            <div class="card-subtext">Avg daily revenue</div>
+            <div class="widget-preview" id="avgSalePreview"></div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openAvgReport()"><i class="bi bi-bar-chart-line-fill"></i> View Report</button>
             </div>
         </div>
 
-        <!-- Charts -->
-        <div class="widget" data-widget-id="fits_chart" data-default-w="6" data-default-h="6" data-min-h="4">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="chart-container">
-                <div class="chart-header">
-                    <h3 id="fitsChartTitle">Fits Per Week</h3>
-                    <div class="chart-type-toggle" data-chart-id="fitsPerWeekChart">
-                        <button class="chart-type-btn active" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
-                        <button class="chart-type-btn" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
-                    </div>
+    </div><!-- /db-stats -->
+
+    <!-- Charts Row -->
+    <div class="db-charts">
+        <div class="chart-container">
+            <div class="chart-header">
+                <h3 id="fitsChartTitle">Fits Per Week</h3>
+                <div class="chart-type-toggle" data-chart-id="fitsPerWeekChart">
+                    <button class="chart-type-btn active" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
+                    <button class="chart-type-btn" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
                 </div>
-                <div class="chart-wrapper">
-                    <canvas id="fitsPerWeekChart"></canvas>
-                </div>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="fitsPerWeekChart"></canvas>
             </div>
         </div>
 
-        <div class="widget" data-widget-id="sales_chart" data-default-w="6" data-default-h="6" data-min-h="4">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="chart-container">
-                <div class="chart-header">
-                    <h3 id="salesChartTitle">Sales Per Week</h3>
-                    <div class="chart-type-toggle" data-chart-id="salesPerWeekChart">
-                        <button class="chart-type-btn active" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
-                        <button class="chart-type-btn" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
-                    </div>
+        <div class="chart-container">
+            <div class="chart-header">
+                <h3 id="salesChartTitle">Sales Per Week</h3>
+                <div class="chart-type-toggle" data-chart-id="salesPerWeekChart">
+                    <button class="chart-type-btn active" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
+                    <button class="chart-type-btn" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
                 </div>
-                <div class="chart-wrapper">
-                    <canvas id="salesPerWeekChart"></canvas>
-                </div>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="salesPerWeekChart"></canvas>
             </div>
         </div>
 
-        <div class="widget" data-widget-id="monthly_sales_chart" data-default-w="6" data-default-h="6" data-min-h="4">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="chart-container">
-                <div class="chart-header">
-                    <h3><i class="bi bi-graph-up-arrow"></i> Monthly Sales</h3>
-                    <div class="chart-type-toggle" data-chart-id="monthlySalesChart">
-                        <button class="chart-type-btn" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
-                        <button class="chart-type-btn active" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
-                    </div>
+        <div class="chart-container">
+            <div class="chart-header">
+                <h3>Monthly Sales</h3>
+                <div class="chart-type-toggle" data-chart-id="monthlySalesChart">
+                    <button class="chart-type-btn" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
+                    <button class="chart-type-btn active" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
                 </div>
-                <div class="chart-wrapper">
-                    <canvas id="monthlySalesChart"></canvas>
-                </div>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="monthlySalesChart"></canvas>
             </div>
         </div>
 
-        <div class="widget" data-widget-id="board_costs_chart" data-default-w="6" data-default-h="6" data-min-h="4">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="chart-container">
-                <div class="chart-header">
-                    <h3><i class="bi bi-box-seam"></i> Monthly Board Costs</h3>
-                    <div class="chart-type-toggle" data-chart-id="boardCostsChart">
-                        <button class="chart-type-btn" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
-                        <button class="chart-type-btn active" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
-                    </div>
+        <div class="chart-container">
+            <div class="chart-header">
+                <h3>Monthly Board Costs</h3>
+                <div class="chart-type-toggle" data-chart-id="boardCostsChart">
+                    <button class="chart-type-btn" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
+                    <button class="chart-type-btn active" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
                 </div>
-                <div class="chart-wrapper">
-                    <canvas id="boardCostsChart"></canvas>
-                </div>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="boardCostsChart"></canvas>
+            </div>
+        </div>
+    </div><!-- /db-charts -->
+
+    <!-- Wide Chart -->
+    <div class="db-chart-wide chart-container">
+        <div class="chart-header">
+            <h3 id="weightedAvgChartTitle">Avg Sale Value Per Fit</h3>
+            <div class="chart-type-toggle" data-chart-id="weightedAvgChart">
+                <button class="chart-type-btn active" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
+                <button class="chart-type-btn" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
+            </div>
+        </div>
+        <div class="chart-wrapper">
+            <canvas id="weightedAvgChart"></canvas>
+        </div>
+    </div><!-- /db-chart-wide -->
+
+    <!-- Bottom Cards Row -->
+    <div class="db-bottom">
+
+        <div class="dashboard-card">
+            <div class="card-label"><i class="bi bi-receipt" style="color:var(--warning-color);"></i> Pending Purchase Orders</div>
+            <div class="card-value">{{ pending_pos_count }}</div>
+            <div class="card-subtext">Approved and awaiting arrival</div>
+            <div class="widget-preview" id="pendingPosPreview"></div>
+        </div>
+
+        <div class="dashboard-card {% if shortage_count > 0 %}accent-danger{% else %}accent-success{% endif %}">
+            <div class="card-label"><i class="bi bi-exclamation-triangle{% if shortage_count == 0 %}-fill{% endif %}" style="color:{% if shortage_count > 0 %}var(--danger-color){% else %}var(--success-color){% endif %};"></i> Item Shortages</div>
+            <div class="card-value">{{ shortage_count }}</div>
+            <div class="card-subtext">Items below par level</div>
+            <div class="widget-preview" id="shortagesPreview"></div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openShortagesModal()">View All</button>
             </div>
         </div>
 
-        <div class="widget" data-widget-id="weighted_avg_chart" data-default-w="12" data-default-h="6" data-min-h="4">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="chart-container">
-                <div class="chart-header">
-                    <h3 id="weightedAvgChartTitle">Avg Sale Value Per Fit</h3>
-                    <div class="chart-type-toggle" data-chart-id="weightedAvgChart">
-                        <button class="chart-type-btn active" data-type="line" title="Line"><i class="bi bi-graph-up"></i></button>
-                        <button class="chart-type-btn" data-type="bar" title="Bar"><i class="bi bi-bar-chart-fill"></i></button>
-                    </div>
-                </div>
-                <div class="chart-wrapper">
-                    <canvas id="weightedAvgChart"></canvas>
-                </div>
+        <div class="dashboard-card">
+            <div class="card-label"><i class="bi bi-truck" style="color:var(--info-color);"></i> Incoming Materials</div>
+            <div class="card-value">{{ incoming_materials_count }}</div>
+            <div class="card-subtext">Purchase orders in transit</div>
+            <div class="widget-preview" id="incomingPreview"></div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openIncomingModal()">View All</button>
             </div>
         </div>
 
-        <!-- Bottom Stat Cards -->
-        <div class="widget" data-widget-id="pending_pos" data-default-w="4" data-default-h="3">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="dashboard-card">
-                <div class="card-label"><i class="bi bi-receipt" style="color:var(--warning-color);"></i> Pending Purchase Orders</div>
-                <div class="card-value">{{ pending_pos_count }}</div>
-                <div class="card-subtext">Approved and awaiting arrival</div>
-                <div class="widget-preview" id="pendingPosPreview"></div>
+        <!-- Workflow Role Cards (rendered by JS, flow directly into grid) -->
+        <div id="workflowWidgetSlot" style="display:contents;"></div>
+
+        <div class="dashboard-card weekly-summary-card">
+            <div class="card-label"><i class="bi bi-clipboard2-data" style="color:var(--success-color);"></i> Weekly Operations Report</div>
+            <div class="card-value" style="font-size:1rem;font-weight:600;background:linear-gradient(90deg,#29e8eb,#3cf987);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">
+                Last · This · Next Week
+            </div>
+            <div class="card-subtext">Sales · Stock · POs · Materials · Insights</div>
+            <div class="card-action">
+                <button class="card-action-btn" onclick="openWeeklySummary()">
+                    <i class="bi bi-file-earmark-bar-graph"></i> View Full Report
+                </button>
             </div>
         </div>
 
-        <div class="widget" data-widget-id="shortages" data-default-w="4" data-default-h="3">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="dashboard-card {% if shortage_count > 0 %}accent-danger{% else %}accent-success{% endif %}">
-                <div class="card-label"><i class="bi bi-exclamation-triangle{% if shortage_count == 0 %}-fill{% endif %}" style="color:{% if shortage_count > 0 %}var(--danger-color){% else %}var(--success-color){% endif %};"></i> Item Shortages</div>
-                <div class="card-value">{{ shortage_count }}</div>
-                <div class="card-subtext">Items below par level</div>
-                <div class="widget-preview" id="shortagesPreview"></div>
-                <div class="card-action">
-                    <button class="card-action-btn" onclick="openShortagesModal()">View All</button>
-                </div>
-            </div>
-        </div>
+    </div><!-- /db-bottom -->
 
-        <div class="widget" data-widget-id="incoming" data-default-w="4" data-default-h="3">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="dashboard-card">
-                <div class="card-label"><i class="bi bi-truck" style="color:var(--info-color);"></i> Incoming Materials</div>
-                <div class="card-value">{{ incoming_materials_count }}</div>
-                <div class="card-subtext">Purchase orders in transit</div>
-                <div class="widget-preview" id="incomingPreview"></div>
-                <div class="card-action">
-                    <button class="card-action-btn" onclick="openIncomingModal()">View All</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Workflow Role Widgets (rendered by JS) -->
-        <div id="workflowWidgetSlot"></div>
-
-        <!-- Weekly Summary Report Widget -->
-        <div class="widget" data-widget-id="weekly_summary" data-default-w="4" data-default-h="3">
-            <div class="widget-handle"><i class="bi bi-grip-vertical"></i></div><button class="widget-settings-btn" onclick="openWidgetConfig(this.closest('.widget'))"><i class="bi bi-gear-fill"></i></button>
-            <div class="dashboard-card weekly-summary-card">
-                <div class="card-label"><i class="bi bi-clipboard2-data" style="color:var(--success-color);"></i> Weekly Operations Report</div>
-                <div class="card-value" style="font-size:1rem;font-weight:600;background:linear-gradient(90deg,#29e8eb,#3cf987);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">
-                    Last · This · Next Week
-                </div>
-                <div class="card-subtext">Sales · Stock · POs · Materials · Insights</div>
-                <div class="card-action">
-                    <button class="card-action-btn" onclick="openWeeklySummary()">
-                        <i class="bi bi-file-earmark-bar-graph"></i> View Full Report
-                    </button>
-                </div>
-            </div>
-        </div>
-
-    </div><!-- /widget-grid -->
 </div>
 
 <!-- Item Shortages Modal -->
@@ -496,13 +333,11 @@
     </div>
 </dialog>
 
+<!--[widget layout system removed]-->
 <script>
-/* ========== Widget Layout System ========== */
-(function() {
-    const savedLayout = {{ dashboard_layout_json|default:"null"|safe }};
-    window._dashboardSavedLayout = savedLayout;
-    const grid = document.getElementById('widgetGrid');
-    const widgets = Array.from(grid.querySelectorAll('.widget'));
+if (false) {
+    // dead code preserved to satisfy closing })(); below
+    const grid = null, widgets = [];
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
                       || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
 
@@ -1046,9 +881,7 @@
         });
     });
 
-    // Init
-    applyLayout(savedLayout);
-})();
+}
 </script>
 
 <script>
@@ -1875,41 +1708,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 });
                 chart.update();
-
-                // Auto-save chart type preference
-                const widget = this.closest('.widget');
-                if (widget) {
-                    const widgetId = widget.dataset.widgetId;
-                    // Save to layout via a quick fetch
-                    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value
-                                      || document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
-                    // Get current layout, update chart type, save
-                    const layoutWidgets = document.querySelectorAll('#widgetGrid .widget');
-                    const layout = Array.from(layoutWidgets).map(w => {
-                        const cs = getComputedStyle(w);
-                        const entry = {
-                            id: w.dataset.widgetId,
-                            w: parseInt(cs.getPropertyValue('--w')) || parseInt(w.dataset.defaultW) || 2,
-                            h: parseInt(cs.getPropertyValue('--h')) || parseInt(w.dataset.defaultH) || 4,
-                            hidden: w.classList.contains('widget-hidden'),
-                        };
-                        const c = cs.getPropertyValue('--c').trim();
-                        const r = cs.getPropertyValue('--r').trim();
-                        if (c && r) { entry.c = parseInt(c); entry.r = parseInt(r); }
-                        // Save chart type if this widget has a chart type toggle
-                        const ct = w.querySelector('.chart-type-toggle');
-                        if (ct) {
-                            const activeBtn = ct.querySelector('.chart-type-btn.active');
-                            if (activeBtn) entry.chartType = activeBtn.dataset.type;
-                        }
-                        return entry;
-                    });
-                    fetch('/dashboard/save-layout/', {
-                        method: 'POST',
-                        headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' },
-                        body: JSON.stringify(layout),
-                    });
-                }
             });
         });
     });
@@ -3189,10 +2987,6 @@ function openIncomingModal() {
     
     let html = '';
     activeRoles.forEach(function(role) {
-        const widgetId = 'wf_' + role.role.replace(/-/g, '_');
-        html += '<div class="widget" data-widget-id="' + widgetId + '" data-default-w="2" data-default-h="3">';
-        html += '<div class="widget-handle"><i class="bi bi-grip-vertical"></i></div>';
-        html += '<button class="widget-settings-btn" onclick="openWidgetConfig(this.closest(\'.widget\'))"><i class="bi bi-gear-fill"></i></button>';
         html += '<div class="dashboard-card" style="border-left-color: ' + role.colour + ';">';
         html += '<div class="card-label">' + role.role_display + '</div>';
         html += '<div class="card-value">' + role.total_orders + '</div>';
@@ -3208,10 +3002,10 @@ function openIncomingModal() {
             html += '</tr>';
         });
         html += '</table></div>';
-        html += '</div></div>';
+        html += '</div>';
     });
-    
-    slot.outerHTML = html;
+
+    slot.innerHTML = html;
 })();
 
 function openDashStageOrders(stageId) {

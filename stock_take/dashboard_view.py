@@ -799,7 +799,6 @@ def dashboard(request):
         'total_outstanding_balance': '{:,.0f}'.format(total_outstanding_balance),
         'outstanding_debtor_count': outstanding_debtor_count,
         'expected_this_week': '{:,.0f}'.format(expected_this_week),
-        'dashboard_layout_json': json.dumps(profile.dashboard_layout if profile and profile.dashboard_layout else None),
         'outstanding_preview_json': json.dumps(outstanding_preview),
         'sales_after_preview_json': json.dumps(sales_after_preview),
         'stock_preview_json': json.dumps(stock_preview),
