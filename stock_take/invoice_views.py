@@ -32,21 +32,25 @@ def _sanitize_activity_suffix(value: str) -> str:
     return cleaned or 'UNKNOWN'
 
 
-def _build_placeholder_activity_id(contract_number: str) -> str:
-    """
-    Create a stable placeholder activity ID for scraped invoice payments.
+def _contract_base_id(contract_number: str) -> str:
+    """Return the base activity ID for a contract number.
 
     Preference order:
       1) trailing 6-digit sale number from contract (e.g. BFS-SD-425035 -> 425035)
       2) sanitized contract fallback
     """
     contract = (contract_number or '').strip().upper()
-    six_digit = ''
     m = re.search(r'(\d{6})$', contract)
     if m:
-        six_digit = m.group(1)
+        return m.group(1)
+    return _sanitize_activity_suffix(contract)
 
-    base = six_digit or _sanitize_activity_suffix(contract)
+
+def _build_placeholder_activity_id(contract_number: str) -> str:
+    """
+    Create a stable placeholder activity ID for scraped invoice payments.
+    """
+    base = _contract_base_id(contract_number)
 
     if not AnthillSale.objects.filter(anthill_activity_id=base).exists():
         return base
@@ -84,6 +88,21 @@ def _ensure_sale_and_customer(contract_number: str, customer_name: str, showroom
         .first()
     )
 
+    # Fall back to matching the real Anthill sale by its base activity ID (the
+    # trailing 6-digit sale number) when the contract number hasn't been linked
+    # yet. Without this we'd create a phantom "<base>-N" duplicate sale and
+    # attach the scraped payment to it instead of the genuine sale.
+    if not sale:
+        base = _contract_base_id(contract)
+        if base:
+            sale = (
+                AnthillSale.objects
+                .select_related('customer', 'order')
+                .filter(anthill_activity_id=base)
+                .order_by('-activity_date', '-pk')
+                .first()
+            )
+
     customer = None
     if sale and sale.customer_id:
         customer = sale.customer
@@ -106,6 +125,9 @@ def _ensure_sale_and_customer(contract_number: str, customer_name: str, showroom
         if not sale.customer_name and name:
             sale.customer_name = name
             update_fields.append('customer_name')
+        if not sale.contract_number and contract:
+            sale.contract_number = contract
+            update_fields.append('contract_number')
         if not sale.location and location:
             sale.location = location
             update_fields.append('location')

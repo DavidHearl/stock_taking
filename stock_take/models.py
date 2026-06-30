@@ -216,6 +216,13 @@ class AnthillSale(models.Model):
         ordering = ['-activity_date']
         verbose_name = 'Anthill Sale'
         verbose_name_plural = 'Anthill Sales'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['contract_number'],
+                condition=~models.Q(contract_number=''),
+                name='unique_non_blank_contract_number',
+            ),
+        ]
 
 
 class SaleCoverSheet(models.Model):

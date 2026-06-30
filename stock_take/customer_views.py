@@ -2882,10 +2882,10 @@ def add_manual_payment(request, pk):
     created_ids = []
     errors = []
     for i, p in enumerate(payments_data):
-        # Parse date — accept "dd/mm/yy HH:MM", "dd/mm/yyyy HH:MM", "dd/mm/yy", "dd/mm/yyyy"
+        # Parse date — accept date-picker "yyyy-mm-dd" plus legacy "dd/mm/yy[yy] [HH:MM]"
         date_val = None
         raw_date = str(p.get('date', '')).strip()
-        for fmt in ('%d/%m/%y %H:%M', '%d/%m/%Y %H:%M', '%d/%m/%y', '%d/%m/%Y'):
+        for fmt in ('%Y-%m-%d', '%d/%m/%y %H:%M', '%d/%m/%Y %H:%M', '%d/%m/%y', '%d/%m/%Y'):
             try:
                 date_val = timezone.make_aware(datetime.strptime(raw_date, fmt))
                 break
