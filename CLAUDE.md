@@ -55,12 +55,16 @@ See [docs/testing.md](docs/testing.md) for full testing docs.
 - Reusable fragments go in `partials/`.
 - Extend the existing base template — don't duplicate `<head>`/nav markup in a new top-level template.
 
-## CSS (`static/css/`)
+## CSS / Design system (`static/css/`)
 
-- One CSS file per page/feature, matching the template/view name (e.g. `dashboard.css`, `customers.css`, `admin_pages.css`).
-- Always use the existing CSS custom properties for colour (`var(--bg-secondary)`, `var(--text-primary)`, `var(--border-color)`, `var(--accent-color)`, etc.) — never hardcode hex colours in a new file. This is what makes dark mode work.
-- Class naming follows a loose BEM-ish pattern: `.admin-card`, `.admin-card-header`, `.admin-card-body`. Match the block-element style of the file you're editing.
-- `obsidian/CSS Design System.md` is currently an empty placeholder — if you formalize the design system, document it there rather than creating a new doc.
+**Full design system is documented in [`obsidian/CSS Design System.md`](obsidian/CSS Design System.md). Read it before writing CSS.** The token definitions themselves live in `static/css/styles.css` (`:root` = dark) and `static/css/light-mode.css` (`body.light-mode` overrides). There's also a live reference page at Admin → Design Rules (`admin_design_rules.html`).
+
+- One CSS file per page/feature, matching the template/view name (e.g. `dashboard.css`, `customers.css`, `admin_pages.css`). `styles.css` is global chrome + token definitions only — don't put feature styles there.
+- **Never hardcode a colour, radius, shadow, spacing, or transition value.** Always reference a token: colour (`var(--bg-secondary)`, `var(--text-primary)`, `var(--primary-color)`, `var(--border-color)`, semantic `--success/--warning/--danger/--info/--purple-*`), spacing (`var(--sp-1..6)`), radius (`var(--radius-sm/md/lg/pill)`), shadow (`var(--shadow-sm/md/lg)`), motion (`var(--transition)`). This is what makes dark/light mode work — light mode only re-declares variables.
+  - The primary brand colour is `var(--primary-color)`, **not** `--accent-color` (that token doesn't exist; only `--accent-glow` does).
+- Every new/changed component must read correctly in **both** themes. If it only looks right in dark mode, you hardcoded something.
+- Class naming follows a loose BEM-ish pattern: `.admin-card`, `.admin-card-header`, `.admin-card-body`. Match the block-element prefix of the file you're editing rather than inventing a new vocabulary.
+- Icons: Bootstrap Icons (`<i class="bi bi-...">`), used sparingly. No emoji in the UI.
 
 ## JS (`static/js/`)
 

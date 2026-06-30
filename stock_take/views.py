@@ -12089,8 +12089,30 @@ def calendar_view(request):
         stale.fit_date = stale.order.fit_date
         stale.save(update_fields=['fit_date'])
 
+    # Canonical order per sale_number. Some sale_numbers have more than one
+    # Order row (there is no unique constraint on Order.sale_number). Only the
+    # order linked from AnthillSale.order is canonical — it is what the
+    # sale-detail page displays. The duplicates are orphans that often hold a
+    # stale fit_date (and sometimes the POs), so each one spawns its own
+    # FitAppointment, producing phantom calendar cards on the wrong day and
+    # occasionally two fitters on a single sale. Map activity_id -> canonical
+    # order id so we can ignore the orphans below.
+    _canonical_order_by_sale = dict(
+        AnthillSale.objects
+        .filter(order__isnull=False)
+        .values_list('anthill_activity_id', 'order_id')
+    )
+
+    def _is_orphan_duplicate(order):
+        """True when this order is a non-canonical duplicate of its sale_number."""
+        if not order or not order.sale_number:
+            return False
+        canon = _canonical_order_by_sale.get(order.sale_number)
+        return canon is not None and canon != order.id
+
     # Get all appointments for this month
     # Auto-create FitAppointment for orders with fit_date but no appointment
+    # (skip orphan duplicates so we don't keep regenerating phantom cards).
     orders_without_appt = (
         Order.objects
         .filter(fit_date__year=current_year, fit_date__month=current_month, job_finished=False)
@@ -12099,6 +12121,8 @@ def calendar_view(request):
         ).values_list('order_id', flat=True))
     )
     for order in orders_without_appt:
+        if _is_orphan_duplicate(order):
+            continue
         FitAppointment.objects.create(
             order=order,
             fit_date=order.fit_date,
@@ -12123,6 +12147,24 @@ def calendar_view(request):
         fit_date__lte=grid_end
     ).select_related('order', 'remedial').prefetch_related('order__po_projects__purchase_order'))
 
+    # Drop appointments belonging to orphan duplicate orders so the calendar only
+    # ever shows the canonical (sale-detail) order's appointment. This removes the
+    # phantom cards on stale dates and prevents one sale from appearing under two
+    # fitters on the same day.
+    appointments = [a for a in appointments if not _is_orphan_duplicate(a.order)]
+
+    # Purchase orders are sometimes attached to the orphan duplicate rather than
+    # the canonical order, so gather POs across every Order that shares the
+    # canonical appointment's sale_number for the detail modal below.
+    from collections import defaultdict as _defaultdict
+    _orders_by_sale = _defaultdict(list)
+    _appt_sale_numbers = {a.order.sale_number for a in appointments if a.order and a.order.sale_number}
+    if _appt_sale_numbers:
+        for _o in (Order.objects
+                   .filter(sale_number__in=_appt_sale_numbers)
+                   .prefetch_related('po_projects__purchase_order')):
+            _orders_by_sale[_o.sale_number].append(_o)
+
     # Attach payment info (sale value / paid / outstanding) from linked AnthillSale.
     # The sale-detail page is the single source of truth: it allocates the
     # customer's whole payment pool across their sales and persists each sale's
@@ -12137,22 +12179,26 @@ def calendar_view(request):
             continue
         appt.fin = _fin_by_sale.get(appt.order.sale_number)
 
-    # Linked purchase orders per appointment (for the appointment detail modal)
+    # Linked purchase orders per appointment (for the appointment detail modal).
+    # Collect across all duplicate orders sharing this sale_number so POs held on
+    # an orphan duplicate still show on the canonical appointment.
     import json as _json
     for appt in appointments:
         _appt_pos = []
         if appt.order:
+            _source_orders = _orders_by_sale.get(appt.order.sale_number) or [appt.order]
             _seen_po = set()
-            for _pp in appt.order.po_projects.all():
-                _po = _pp.purchase_order
-                if not _po or _po.workguru_id in _seen_po:
-                    continue
-                _seen_po.add(_po.workguru_id)
-                _appt_pos.append({
-                    'number': _po.display_number or _po.number or str(_po.workguru_id),
-                    'status': (_po.status or 'Draft').strip(),
-                    'supplier': _po.supplier_name or '',
-                })
+            for _src in _source_orders:
+                for _pp in _src.po_projects.all():
+                    _po = _pp.purchase_order
+                    if not _po or _po.workguru_id in _seen_po:
+                        continue
+                    _seen_po.add(_po.workguru_id)
+                    _appt_pos.append({
+                        'number': _po.display_number or _po.number or str(_po.workguru_id),
+                        'status': (_po.status or 'Draft').strip(),
+                        'supplier': _po.supplier_name or '',
+                    })
         appt.pos_json = _json.dumps(_appt_pos)
 
     # Get all orders with fit dates in this month (for quick add)
