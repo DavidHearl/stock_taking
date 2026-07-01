@@ -4,7 +4,13 @@ Sliderobes Atlas — internal ops platform (Django 5.2). These are the standing 
 
 ## Git workflow
 
-- **Push directly to `main`.** The dev environment runs against main, so all changes go there immediately so the user can review them live. Do not create feature branches or PRs unless explicitly asked.
+- **Work directly on `main` — no feature branches or PRs unless explicitly asked.**
+- **Never run `git commit` or `git push` unless the user explicitly tells you to commit.** Make the code changes and leave them as uncommitted diffs for review — the user may have other work in progress and wants to control when/what lands on `main`. Committing or pushing without being told is a hard rule violation, not a judgment call.
+- If a background/worktree session must isolate edits mechanically, that isolation is a session-local staging detail only — it doesn't change the rule above. The change still isn't committed to the project's real `main` until the user says so.
+
+## Code style
+
+- **Indentation: tab characters, not spaces**, in code you write or edit (Python, CSS, JS, templates). Existing files may still use spaces — don't do a drive-by reformat of a whole file just to switch its indentation; match this rule for new/changed lines going forward.
 
 ## Running things
 
