@@ -6,9 +6,10 @@
 {% block nav_sales_active %}active{% endblock %}
 
 {% block page_title %}
-<span class="page-title-row">
-    <a href="{% url 'sales_list' %}" class="back-link" title="Back to Sales"><i class="bi bi-arrow-left"></i></a>
-    Sale Detail{% if sale.contract_number %}: <span class="sale-number-suffix">{{ sale.contract_number }}</span>{% else %}: {{ sale.anthill_activity_id }}{% endif %}
+<span class="page-breadcrumb">
+    <a href="{% url 'sales_list' %}">Sales</a>
+    <span class="breadcrumb-sep">/</span>
+    <span class="breadcrumb-current">Sale Detail{% if sale.contract_number %}: <span class="sale-number-suffix">{{ sale.contract_number }}</span>{% else %}: {{ sale.anthill_activity_id }}{% endif %}</span>
 </span>
 {% endblock %}
 
@@ -180,6 +181,7 @@
 
                 {% if xero_payments %}
                 <div class="payment-source-label"><i class="bi bi-cloud"></i> Xero Payments <span class="text-muted">(all of this customer's sales)</span></div>
+                <div class="sale-table-scroll">
                 <table class="table orders-table">
                     <thead>
                         <tr>
@@ -262,10 +264,12 @@
                         </tr>
                     </tfoot>
                 </table>
+                </div>
                 {% endif %}
 
                 {% if manual_payments %}
                 <div class="payment-source-label"><i class="bi bi-pencil"></i> Manual Payments <span class="text-muted">(all of this customer's sales)</span></div>
+                <div class="sale-table-scroll">
                 <table class="table orders-table" id="manualPaymentsTable">
                     <thead>
                         <tr>
@@ -334,6 +338,7 @@
                         </tr>
                     </tfoot>
                 </table>
+                </div>
                 {% endif %}
 
                 {% if not xero_payments and not manual_payments %}
@@ -2030,7 +2035,7 @@
             <form class="order-note-form" id="order-note-form" onsubmit="submitOrderNote(event)">
                 {% csrf_token %}
                 <textarea class="order-note-input" id="order-note-input" name="text" rows="3" placeholder="Add a note…"></textarea>
-                <button type="submit" class="btn btn-sm btn-add-icon order-note-submit">
+                <button type="submit" class="btn btn-sm order-note-submit">
                     <i class="bi bi-plus-lg"></i> Add Note
                 </button>
             </form>
@@ -2232,6 +2237,17 @@
                            onchange="setAllItemsOrdered({{ order.id }}, this.checked)">
                     <span><i class="bi bi-box-seam"></i> All Items Ordered</span>
                 </label>
+                {% endif %}
+                {% if workflow_progress.current_stage.name == 'Upload Fit Photos' %}
+                <label class="wf-order-action wf-photo-action {% if fit_photos_uploaded %}is-done{% endif %}" for="wfFitPhotoInput">
+                    <input type="checkbox" {% if fit_photos_uploaded %}checked{% endif %} disabled>
+                    <span><i class="bi bi-camera"></i> Fit Photos Uploaded</span>
+                    <input type="file" id="wfFitPhotoInput" accept="image/*" multiple class="job-doc-file-hidden"
+                           onchange="uploadSalePhotos(this, {{ order.id }})">
+                </label>
+                {% if not fit_photos_uploaded %}
+                <p class="wf-req-hint"><i class="bi bi-exclamation-circle"></i> Upload at least one fit photo to progress this stage.</p>
+                {% endif %}
                 {% endif %}
                 <div class="wf-stage-actions">
                     {% if stage_criteria_met %}

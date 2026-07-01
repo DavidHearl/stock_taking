@@ -2445,6 +2445,31 @@ textarea.form-input {
     color: var(--success-color);
 }
 
+/* Pending state — Upload Fit Photos before any photo exists. Signals the stage
+   isn't satisfied yet rather than showing the default green "done" look. */
+.wf-order-action.wf-photo-action:not(.is-done) {
+    background: var(--warning-subtle);
+    border-color: var(--warning-subtle);
+    color: var(--warning-color);
+}
+
+.wf-order-action.wf-photo-action:not(.is-done):hover {
+    border-color: var(--warning-color);
+}
+
+.wf-order-action.wf-photo-action input[type="checkbox"]:disabled {
+    cursor: pointer;
+}
+
+.wf-req-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 6px 0 0;
+    font-size: 0.72rem;
+    color: var(--warning-color);
+}
+
 /* Stage criteria-met tick after the stage name */
 .wf-stage-name-row {
     display: flex;
@@ -3174,13 +3199,33 @@ tfoot tr.tbl-subtotal-row:hover > td {
     .order-details-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .sidebar-column {
         order: -1;
     }
 
     .order-info-grid {
         grid-template-columns: 1fr;
+    }
+
+    /* Keep the detail page within the viewport: the layout wrappers must be
+       allowed to shrink (grid/flex children default to min-width:auto, which
+       is what forces the page wider than the screen). Genuinely wide tables
+       keep their own horizontal scroll inside .sale-table-scroll. */
+    .sale-page-layout,
+    .sale-page-main,
+    .sale-page-summary-col,
+    .order-details-grid,
+    .main-column,
+    .detail-tab-panel {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    /* Scoped to this page (via :has) so other pages that rely on page-level
+       horizontal scroll for wide tables are unaffected. */
+    .page-content:has(.sale-page-layout) {
+        overflow-x: clip;
     }
 }
 
@@ -3189,7 +3234,16 @@ tfoot tr.tbl-subtotal-row:hover > td {
     .form-grid-3col {
         grid-template-columns: 1fr;
     }
-    
+
+    /* Reclaim horizontal space inside the detail cards on phones. */
+    .sale-page-layout .card-body.padded {
+        padding: 12px !important;
+    }
+
+    .sale-page-layout .card-header {
+        padding: 10px 12px;
+    }
+
     .section-header {
         flex-direction: column;
         align-items: flex-start;
@@ -4312,10 +4366,8 @@ tfoot tr.tbl-subtotal-row:hover > td {
     background: var(--primary-color, #4a9eff);
 }
 
-/* ─── Order Notes ──────────────────────────────────────────────────────────── */
 .order-notes-wrap {
-    max-width: 700px;
-    padding: 24px 0;
+    width: 100%;
     display: flex;
     flex-direction: column;
     gap: 20px;
@@ -4405,7 +4457,25 @@ tfoot tr.tbl-subtotal-row:hover > td {
 }
 
 .order-note-submit {
-    align-self: flex-end;
+	align-self: flex-end;
+	display: inline-flex;
+	align-items: center;
+	gap: var(--sp-2);
+	width: auto;
+	height: auto;
+	padding: var(--sp-2) var(--sp-4);
+	border: none;
+	border-radius: var(--radius-md);
+	background: var(--success-color);
+	color: var(--text-on-color);
+	font-size: 0.85rem;
+	font-weight: 600;
+	cursor: pointer;
+	transition: var(--transition);
+}
+
+.order-note-submit:hover {
+	background: var(--success-hover);
 }
 
 #addBoardModal #board-staging-area {

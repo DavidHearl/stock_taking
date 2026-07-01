@@ -7427,6 +7427,14 @@ def _build_order_context(order, request):
     if (workflow_progress.current_stage
             and workflow_progress.current_stage.name == 'Place Order or Allocate from Stock'):
         stage_criteria_met = stage_criteria_met and order.all_items_ordered
+    # The "Upload Fit Photos" stage can't be completed until at least one photo
+    # has actually been uploaded against the order — without this gate the stage
+    # auto-ticks (it has no requirement tasks) and lets users progress with no photos.
+    from .models import GalleryImage
+    fit_photos_uploaded = GalleryImage.objects.filter(order=order).exists()
+    if (workflow_progress.current_stage
+            and workflow_progress.current_stage.name == 'Upload Fit Photos'):
+        stage_criteria_met = stage_criteria_met and fit_photos_uploaded
 
     phases = [('enquiry', 'Enquiry'), ('lead', 'Lead'), ('sale', 'Sale')]
     # Count active orders sitting at each stage (for the workflow management modal)
@@ -7794,6 +7802,7 @@ def _build_order_context(order, request):
         'workflow_stages': workflow_stages,
         'task_completions': task_completions,
         'stage_criteria_met': stage_criteria_met,
+        'fit_photos_uploaded': fit_photos_uploaded,
         'phases': phases,
         'stages_by_phase': stages_by_phase,
         'installation_timesheets': installation_timesheets,
@@ -12656,8 +12665,14 @@ def progress_to_next_stage(request, order_id):
             # Check if all requirement tasks are completed before progressing
             if not workflow_progress.can_progress_to_next_stage:
                 return JsonResponse({'success': False, 'error': 'Cannot progress: Required tasks must be completed first'}, status=400)
-            
+
             current_stage = workflow_progress.current_stage
+
+            # "Upload Fit Photos" can't be completed until a photo has been uploaded.
+            if current_stage.name == 'Upload Fit Photos':
+                from .models import GalleryImage
+                if not GalleryImage.objects.filter(order=order).exists():
+                    return JsonResponse({'success': False, 'error': 'Cannot progress: a fit photo must be uploaded first'}, status=400)
             
             # Find next stage (same phase, higher order, or first stage of next phase)
             next_stage = WorkflowStage.objects.filter(
