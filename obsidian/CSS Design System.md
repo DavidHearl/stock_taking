@@ -21,12 +21,12 @@ The one rule that matters most: **never hardcode a colour, radius, shadow, or sp
 
 | Token | Dark | Light | Use |
 |---|---|---|---|
-| `--bg-page` | `#0b0c10` | `#eef0f3` | Outermost page background (canvas) |
-| `--bg-primary` | `#0f1116` | `#f5f6f9` | Primary surface |
-| `--bg-secondary` | `#14161c` | `#ffffff` | Cards, panels |
-| `--bg-tertiary` | `#1b1e26` | `#f2f4f7` | Raised/nested surface (sunken) |
-| `--bg-nav` | `#14161c` | `#ffffff` | Sidebar / topbar |
-| `--bg-input` | `#1b1e26` | `#ffffff` | Form inputs |
+| `--bg-page` | `#141518` | `#eef1f5` | Outermost page background (canvas) |
+| `--bg-primary` | `#191a1e` | `#f5f6f9` | Primary surface (mid step above canvas) |
+| `--bg-secondary` | `#1f2024` | `#ffffff` | Cards, panels (dark: clearly lighter than canvas) |
+| `--bg-tertiary` | `#2a2b30` | `#f2f4f7` | Raised/nested surface (sunken), table headers |
+| `--bg-nav` | `#1f2024` | `#ffffff` | Sidebar / topbar |
+| `--bg-input` | `#2a2b30` | `#ffffff` | Form inputs |
 | `--bg-hover` | `rgba(47,107,246,.06)` | `rgba(47,107,246,.08)` | Hover states (accent-tinted) |
 | `--bg-card` | dark gradient | white gradient | Card backgrounds |
 | `--overlay-bg` | `rgba(0,0,0,.60)` | `rgba(0,0,0,.40)` | Modal/scrim overlay |
@@ -35,10 +35,11 @@ The one rule that matters most: **never hardcode a colour, radius, shadow, or sp
 
 | Token | Dark | Light | Use |
 |---|---|---|---|
-| `--text-primary` | `#f2f3f6` | `#1f2430` | Body / headings |
-| `--text-secondary` | `#99a0ad` | `#5a616e` | Supporting text |
-| `--text-muted` | `#636a78` | `#9aa2b0` | Labels, hints, captions |
+| `--text-primary` | `#dee1e5` | `#0f172a` | Body / headings (high contrast, soft off-white) |
+| `--text-secondary` | `#b4b8bf` | `#334155` | Supporting text |
+| `--text-muted` | `#9da1a9` | `#5b6472` | Labels, hints, captions — never lighter than this on white |
 | `--text-on-color` | `#ffffff` | `#ffffff` | Text on a coloured fill (buttons, badges) |
+| `--link-color` | `#77a5ff` | `#1d4ed8` | Text hyperlinks / report actions (higher contrast than the `#2f6bf6` accent) |
 
 ### Semantic colours
 
@@ -76,10 +77,10 @@ Example: a "pending" badge uses `background: var(--warning-subtle); color: var(-
 
 | Token | Value | Use |
 |---|---|---|
-| `--radius-sm` | 9px | Inputs, small buttons, swatches |
+| `--radius-sm` | 9px | Buttons, inputs, tabs, small controls, swatches |
 | `--radius-md` | 14px | Cards, panels |
 | `--radius-lg` | 18px | Large containers, modals |
-| `--radius-pill` | 999px | Pills / badges / buttons — always fully rounded |
+| `--radius-pill` | 999px | Status badges & pills only (not action buttons) — always fully rounded |
 
 ### Shadows
 
@@ -87,7 +88,7 @@ Example: a "pending" badge uses `background: var(--warning-subtle); color: var(-
 
 ### Borders & motion
 
-- `--border-color` — the one border colour for dividers, card edges, input borders. (`#282c36` dark / `#eceef1` light.)
+- `--border-color` — the one border colour for dividers, card edges, input borders. (`#34363b` dark / `#dce1e9` light — kept deliberately visible so cards/tables separate from the canvas.)
 - `--transition` — `all 0.2s ease`. Use it for hover/focus transitions instead of writing your own timing.
 
 ### Typography

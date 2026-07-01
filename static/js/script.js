@@ -132,7 +132,7 @@ function trackChange(selectElement) {
     if (originalValue !== newValue) {
         // Mark as changed
         pendingChanges.set(itemId, newValue);
-        selectElement.style.borderColor = '#ffc107';
+        selectElement.style.borderColor = 'var(--warning-color)';
         selectElement.style.borderWidth = '2px';
     } else {
         // Revert to original

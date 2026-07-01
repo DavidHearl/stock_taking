@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>html,body{margin:0;-webkit-font-smoothing:antialiased;}*{box-sizing:border-box;}</style>
+</helmet>
+<div style="{{ sBackdrop }}">
+  <div style="{{ sModal }}">
+    <div style="{{ sHeader }}">
+      <div>
+        <div style="{{ sTitle }}">Workflow Management</div>
+        <div style="{{ sSubtitle }}">27 stages · 93 days total</div>
+      </div>
+      <div style="{{ sHeadRight }}">
+        <div style="{{ sAddStage }}">⊕ Add Stage</div>
+        <div style="{{ sClose }}">✕</div>
+      </div>
+    </div>
+
+    <div style="{{ sList }}">
+      <sc-for list="{{ stages }}" as="s" hint-placeholder-count="10">
+        <div style="{{ s.wrapStyle }}">
+          <div style="{{ s.rowStyle }}" onClick="{{ s.onToggle }}">
+            <span style="{{ s.chevStyle }}">›</span>
+            <span style="{{ sNum }}">{{ s.num }}</span>
+            <span style="{{ sStageTitle }}">{{ s.title }}</span>
+            <span style="{{ s.teamStyle }}">{{ s.team }}</span>
+            <span style="{{ sDur }}">◷ {{ s.dur }}</span>
+            <span style="{{ s.checkStyle }}">☑ {{ s.checks }}</span>
+            <span style="{{ s.currentStyle }}">✓ Current</span>
+            <span style="{{ s.peopleStyle }}">👥 {{ s.people }}</span>
+            <span style="{{ sKebab }}">⋮</span>
+          </div>
+          <sc-if value="{{ s.open }}" hint-placeholder-val="{{ false }}">
+            <div style="{{ sExpand }}">
+              <div style="{{ sDesc }}">{{ s.desc }}</div>
+              <sc-for list="{{ s.tasks }}" as="t" hint-placeholder-count="2">
+                <div style="{{ sTaskRow }}"><span style="{{ sTaskCheck }}">☑</span><span style="{{ sTaskLabel }}">{{ t }}</span><span style="{{ sRecord }}">RECORD</span><span style="{{ sTaskX }}">✕</span></div>
+              </sc-for>
+              <div style="{{ sAddTask }}">＋ Add Task</div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="{{ sFooter }}"><div style="{{ sCloseBtn }}">Close</div></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:900,&quot;height&quot;:820},&quot;mode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;default&quot;:&quot;light&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;color&quot;,&quot;default&quot;:&quot;#2F6BF6&quot;,&quot;options&quot;:[&quot;#2F6BF6&quot;,&quot;#2563EB&quot;,&quot;#1D4ED8&quot;,&quot;#3B82F6&quot;],&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  state = { open: 18 };
+  rgba(hex, a) {
+    const h = (hex || '#000').replace('#', '');
+    const n = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+    return `rgba(${parseInt(n.slice(0,2),16)},${parseInt(n.slice(2,4),16)},${parseInt(n.slice(4,6),16)},${a})`;
+  }
+  renderVals() {
+    const accent = this.props.accent || '#2F6BF6';
+    const mode = this.props.mode === 'dark' ? 'dark' : 'light';
+    const light = mode === 'light';
+    const font = "'Manrope', system-ui, sans-serif";
+    const disp = "'Chakra Petch', sans-serif";
+    const p = light
+      ? { modal: '#FFFFFF', bg: '#F4F5F8', line: '#E4E7ED', lineHard: '#CBD0DA', text: '#0F1420', text2: '#3A4150', dim: '#5E6675', faint: '#8B93A2', cur: '#EEF3FF' }
+      : { modal: '#1D1E22', bg: '#141518', line: '#313236', lineHard: '#43454A', text: '#DEE1E5', text2: '#B4B8BF', dim: '#8F949C', faint: '#6C7079', cur: '#24262B' };
+
+    const teamColor = {
+      'Customer Support': ['#2563EB', light ? '#2563EB' : '#7FA8FF'],
+      'Design': ['#8B5CF6', light ? '#7C3AED' : '#B79BFF'],
+      'Operations': ['#F59E0B', light ? '#B4790B' : '#F5B84A'],
+      'Manufacturing': ['#16A34A', light ? '#12924A' : '#4ED88A'],
+      'Waiting Period': ['#8B5CF6', light ? '#7C3AED' : '#B79BFF'],
+      'Fitter': ['#EF4444', light ? '#DC2626' : '#FF8A8A']
+    };
+    const raw = [
+      [12, 'Take Deposit', 'Customer Support', '3d', 3, 0],
+      [13, 'Generate Contract', 'Customer Support', '1d', 0, 0],
+      [14, 'Confirm Contract Signed', 'Customer Support', '2d', 0, 0],
+      [15, 'Upload Documents', 'Design', '2d', 4, 0],
+      [16, 'Final Design Checked and Handover', 'Operations', '2d', 2, 2],
+      [17, 'Passed for Production (PFP)', 'Manufacturing', '3d', 4, 0],
+      [18, 'Arrange Install Date & Take Stock Payment', 'Customer Support', '3d', 2, 31, true],
+      [19, 'Place Order or Allocate from Stock', 'Operations', '7d', 0, 17],
+      [20, 'Allow time for orders to arrive', 'Waiting Period', '21d', 0, 3],
+      [21, 'Manufacture Product', 'Manufacturing', '6d', 4, 0],
+      [22, 'Pre-Fit Call to Customer', 'Customer Support', '2d', 3, 18],
+      [23, 'Upload Fit Photos', 'Fitter', '', 0, 25],
+      [24, 'Complete Fitter Report', 'Fitter', '', 1, 9]
+    ];
+    const tasksFor = n => n === 18 ? ['1st attempt to arrange install date.', '2nd attempt to arrange install date.'] : [];
+    const descFor = n => n === 18 ? 'Arrange the fit date based on the estimate provided in the PFP. Take a second payment so the stock can be ordered.' : 'Stage details and checklist for this step.';
+
+    const stages = raw.map(d => {
+      const [num, title, team, dur, checks, people, current] = d;
+      const open = this.state.open === num;
+      const tc = teamColor[team] || ['#64748B', p.dim];
+      return {
+        num, title, team, dur, checks, people,
+        open, desc: descFor(num), tasks: tasksFor(num),
+        onToggle: () => this.setState(s => ({ open: s.open === num ? -1 : num })),
+        wrapStyle: { flexShrink: 0, border: `1px solid ${current ? accent : p.line}`, borderLeft: current ? `3px solid ${accent}` : `1px solid ${p.line}`, borderRadius: '12px', background: open && !current ? p.bg : p.modal, overflow: 'hidden', boxShadow: current ? `0 4px 16px ${this.rgba(accent, .14)}` : 'none' },
+        rowStyle: { display: 'flex', alignItems: 'center', gap: '12px', padding: '15px 16px', cursor: 'pointer' },
+        chevStyle: { color: p.faint, fontSize: '17px', fontWeight: 700, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flex: '0 0 auto' },
+        teamStyle: { fontSize: '12px', fontWeight: 700, color: tc[1], background: this.rgba(tc[0], light ? .12 : .2), padding: '4px 11px', borderRadius: '999px', flex: '0 0 auto' },
+        checkStyle: checks ? { fontSize: '12.5px', color: p.dim, fontWeight: 600, flex: '0 0 auto' } : { display: 'none' },
+        currentStyle: current ? { fontSize: '12px', fontWeight: 700, color: '#fff', background: accent, padding: '4px 10px', borderRadius: '999px', flex: '0 0 auto' } : { display: 'none' },
+        peopleStyle: people ? { fontSize: '12px', color: p.dim, fontWeight: 700, background: light ? '#EEF0F3' : '#22242C', padding: '4px 9px', borderRadius: '999px', flex: '0 0 auto' } : { display: 'none' }
+      };
+    });
+
+    return {
+      stages,
+      sBackdrop: { minHeight: '100%', background: this.rgba('#0A0D14', light ? .5 : .7), display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 20px', fontFamily: font },
+      sModal: { width: '760px', maxWidth: '100%', background: p.modal, borderRadius: '20px', boxShadow: '0 30px 90px rgba(0,0,0,.4)', display: 'flex', flexDirection: 'column', maxHeight: '86vh', overflow: 'hidden', border: light ? 'none' : `1px solid ${p.line}` },
+      sHeader: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', padding: '24px 26px 18px' },
+      sTitle: { fontFamily: disp, fontSize: '24px', fontWeight: 600, color: p.text },
+      sSubtitle: { fontSize: '13px', color: p.dim, marginTop: '4px', fontWeight: 500 },
+      sHeadRight: { display: 'flex', alignItems: 'center', gap: '14px' },
+      sAddStage: { padding: '10px 16px', borderRadius: '10px', background: accent, color: '#fff', fontSize: '13.5px', fontWeight: 700, boxShadow: `0 4px 12px ${this.rgba(accent, .3)}` },
+      sClose: { color: p.dim, fontSize: '18px', fontWeight: 700, cursor: 'pointer', padding: '4px' },
+      sList: { display: 'flex', flexDirection: 'column', gap: '12px', padding: '4px 26px 20px', overflowY: 'auto' },
+      sNum: { fontSize: '14px', fontWeight: 700, color: p.faint, minWidth: '20px', fontVariantNumeric: 'tabular-nums', flex: '0 0 auto' },
+      sStageTitle: { fontSize: '15px', fontWeight: 700, color: p.text, flex: '1 1 auto' },
+      sDur: { fontSize: '12.5px', color: p.dim, fontWeight: 600, background: light ? '#EEF0F3' : '#22242C', padding: '4px 10px', borderRadius: '999px', flex: '0 0 auto' },
+      sKebab: { color: p.faint, fontSize: '17px', fontWeight: 700, flex: '0 0 auto' },
+      sExpand: { padding: '2px 16px 16px 44px', display: 'flex', flexDirection: 'column', gap: '10px' },
+      sDesc: { fontSize: '13.5px', color: p.text2, lineHeight: 1.5 },
+      sTaskRow: { display: 'flex', alignItems: 'center', gap: '11px', padding: '11px 13px', borderRadius: '9px', background: p.bg, border: `1px solid ${p.line}` },
+      sTaskCheck: { color: p.faint, fontSize: '15px' },
+      sTaskLabel: { flex: '1 1 auto', fontSize: '13.5px', fontWeight: 600, color: p.text },
+      sRecord: { fontSize: '10px', fontWeight: 800, letterSpacing: '.06em', color: p.faint, border: `1px solid ${p.line}`, borderRadius: '5px', padding: '3px 7px' },
+      sTaskX: { color: p.faint, fontSize: '13px' },
+      sAddTask: { alignSelf: 'flex-start', fontSize: '13px', fontWeight: 700, color: p.dim, border: `1px dashed ${p.lineHard}`, borderRadius: '999px', padding: '7px 15px' },
+      sFooter: { display: 'flex', justifyContent: 'flex-end', padding: '16px 26px', borderTop: `1px solid ${p.line}` },
+      sCloseBtn: { padding: '9px 20px', borderRadius: '10px', border: `1px solid ${p.lineHard}`, color: p.text2, fontSize: '13.5px', fontWeight: 700 }
+    };
+  }
+}
+</script>
+</body>
+</html>

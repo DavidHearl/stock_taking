@@ -18,7 +18,7 @@
         bodyEl.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
     }
     function setError(bodyEl) {
-        bodyEl.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load report.</p>';
+        bodyEl.innerHTML = '<p style="padding:12px;color:var(--danger-color)">Failed to load report.</p>';
     }
     function setEmpty(bodyEl, msg) {
         bodyEl.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">' + msg + '</p>';
@@ -134,7 +134,7 @@
                         const saleLink = r.sale_number
                             ? '<a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.sale_number + '</a>'
                             : '-';
-                        const remainingStyle = r.remaining > 0 ? ' style="color:#dc3545;font-weight:600;"' : '';
+                        const remainingStyle = r.remaining > 0 ? ' style="color:var(--danger-color);font-weight:600;"' : '';
                         html += '<tr>' +
                             '<td><a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.customer + '</a></td>' +
                             '<td>' + saleLink + '</td>' +
@@ -154,7 +154,7 @@
                         '<span class="dash-report-year-total">' + fmt(grandTotal) + ' total</span></td>' +
                         '<td class="text-right" style="font-weight:600;">' + fmt(grandTotal) + '</td>' +
                         '<td class="text-right" style="font-weight:600;">' + fmt(grandPaid) + '</td>' +
-                        '<td class="text-right" style="font-weight:600;color:#dc3545;">' + fmt(grandRemaining) + '</td>' +
+                        '<td class="text-right" style="font-weight:600;color:var(--danger-color);">' + fmt(grandRemaining) + '</td>' +
                         '</tr>';
                     html += '</tbody></table>';
                     body.innerHTML = html;
@@ -202,7 +202,7 @@
                     '<td class="text-right" style="font-weight:600;">' + fmt(avgPerSale) + '</td>' +
                     '</tr>';
                 html += '</tbody></table>';
-                html += '<div style="margin-top:16px;padding:12px 16px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:8px;display:flex;gap:32px;flex-wrap:wrap;">' +
+                html += '<div style="margin-top:16px;padding:12px 16px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:8px;display:flex;gap:32px;flex-wrap:wrap;">' +
                     '<div><div style="font-size:0.75rem;color:var(--text-secondary);">Daily Avg Revenue (total \u00f7 365)</div>' +
                     '<div style="font-size:1.25rem;font-weight:700;">' + fmt(data.daily_avg) + '</div></div>' +
                     '<div><div style="font-size:0.75rem;color:var(--text-secondary);">Avg Sale Value (total \u00f7 fits)</div>' +
@@ -245,16 +245,16 @@
         if (tab === 'report') {
             reportBody.style.display = '';
             tabs.report.style.color = 'var(--text-primary)';
-            tabs.report.style.borderBottomColor = '#29e8eb';
+            tabs.report.style.borderBottomColor = 'var(--primary-color)';
             if (pdfBtn) pdfBtn.style.display = '';
         } else if (tab === 'changes') {
             changesBody.style.display = '';
             tabs.changes.style.color = 'var(--text-primary)';
-            tabs.changes.style.borderBottomColor = '#29e8eb';
+            tabs.changes.style.borderBottomColor = 'var(--primary-color)';
         } else {
             historyBody.style.display = '';
             tabs.history.style.color = 'var(--text-primary)';
-            tabs.history.style.borderBottomColor = '#29e8eb';
+            tabs.history.style.borderBottomColor = 'var(--primary-color)';
             if (!_stockHistoryLoaded) loadStockHistory(cfg);
         }
     }
@@ -278,7 +278,7 @@
             .then(r => r.json())
             .then(data => {
                 if (!data.success) {
-                    reportBody.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load stock data.</p>';
+                    reportBody.innerHTML = '<p style="padding:12px;color:var(--danger-color)">Failed to load stock data.</p>';
                     changesBody.innerHTML = '';
                     return;
                 }
@@ -295,8 +295,8 @@
                         '<th class="text-right">Qty Change</th><th class="text-right">Value Change</th><th class="text-right">Date</th>' +
                         '</tr></thead><tbody>';
                     data.recent_changes.forEach(c => {
-                        const qtyColor = c.change_amount > 0 ? '#28a745' : '#dc3545';
-                        const valColor = c.value_change > 0 ? '#28a745' : '#dc3545';
+                        const qtyColor = c.change_amount > 0 ? 'var(--success-color)' : 'var(--danger-color)';
+                        const valColor = c.value_change > 0 ? 'var(--success-color)' : 'var(--danger-color)';
                         const qtySign = c.change_amount > 0 ? '+' : '';
                         const valSign = c.value_change > 0 ? '+' : '';
                         changesHtml += '<tr>' +
@@ -350,7 +350,7 @@
             .then(r => r.json())
             .then(data => {
                 if (!data.success) {
-                    body.innerHTML = '<p style="padding:12px;color:#dc3545">Failed to load data.</p>';
+                    body.innerHTML = '<p style="padding:12px;color:var(--danger-color)">Failed to load data.</p>';
                     return;
                 }
                 _stockHistoryLoaded = true;
@@ -358,7 +358,7 @@
                 const canvasId = 'monthlyStockChart';
                 let html = '<canvas id="' + canvasId + '" style="width:100%;max-height:260px;margin-bottom:16px;"></canvas>';
                 html += '<div style="border:1px solid var(--border-color);border-radius:8px;overflow:hidden;">';
-                html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;padding:6px 16px;background:var(--card-bg);border-bottom:2px solid var(--border-color);font-size:0.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);">' +
+                html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;padding:6px 16px;background:var(--bg-card);border-bottom:2px solid var(--border-color);font-size:0.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);">' +
                     '<span>Month</span><span style="text-align:right;">Stock Value</span><span style="text-align:right;">Change</span></div>';
                 months.forEach((row, idx) => {
                     const prev = idx > 0 ? months[idx - 1].value : null;
@@ -366,7 +366,7 @@
                     if (prev !== null) {
                         const diff = row.value - prev;
                         const pct = prev > 0 ? ((diff / prev) * 100).toFixed(1) : '&mdash;';
-                        const color = diff >= 0 ? '#28a745' : '#dc3545';
+                        const color = diff >= 0 ? 'var(--success-color)' : 'var(--danger-color)';
                         const sign = diff >= 0 ? '+' : '';
                         changeHtml = '<span style="color:' + color + ';">' + sign + fmt(diff) + ' (' + sign + pct + '%)</span>';
                     }
@@ -391,7 +391,7 @@
                             datasets: [{
                                 label: 'Stock Value',
                                 data: values,
-                                borderColor: '#29e8eb',
+                                borderColor: 'var(--primary-color)',
                                 backgroundColor: 'rgba(41,232,235,0.1)',
                                 fill: true,
                                 tension: 0.3,
@@ -492,7 +492,7 @@
                     html += '<td>' + cust.sales.length + ' sale' + (cust.sales.length !== 1 ? 's' : '') + '</td>';
                     html += '<td class="text-right">' + fmt(cust.total_sale_value) + '</td>';
                     html += '<td class="text-right">' + fmt(cust.total_paid) + '</td>';
-                    html += '<td class="text-right" style="color:#dc3545;font-weight:600">' + fmt(cust.total_outstanding) + '</td>';
+                    html += '<td class="text-right" style="color:var(--danger-color);font-weight:600">' + fmt(cust.total_outstanding) + '</td>';
                     html += '</tr>';
 
                     html += '<tr class="os-detail-row" id="' + rid + '" style="display:none;"><td colspan="' + COL_COUNT + '">';
@@ -505,10 +505,10 @@
                             html += '<tr>';
                             html += '<td>' + (s.sale_number ? '<a href="/sale/' + s.pk + '/" target="_blank" class="dash-report-link">' + s.sale_number + '</a>' : '-') + '</td>';
                             html += '<td>' + (s.contract || '-') + '</td>';
-                            html += '<td>' + (s.fit_date || '<span style="color:#dc3545;font-style:italic;">No fit date</span>') + '</td>';
+                            html += '<td>' + (s.fit_date || '<span style="color:var(--danger-color);font-style:italic;">No fit date</span>') + '</td>';
                             html += '<td class="text-right">' + fmt(s.sale_value) + '</td>';
                             html += '<td class="text-right">' + fmt(s.paid) + '</td>';
-                            html += '<td class="text-right" style="color:#dc3545;font-weight:600">' + fmt(s.outstanding) + '</td>';
+                            html += '<td class="text-right" style="color:var(--danger-color);font-weight:600">' + fmt(s.outstanding) + '</td>';
                             html += '<td class="text-center"><button class="os-xero-btn" onclick="DashReports.checkXeroSingle(' + s.pk + ', this, event)" title="Check Xero for payments"><i class="bi bi-arrow-repeat"></i></button></td>';
                             html += '</tr>';
                             if (s.payments && s.payments.length > 0) {
@@ -528,7 +528,7 @@
                 if (data.overpaid_rows && data.overpaid_rows.length > 0) {
                     const totalOverpaid = data.overpaid_rows.reduce((s, r) => s + r.total_overpaid, 0);
                     html += '<div style="margin-top:18px;padding:12px 16px;background:rgba(255,165,0,0.08);border:1px solid rgba(255,165,0,0.3);border-radius:8px;">';
-                    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><i class="bi bi-exclamation-triangle-fill" style="color:#f59e0b;font-size:1rem;"></i><strong style="color:#f59e0b;">Overpaid Customers</strong><span style="font-size:0.78rem;color:var(--text-secondary);">' + data.overpaid_rows.length + ' customer' + (data.overpaid_rows.length !== 1 ? 's' : '') + ' &mdash; ' + fmt(totalOverpaid) + ' overpaid</span></div>';
+                    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><i class="bi bi-exclamation-triangle-fill" style="color:var(--warning-color);font-size:1rem;"></i><strong style="color:var(--warning-color);">Overpaid Customers</strong><span style="font-size:0.78rem;color:var(--text-secondary);">' + data.overpaid_rows.length + ' customer' + (data.overpaid_rows.length !== 1 ? 's' : '') + ' &mdash; ' + fmt(totalOverpaid) + ' overpaid</span></div>';
                     html += '<table class="dash-report-table" style="margin:0;"><thead><tr>';
                     html += '<th style="width:24px"></th><th>Customer</th><th>Sales</th><th class="text-right">Sale Value</th><th class="text-right">Paid</th><th class="text-right">Overpaid</th>';
                     html += '</tr></thead><tbody>';
@@ -548,7 +548,7 @@
                         html += '<td>' + cust.sales.length + ' sale' + (cust.sales.length !== 1 ? 's' : '') + '</td>';
                         html += '<td class="text-right">' + fmt(cust.total_sale_value) + '</td>';
                         html += '<td class="text-right">' + fmt(cust.total_paid) + '</td>';
-                        html += '<td class="text-right" style="color:#f59e0b;font-weight:600">+' + fmt(cust.total_overpaid) + '</td>';
+                        html += '<td class="text-right" style="color:var(--warning-color);font-weight:600">+' + fmt(cust.total_overpaid) + '</td>';
                         html += '</tr>';
                         html += '<tr class="os-detail-row" id="' + oprid + '" style="display:none;"><td colspan="6">';
                         html += '<div class="os-detail-content">';
@@ -561,7 +561,7 @@
                                 html += '<td>' + (s.fit_date || '-') + '</td>';
                                 html += '<td class="text-right">' + fmt(s.sale_value) + '</td>';
                                 html += '<td class="text-right">' + fmt(s.paid) + '</td>';
-                                html += '<td class="text-right" style="color:#f59e0b;font-weight:600">+' + fmt(s.overpaid) + '</td>';
+                                html += '<td class="text-right" style="color:var(--warning-color);font-weight:600">+' + fmt(s.overpaid) + '</td>';
                                 html += '</tr>';
                                 if (s.payments && s.payments.length > 0) {
                                     html += '<tr class="os-payment-sub"><td colspan="6"><table class="os-payments-table"><thead><tr><th>Date</th><th>Type</th><th>Source</th><th>Invoice</th><th>Status</th><th class="text-right">Amount</th></tr></thead><tbody>';
@@ -607,13 +607,13 @@
             .then(data => {
                 btnEl.disabled = false;
                 if (!data.success) {
-                    btnEl.innerHTML = '<i class="bi bi-x-circle" style="color:#dc3545;"></i>';
+                    btnEl.innerHTML = '<i class="bi bi-x-circle" style="color:var(--danger-color);"></i>';
                     btnEl.title = data.error || 'Error';
                     setTimeout(() => { btnEl.innerHTML = originalHtml; btnEl.title = 'Check Xero for payments'; }, 3000);
                     return;
                 }
                 if (data.found && (data.payments_created > 0 || data.payments_updated > 0)) {
-                    btnEl.innerHTML = '<i class="bi bi-check-circle" style="color:#10b981;"></i>';
+                    btnEl.innerHTML = '<i class="bi bi-check-circle" style="color:var(--success-color);"></i>';
                     btnEl.title = data.message;
                     setTimeout(() => loadOutstanding(), 1500);
                 } else {
@@ -624,7 +624,7 @@
             })
             .catch(() => {
                 btnEl.disabled = false;
-                btnEl.innerHTML = '<i class="bi bi-x-circle" style="color:#dc3545;"></i>';
+                btnEl.innerHTML = '<i class="bi bi-x-circle" style="color:var(--danger-color);"></i>';
                 setTimeout(() => { btnEl.innerHTML = originalHtml; }, 3000);
             });
     }
@@ -686,11 +686,11 @@
 
         function appendLog(text, level) {
             const line = document.createElement('div');
-            if (level === 'found') { line.style.color = '#10b981'; line.style.fontWeight = '600'; }
-            else if (level === 'error') { line.style.color = '#dc3545'; }
-            else if (level === 'warn') { line.style.color = '#f59e0b'; }
-            else if (level === 'skip') { line.style.color = 'var(--text-secondary, #6c757d)'; }
-            else { line.style.color = 'var(--text-primary, #212529)'; }
+            if (level === 'found') { line.style.color = 'var(--success-color)'; line.style.fontWeight = '600'; }
+            else if (level === 'error') { line.style.color = 'var(--danger-color)'; }
+            else if (level === 'warn') { line.style.color = 'var(--warning-color)'; }
+            else if (level === 'skip') { line.style.color = 'var(--text-secondary, var(--text-secondary))'; }
+            else { line.style.color = 'var(--text-primary, var(--text-primary))'; }
             line.textContent = text;
             logPanel.appendChild(line);
             logPanel.scrollTop = logPanel.scrollHeight;
