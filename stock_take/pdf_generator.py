@@ -16,7 +16,7 @@ from datetime import datetime
 from django.conf import settings
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
@@ -1041,16 +1041,17 @@ def generate_costing_report_pdf(costing_orders, stats):
     buffer = io.BytesIO()
     styles = _get_styles()
 
+    page_size = landscape(A4)
     doc = SimpleDocTemplate(
         buffer,
-        pagesize=A4,
+        pagesize=page_size,
         leftMargin=15 * mm, rightMargin=15 * mm,
         topMargin=15 * mm, bottomMargin=15 * mm,
         title='Costing Report',
     )
 
     elements = []
-    page_width = A4[0] - 30 * mm
+    page_width = page_size[0] - 30 * mm
 
     # ── HEADER ──────────────────────────────────────────────────
     logo_path = os.path.join(settings.BASE_DIR, 'static', 'images', 'logo-full-light.png')

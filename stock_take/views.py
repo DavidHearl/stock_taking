@@ -15441,10 +15441,50 @@ def costing_report(request):
 
     # ============================================================
     # Profitability analysis across ALL completed jobs.
-    # Mirrors the sale Financial Summary: where installation or
-    # manufacturing costs are not recorded, they are estimated at
-    # 10% / 5% of net revenue so every completed job can be analysed.
+    #
+    # Where a cost category is not recorded on a job it is estimated so every
+    # completed job can still be analysed. Rather than flat guesses, the
+    # estimate rate for each category is the AVERAGE ratio (cost / net revenue)
+    # observed across every job that DOES have that cost recorded - i.e. the
+    # company's own real numbers. Flat defaults are only used as a last resort
+    # when there is no recorded data at all to average from.
     # ============================================================
+
+    # Fallback rates used only when no recorded data exists to derive an average.
+    DEFAULT_MATERIALS_RATIO = 0.30
+    DEFAULT_INSTALLATION_RATIO = 0.10
+    DEFAULT_MANUFACTURING_RATIO = 0.05
+
+    def _avg_ratio(field, default):
+        """Average of (cost / revenue) across jobs that have this cost recorded."""
+        ratios = [
+            float(o[field]) / float(o['revenue'])
+            for o in orders_with_costs
+            if float(o['revenue']) > 0 and float(o[field]) > 0
+        ]
+        if ratios:
+            return sum(ratios) / len(ratios), len(ratios), False
+        return default, 0, True
+
+    materials_ratio, materials_sample, materials_is_default = _avg_ratio('materials_cost', DEFAULT_MATERIALS_RATIO)
+    installation_ratio, installation_sample, installation_is_default = _avg_ratio('installation_cost', DEFAULT_INSTALLATION_RATIO)
+    manufacturing_ratio, manufacturing_sample, manufacturing_is_default = _avg_ratio('manufacturing_cost', DEFAULT_MANUFACTURING_RATIO)
+
+    cost_ratios = {
+        'materials': {'pct': materials_ratio * 100, 'sample': materials_sample, 'is_default': materials_is_default},
+        'installation': {'pct': installation_ratio * 100, 'sample': installation_sample, 'is_default': installation_is_default},
+        'manufacturing': {'pct': manufacturing_ratio * 100, 'sample': manufacturing_sample, 'is_default': manufacturing_is_default},
+    }
+
+    # Track how complete the underlying data is, per cost category, across the
+    # analysed jobs so the report can show where numbers are real vs estimated.
+    completeness = {
+        'total': 0,
+        'materials_recorded': 0,
+        'installation_recorded': 0,
+        'manufacturing_recorded': 0,
+    }
+
     analysis = []
     for o in orders_with_costs:
         revenue = float(o['revenue'])
@@ -15453,12 +15493,27 @@ def costing_report(request):
         materials = float(o['materials_cost'])
         installation = float(o['installation_cost'])
         manufacturing = float(o['manufacturing_cost'])
+
+        completeness['total'] += 1
+        if materials > 0:
+            completeness['materials_recorded'] += 1
+        if installation > 0:
+            completeness['installation_recorded'] += 1
+        if manufacturing > 0:
+            completeness['manufacturing_recorded'] += 1
+
+        # Estimate any missing category from the company's real average ratios.
+        # Missing materials were previously counted as £0, which overstated
+        # profit on any job without a materials figure - estimate them too.
         estimated = False
+        if materials <= 0:
+            materials = revenue * materials_ratio
+            estimated = True
         if installation <= 0:
-            installation = revenue * 0.10
+            installation = revenue * installation_ratio
             estimated = True
         if manufacturing <= 0:
-            manufacturing = revenue * 0.05
+            manufacturing = revenue * manufacturing_ratio
             estimated = True
         a_total_cost = materials + installation + manufacturing
         a_profit = revenue - a_total_cost
@@ -15478,6 +15533,15 @@ def costing_report(request):
             'range_name': o['range_name'],
             'door_type': o['door_type'],
         })
+
+    # Percentages for the completeness panel
+    _ct = completeness['total'] or 1
+    completeness['materials_pct'] = completeness['materials_recorded'] / _ct * 100
+    completeness['installation_pct'] = completeness['installation_recorded'] / _ct * 100
+    completeness['manufacturing_pct'] = completeness['manufacturing_recorded'] / _ct * 100
+    completeness['materials_missing'] = completeness['total'] - completeness['materials_recorded']
+    completeness['installation_missing'] = completeness['total'] - completeness['installation_recorded']
+    completeness['manufacturing_missing'] = completeness['total'] - completeness['manufacturing_recorded']
 
     def _aggregate(items, key, with_jobs=False):
         groups = {}
@@ -15504,25 +15568,31 @@ def costing_report(request):
     # Product range is explorable (each row expands to its individual sales)
     range_breakdown = _aggregate(analysis, 'range_name', with_jobs=True)
     breakdowns = [
+        {'key': 'order_type', 'title': 'Order Type', 'icon': 'bi-tag', 'rows': _aggregate(analysis, 'order_type')},
         {'key': 'door_type', 'title': 'Door Type', 'icon': 'bi-door-open', 'rows': _aggregate(analysis, 'door_type')},
         {'key': 'designer_name', 'title': 'Designer', 'icon': 'bi-person-badge', 'rows': _aggregate(analysis, 'designer_name')},
     ]
 
     # Margin distribution buckets: Loss, <40%, then 10% bands up to 80%+
     margin_distribution = [
-        {'label': 'Loss (<0%)', 'min': -1e9, 'max': 0, 'count': 0, 'cls': 'danger'},
-        {'label': '0\u201340%', 'min': 0, 'max': 40, 'count': 0, 'cls': 'warning'},
-        {'label': '40\u201350%', 'min': 40, 'max': 50, 'count': 0, 'cls': 'info'},
-        {'label': '50\u201360%', 'min': 50, 'max': 60, 'count': 0, 'cls': 'info'},
-        {'label': '60\u201370%', 'min': 60, 'max': 70, 'count': 0, 'cls': 'primary'},
-        {'label': '70\u201380%', 'min': 70, 'max': 80, 'count': 0, 'cls': 'success'},
-        {'label': '80%+', 'min': 80, 'max': 1e9, 'count': 0, 'cls': 'success'},
+        {'label': 'Loss (<0%)', 'short': 'Loss', 'min': -1e9, 'max': 0, 'count': 0, 'cls': 'danger'},
+        {'label': '0\u201340%', 'short': '0\u201340', 'min': 0, 'max': 40, 'count': 0, 'cls': 'warning'},
+        {'label': '40\u201350%', 'short': '40\u201350', 'min': 40, 'max': 50, 'count': 0, 'cls': 'info'},
+        {'label': '50\u201360%', 'short': '50\u201360', 'min': 50, 'max': 60, 'count': 0, 'cls': 'info'},
+        {'label': '60\u201370%', 'short': '60\u201370', 'min': 60, 'max': 70, 'count': 0, 'cls': 'primary'},
+        {'label': '70\u201380%', 'short': '70\u201380', 'min': 70, 'max': 80, 'count': 0, 'cls': 'success'},
+        {'label': '80%+', 'short': '80+', 'min': 80, 'max': 1e9, 'count': 0, 'cls': 'success'},
     ]
+    for b in margin_distribution:
+        b['revenue'] = 0.0
+        b['profit'] = 0.0
     for it in analysis:
         m = it['margin']
         for b in margin_distribution:
             if b['min'] <= m < b['max']:
                 b['count'] += 1
+                b['revenue'] += it['revenue']
+                b['profit'] += it['profit']
                 break
     max_bucket = max((b['count'] for b in margin_distribution), default=0) or 1
     for b in margin_distribution:
@@ -15541,18 +15611,241 @@ def costing_report(request):
         'count': len(analysis),
         'total_revenue': sum(a['revenue'] for a in analysis),
         'total_profit': sum(a['profit'] for a in analysis),
+        'total_cost': sum(a['total_cost'] for a in analysis),
         'estimated_count': sum(1 for a in analysis if a['estimated']),
+        'fully_recorded_count': sum(1 for a in analysis if not a['estimated']),
     }
     analysis_stats['overall_margin'] = (
         analysis_stats['total_profit'] / analysis_stats['total_revenue'] * 100
     ) if analysis_stats['total_revenue'] > 0 else 0
 
+    # How much of the headline profit is on fully-recorded jobs vs jobs that
+    # lean on estimated costs - a confidence signal for the numbers above.
+    analysis_stats['recorded_profit'] = sum(a['profit'] for a in analysis if not a['estimated'])
+    analysis_stats['estimated_profit'] = sum(a['profit'] for a in analysis if a['estimated'])
+    analysis_stats['recorded_revenue'] = sum(a['revenue'] for a in analysis if not a['estimated'])
+
+    # Loss-making jobs - surfaced explicitly so they can be actioned.
+    loss_jobs = [a for a in analysis if a['profit'] < 0]
+    loss_stats = {
+        'count': len(loss_jobs),
+        'total_loss': sum(a['profit'] for a in loss_jobs),
+        'pct': (len(loss_jobs) / len(analysis) * 100) if analysis else 0,
+    }
+
+    # ------------------------------------------------------------------
+    # Monthly performance trend (by fit month). Each month's revenue bar is
+    # split into cost (top) and profit (bottom) so both volume and
+    # profitability read at a glance. Most recent 12 months with jobs.
+    # ------------------------------------------------------------------
+    monthly_map = {}
+    for a in analysis:
+        fd = a['order'].fit_date
+        if not fd:
+            continue
+        key = (fd.year, fd.month)
+        mo = monthly_map.setdefault(key, {
+            'year': fd.year, 'month': fd.month,
+            'count': 0, 'revenue': 0.0, 'profit': 0.0,
+        })
+        mo['count'] += 1
+        mo['revenue'] += a['revenue']
+        mo['profit'] += a['profit']
+
+    monthly_trend = sorted(monthly_map.values(), key=lambda m: (m['year'], m['month']))[-12:]
+    max_month_rev = max((m['revenue'] for m in monthly_trend), default=0) or 1
+    for m in monthly_trend:
+        m['margin'] = (m['profit'] / m['revenue'] * 100) if m['revenue'] > 0 else 0
+        m['label'] = date(m['year'], m['month'], 1).strftime('%b %y')
+        m['rev_bar'] = m['revenue'] / max_month_rev * 100
+        if m['profit'] > 0 and m['revenue'] > 0:
+            m['profit_pct'] = min(100.0, m['margin'])
+            m['cost_pct'] = 100.0 - m['profit_pct']
+            m['loss'] = False
+        else:
+            m['profit_pct'] = 0.0
+            m['cost_pct'] = 100.0
+            m['loss'] = True
+    monthly_totals = {
+        'revenue': sum(m['revenue'] for m in monthly_trend),
+        'profit': sum(m['profit'] for m in monthly_trend),
+        'count': sum(m['count'] for m in monthly_trend),
+        'margin': 0,
+    }
+    if monthly_totals['revenue'] > 0:
+        monthly_totals['margin'] = monthly_totals['profit'] / monthly_totals['revenue'] * 100
+
+    # ------------------------------------------------------------------
+    # Per-job economics for the "Cost Breakdown per Job" card. Built from
+    # the analysed jobs (estimates filled where missing) so the averages
+    # line up with the headline profitability numbers above, rather than
+    # the raw recorded-only `stats` used by the detailed tables / PDF.
+    # ------------------------------------------------------------------
+    cost_breakdown = []
+    profit_row = None
+    job_economics = None
+    if analysis:
+        n = len(analysis)
+        avg_revenue = sum(a['revenue'] for a in analysis) / n
+
+        def _cat(key, label, icon):
+            vals = [a[key] for a in analysis]
+            avg = sum(vals) / n
+            return {
+                'key': key,
+                'label': label,
+                'icon': icon,
+                'avg': avg,
+                'median': statistics.median(vals),
+                'total': sum(vals),
+                'pct': (avg / avg_revenue * 100) if avg_revenue > 0 else 0,
+            }
+
+        cost_breakdown = [
+            _cat('materials', 'Materials', 'bi-box-seam'),
+            _cat('installation', 'Installation', 'bi-tools'),
+            _cat('manufacturing', 'Manufacturing', 'bi-gear'),
+        ]
+        profit_row = _cat('profit', 'Profit', 'bi-graph-up-arrow')
+
+        margins = [a['margin'] for a in analysis]
+        job_economics = {
+            'avg_revenue': avg_revenue,
+            'avg_cost': sum(a['total_cost'] for a in analysis) / n,
+            'avg_profit': sum(a['profit'] for a in analysis) / n,
+            'avg_margin': sum(margins) / n,
+            'median_margin': statistics.median(margins),
+        }
+
+    # ------------------------------------------------------------------
+    # Business performance: the most recent rolling window vs the one
+    # immediately before it, by fit date. Shows the direction of travel
+    # (is revenue/profit/margin growing or slipping?) rather than static
+    # lifetime totals - which is what actually reads as "how are we doing".
+    # ------------------------------------------------------------------
+    from datetime import timedelta
+    PERIOD_DAYS = 90
+    cur_start = today - timedelta(days=PERIOD_DAYS)
+    prev_start = today - timedelta(days=PERIOD_DAYS * 2)
+
+    def _window(items, start, end):
+        """Aggregate analysed jobs whose fit date is in (start, end]."""
+        agg = {'count': 0, 'revenue': 0.0, 'profit': 0.0, 'cost': 0.0,
+               'materials': 0.0, 'installation': 0.0, 'manufacturing': 0.0}
+        for a in items:
+            fd = a['order'].fit_date
+            if not fd or not (start < fd <= end):
+                continue
+            agg['count'] += 1
+            agg['revenue'] += a['revenue']
+            agg['profit'] += a['profit']
+            agg['cost'] += a['total_cost']
+            agg['materials'] += a['materials']
+            agg['installation'] += a['installation']
+            agg['manufacturing'] += a['manufacturing']
+        rev = agg['revenue']
+        agg['margin'] = (agg['profit'] / rev * 100) if rev > 0 else 0
+        agg['avg_sale'] = (rev / agg['count']) if agg['count'] else 0
+        agg['avg_profit'] = (agg['profit'] / agg['count']) if agg['count'] else 0
+        agg['materials_pct'] = (agg['materials'] / rev * 100) if rev > 0 else 0
+        agg['installation_pct'] = (agg['installation'] / rev * 100) if rev > 0 else 0
+        agg['manufacturing_pct'] = (agg['manufacturing'] / rev * 100) if rev > 0 else 0
+        return agg
+
+    perf_cur = _window(analysis, cur_start, today)
+    perf_prev = _window(analysis, prev_start, cur_start)
+
+    def _pct_change(cur_v, prev_v):
+        """Percentage change vs prior period; None when there's no baseline."""
+        if not prev_v:
+            return None
+        return (cur_v - prev_v) / abs(prev_v) * 100
+
+    # Headline KPI comparisons. Each is a percentage change except margin and
+    # the cost ratios, which are compared in percentage points (a change in a
+    # ratio is naturally read as +/- points, not a % of a %).
+    performance = {
+        'period_days': PERIOD_DAYS,
+        'has_prior': perf_prev['count'] > 0,
+        'has_current': perf_cur['count'] > 0,
+        'cur': perf_cur,
+        'prev': perf_prev,
+        'kpis': [
+            {'label': 'Revenue', 'kind': 'money', 'higher_better': True,
+             'cur': perf_cur['revenue'], 'prev': perf_prev['revenue'],
+             'change': _pct_change(perf_cur['revenue'], perf_prev['revenue'])},
+            {'label': 'Profit', 'kind': 'money', 'higher_better': True,
+             'cur': perf_cur['profit'], 'prev': perf_prev['profit'],
+             'change': _pct_change(perf_cur['profit'], perf_prev['profit'])},
+            {'label': 'Profit Margin', 'kind': 'pct', 'higher_better': True,
+             'cur': perf_cur['margin'], 'prev': perf_prev['margin'],
+             'change_pp': perf_cur['margin'] - perf_prev['margin']},
+            {'label': 'Jobs Completed', 'kind': 'int', 'higher_better': True,
+             'cur': perf_cur['count'], 'prev': perf_prev['count'],
+             'change': _pct_change(perf_cur['count'], perf_prev['count'])},
+            {'label': 'Avg Sale Value', 'kind': 'money', 'higher_better': True,
+             'cur': perf_cur['avg_sale'], 'prev': perf_prev['avg_sale'],
+             'change': _pct_change(perf_cur['avg_sale'], perf_prev['avg_sale'])},
+            {'label': 'Avg Profit / Job', 'kind': 'money', 'higher_better': True,
+             'cur': perf_cur['avg_profit'], 'prev': perf_prev['avg_profit'],
+             'change': _pct_change(perf_cur['avg_profit'], perf_prev['avg_profit'])},
+        ],
+        # Cost efficiency: a rising ratio means that cost is eating more of every
+        # £ of revenue, so for these lower is better (higher_better=False).
+        'cost_ratios': [
+            {'label': 'Materials', 'key': 'materials', 'higher_better': False,
+             'cur': perf_cur['materials_pct'], 'prev': perf_prev['materials_pct'],
+             'change_pp': perf_cur['materials_pct'] - perf_prev['materials_pct']},
+            {'label': 'Installation', 'key': 'installation', 'higher_better': False,
+             'cur': perf_cur['installation_pct'], 'prev': perf_prev['installation_pct'],
+             'change_pp': perf_cur['installation_pct'] - perf_prev['installation_pct']},
+            {'label': 'Manufacturing', 'key': 'manufacturing', 'higher_better': False,
+             'cur': perf_cur['manufacturing_pct'], 'prev': perf_prev['manufacturing_pct'],
+             'change_pp': perf_cur['manufacturing_pct'] - perf_prev['manufacturing_pct']},
+        ],
+    }
+
+    # Annotate each comparison row with a direction (up/down/flat) and a
+    # sentiment (good/bad/neutral) so the template can colour/arrow it without
+    # re-deriving the higher-is-better logic per metric. A tiny epsilon keeps
+    # rounding noise from flagging a move that displays as 0.0.
+    EPS = 0.05
+    def _annotate(rows):
+        for r in rows:
+            delta = r['change_pp'] if 'change_pp' in r else r.get('change')
+            if not performance['has_prior'] or delta is None:
+                r['dir'], r['sentiment'] = None, 'neutral'
+            elif delta > EPS:
+                r['dir'] = 'up'
+                r['sentiment'] = 'good' if r['higher_better'] else 'bad'
+            elif delta < -EPS:
+                r['dir'] = 'down'
+                r['sentiment'] = 'bad' if r['higher_better'] else 'good'
+            else:
+                r['dir'], r['sentiment'] = 'flat', 'neutral'
+    _annotate(performance['kpis'])
+    _annotate(performance['cost_ratios'])
+
     # Single unified list for the order-level costing table - every completed order,
     # most recently fitted first, regardless of the (unreliable) fully_costed checkbox.
     costing_orders = sorted(orders_with_costs, key=lambda o: o['order'].fit_date or date.min, reverse=True)
 
+    # Column totals for the order-level table footer (recorded values as shown).
+    costing_totals = {
+        'revenue': sum(float(o['revenue']) for o in costing_orders),
+        'materials': sum(float(o['materials_cost']) for o in costing_orders),
+        'installation': sum(float(o['installation_cost']) for o in costing_orders),
+        'manufacturing': sum(float(o['manufacturing_cost']) for o in costing_orders),
+        'total_cost': sum(float(o['total_cost']) for o in costing_orders),
+        'profit': sum(float(o['profit']) for o in costing_orders),
+    }
+    costing_totals['margin'] = (
+        costing_totals['profit'] / costing_totals['revenue'] * 100
+    ) if costing_totals['revenue'] > 0 else 0
+
     return render(request, 'stock_take/costing_report.html', {
         'costing_orders': costing_orders,
+        'costing_totals': costing_totals,
         'stats': stats,
         'range_breakdown': range_breakdown,
         'breakdowns': breakdowns,
@@ -15561,6 +15854,15 @@ def costing_report(request):
         'bottom_jobs': bottom_jobs,
         'all_jobs': all_jobs,
         'analysis_stats': analysis_stats,
+        'cost_ratios': cost_ratios,
+        'completeness': completeness,
+        'cost_breakdown': cost_breakdown,
+        'profit_row': profit_row,
+        'job_economics': job_economics,
+        'loss_stats': loss_stats,
+        'monthly_trend': monthly_trend,
+        'monthly_totals': monthly_totals,
+        'performance': performance,
     })
 
 
@@ -15650,7 +15952,9 @@ def costing_report_pdf(request):
     costing_orders = sorted(orders_with_costs, key=lambda o: o['order'].fit_date or date.min, reverse=True)
     buffer = generate_costing_report_pdf(costing_orders, stats)
     response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="Costing_Report_{today.strftime("%Y%m%d")}.pdf"'
+    # Inline so target="_blank" opens the report in a new browser tab rather than
+    # forcing a download; the filename is still used if the user saves it.
+    response['Content-Disposition'] = f'inline; filename="Costing_Report_{today.strftime("%Y%m%d")}.pdf"'
     return response
 
 
