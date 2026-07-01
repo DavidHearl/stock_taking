@@ -15248,7 +15248,7 @@ def delete_fitter(request, fitter_id):
 
 @login_required
 def costing_report(request):
-    """Costing report showing fully and partially costed orders with statistics"""
+    """Costing report showing cost/profit statistics across all completed orders"""
     from .models import Order, Timesheet
     from django.db.models import Avg, Sum, Count, F, ExpressionWrapper, DecimalField, Q
     from decimal import Decimal
@@ -15287,12 +15287,13 @@ def costing_report(request):
         profit = revenue - total_cost
         profit_margin = (profit / revenue * 100) if revenue > 0 else Decimal('0')
         
-        # Determine costing status - use the explicit fully_costed checkbox
+        # Flag which cost categories are actually recorded, so gaps are still visible
+        # in the report even though costing status no longer drives what's displayed.
         has_materials = materials_cost > 0
         has_installation = installation_cost > 0
         has_manufacturing = manufacturing_cost > 0
-        is_fully_costed = order.fully_costed  # Use explicit checkbox instead of auto-detection
-        
+        is_fully_costed = order.fully_costed
+
         # Categorisation dimensions for profitability analysis
         sale = next(iter(order.anthill_sale.all()), None)
         designer_name = order.designer.name if order.designer else 'Unassigned'
@@ -15318,22 +15319,20 @@ def costing_report(request):
             'door_type': door_type,
         })
     
-    # Separate fully costed and partially costed
-    fully_costed = [o for o in orders_with_costs if o['is_fully_costed']]
-    partially_costed = [o for o in orders_with_costs if not o['is_fully_costed']]
-    
-    # Calculate statistics for fully costed orders
+    # Cost/profit statistics are calculated across every completed order with recorded
+    # revenue - not just orders someone has manually ticked "fully costed", since that
+    # checkbox is frequently left unticked even once all costs are actually recorded.
+    costed_orders = [o for o in orders_with_costs if o['revenue'] > 0]
+
     stats = {
         'total_orders': len(all_orders),
-        'fully_costed_count': len(fully_costed),
-        'partially_costed_count': len(partially_costed),
-        'costing_completion_rate': (len(fully_costed) / len(all_orders) * 100) if all_orders else 0,
+        'costed_orders_count': len(costed_orders),
     }
-    
-    if fully_costed:
+
+    if costed_orders:
         # Profit statistics
-        profits = [float(o['profit']) for o in fully_costed]
-        profit_margins = [float(o['profit_margin']) for o in fully_costed]
+        profits = [float(o['profit']) for o in costed_orders]
+        profit_margins = [float(o['profit_margin']) for o in costed_orders]
         
         stats['avg_profit'] = sum(profits) / len(profits)
         stats['median_profit'] = statistics.median(profits)
@@ -15344,11 +15343,11 @@ def costing_report(request):
         stats['median_profit_margin'] = statistics.median(profit_margins)
         
         # Cost breakdowns
-        materials_costs = [float(o['materials_cost']) for o in fully_costed]
-        installation_costs = [float(o['installation_cost']) for o in fully_costed]
-        manufacturing_costs = [float(o['manufacturing_cost']) for o in fully_costed]
-        total_costs = [float(o['total_cost']) for o in fully_costed]
-        revenues = [float(o['revenue']) for o in fully_costed]
+        materials_costs = [float(o['materials_cost']) for o in costed_orders]
+        installation_costs = [float(o['installation_cost']) for o in costed_orders]
+        manufacturing_costs = [float(o['manufacturing_cost']) for o in costed_orders]
+        total_costs = [float(o['total_cost']) for o in costed_orders]
+        revenues = [float(o['revenue']) for o in costed_orders]
         
         stats['avg_materials_cost'] = sum(materials_costs) / len(materials_costs)
         stats['avg_installation_cost'] = sum(installation_costs) / len(installation_costs)
@@ -15373,10 +15372,10 @@ def costing_report(request):
             stats['manufacturing_pct_of_revenue'] = 0
         
         # Cost as percentage of revenue (medians) - calculate percentage per order first, then median
-        materials_pcts = [(float(o['materials_cost']) / float(o['revenue'])) * 100 if float(o['revenue']) > 0 else 0 for o in fully_costed]
-        installation_pcts = [(float(o['installation_cost']) / float(o['revenue'])) * 100 if float(o['revenue']) > 0 else 0 for o in fully_costed]
-        manufacturing_pcts = [(float(o['manufacturing_cost']) / float(o['revenue'])) * 100 if float(o['revenue']) > 0 else 0 for o in fully_costed]
-        profit_pcts = [(float(o['profit']) / float(o['revenue'])) * 100 if float(o['revenue']) > 0 else 0 for o in fully_costed]
+        materials_pcts = [(float(o['materials_cost']) / float(o['revenue'])) * 100 if float(o['revenue']) > 0 else 0 for o in costed_orders]
+        installation_pcts = [(float(o['installation_cost']) / float(o['revenue'])) * 100 if float(o['revenue']) > 0 else 0 for o in costed_orders]
+        manufacturing_pcts = [(float(o['manufacturing_cost']) / float(o['revenue'])) * 100 if float(o['revenue']) > 0 else 0 for o in costed_orders]
+        profit_pcts = [(float(o['profit']) / float(o['revenue'])) * 100 if float(o['revenue']) > 0 else 0 for o in costed_orders]
         
         # Calculate raw medians
         raw_median_materials = statistics.median(materials_pcts)
@@ -15405,7 +15404,7 @@ def costing_report(request):
         stats['total_installation'] = sum(installation_costs)
         stats['total_manufacturing'] = sum(manufacturing_costs)
     else:
-        # Set defaults if no fully costed orders
+        # Set defaults if no costed orders
         stats['avg_profit'] = 0
         stats['median_profit'] = 0
         stats['min_profit'] = 0
@@ -15548,9 +15547,12 @@ def costing_report(request):
         analysis_stats['total_profit'] / analysis_stats['total_revenue'] * 100
     ) if analysis_stats['total_revenue'] > 0 else 0
 
+    # Single unified list for the order-level costing table - every completed order,
+    # most recently fitted first, regardless of the (unreliable) fully_costed checkbox.
+    costing_orders = sorted(orders_with_costs, key=lambda o: o['order'].fit_date or date.min, reverse=True)
+
     return render(request, 'stock_take/costing_report.html', {
-        'fully_costed': fully_costed,
-        'partially_costed': partially_costed,
+        'costing_orders': costing_orders,
         'stats': stats,
         'range_breakdown': range_breakdown,
         'breakdowns': breakdowns,
@@ -15605,30 +15607,27 @@ def costing_report_pdf(request):
             'revenue': revenue,
             'profit': profit,
             'profit_margin': profit_margin,
-            'is_fully_costed': order.fully_costed,
         })
 
-    fully_costed = [o for o in orders_with_costs if o['is_fully_costed']]
-    partially_costed = [o for o in orders_with_costs if not o['is_fully_costed']]
+    # Stats are calculated across every completed order with recorded revenue - not
+    # just orders manually ticked "fully costed" (see costing_report for why).
+    costed_orders = [o for o in orders_with_costs if o['revenue'] > 0]
 
-    # Build stats
     stats = {
         'total_orders': len(orders_with_costs),
-        'fully_costed_count': len(fully_costed),
-        'partially_costed_count': len(partially_costed),
-        'costing_completion_rate': (len(fully_costed) / len(orders_with_costs) * 100) if orders_with_costs else 0,
+        'costed_orders_count': len(costed_orders),
     }
 
     all_revenues = [float(o['revenue']) for o in orders_with_costs if float(o['revenue']) > 0]
     stats['avg_sale_value'] = sum(all_revenues) / len(all_revenues) if all_revenues else 0
 
-    if fully_costed:
-        profits = [float(o['profit']) for o in fully_costed]
-        profit_margins = [float(o['profit_margin']) for o in fully_costed]
-        revenues = [float(o['revenue']) for o in fully_costed]
-        materials_costs = [float(o['materials_cost']) for o in fully_costed]
-        installation_costs = [float(o['installation_cost']) for o in fully_costed]
-        manufacturing_costs = [float(o['manufacturing_cost']) for o in fully_costed]
+    if costed_orders:
+        profits = [float(o['profit']) for o in costed_orders]
+        profit_margins = [float(o['profit_margin']) for o in costed_orders]
+        revenues = [float(o['revenue']) for o in costed_orders]
+        materials_costs = [float(o['materials_cost']) for o in costed_orders]
+        installation_costs = [float(o['installation_cost']) for o in costed_orders]
+        manufacturing_costs = [float(o['manufacturing_cost']) for o in costed_orders]
 
         stats['avg_profit'] = sum(profits) / len(profits)
         stats['avg_profit_margin'] = sum(profit_margins) / len(profit_margins)
@@ -15637,7 +15636,7 @@ def costing_report_pdf(request):
         stats['avg_installation_cost'] = sum(installation_costs) / len(installation_costs)
         stats['avg_manufacturing_cost'] = sum(manufacturing_costs) / len(manufacturing_costs)
         stats['total_revenue'] = sum(revenues)
-        stats['total_costs'] = sum(float(o['total_cost']) for o in fully_costed)
+        stats['total_costs'] = sum(float(o['total_cost']) for o in costed_orders)
         stats['total_profit'] = sum(profits)
         stats['materials_pct_of_revenue'] = (stats['avg_materials_cost'] / stats['avg_revenue']) * 100 if stats['avg_revenue'] > 0 else 0
         stats['installation_pct_of_revenue'] = (stats['avg_installation_cost'] / stats['avg_revenue']) * 100 if stats['avg_revenue'] > 0 else 0
@@ -15648,7 +15647,8 @@ def costing_report_pdf(request):
                                        'total_revenue', 'total_costs', 'total_profit',
                                        'materials_pct_of_revenue', 'installation_pct_of_revenue', 'manufacturing_pct_of_revenue']})
 
-    buffer = generate_costing_report_pdf(fully_costed, partially_costed, stats)
+    costing_orders = sorted(orders_with_costs, key=lambda o: o['order'].fit_date or date.min, reverse=True)
+    buffer = generate_costing_report_pdf(costing_orders, stats)
     response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="Costing_Report_{today.strftime("%Y%m%d")}.pdf"'
     return response

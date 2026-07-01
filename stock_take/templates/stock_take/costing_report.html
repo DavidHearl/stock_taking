@@ -34,18 +34,6 @@
             </div>
             <i class="bi bi-arrows-angle-expand costing-stat-explore"></i>
         </div>
-        <div class="costing-stat-card clickable" role="button" tabindex="0"
-             onclick="openCostingModal('fullyCostedModal')"
-             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCostingModal('fullyCostedModal');}">
-            <div class="costing-stat-icon green">
-                <i class="bi bi-check-circle"></i>
-            </div>
-            <div class="costing-stat-content">
-                <span class="costing-stat-value">{{ stats.fully_costed_count }}</span>
-                <span class="costing-stat-label">Fully Costed</span>
-            </div>
-            <i class="bi bi-arrows-angle-expand costing-stat-explore"></i>
-        </div>
         <div class="costing-stat-card">
             <div class="costing-stat-icon info">
                 <i class="bi bi-currency-pound"></i>
@@ -263,8 +251,8 @@
     </div>
     {% endif %}
 
-    <!-- Cost vs Revenue Breakdown Bars (for fully costed) -->
-    {% if stats.fully_costed_count > 0 %}
+    <!-- Cost vs Revenue Breakdown Bars (across all costed orders) -->
+    {% if stats.costed_orders_count > 0 %}
     <div class="cost-breakdown-container">
         <div class="cost-breakdown-card">
             <div class="cost-breakdown-header">
@@ -405,15 +393,15 @@
     </div>
     {% else %}
     <div class="alert alert-info">
-        <i class="bi bi-info-circle"></i> No fully costed orders yet.
+        <i class="bi bi-info-circle"></i> No costed orders yet.
     </div>
     {% endif %}
 
     <!-- Detailed Statistics -->
-    {% if stats.fully_costed_count > 0 %}
+    {% if stats.costed_orders_count > 0 %}
     <div class="costing-analysis-card">
         <div class="costing-analysis-header">
-            <h3><i class="bi bi-bar-chart-line"></i> Detailed Cost Analysis (Fully Costed Jobs)</h3>
+            <h3><i class="bi bi-bar-chart-line"></i> Detailed Cost Analysis</h3>
         </div>
         <div class="costing-analysis-body">
             <div class="costing-stats-grid">
@@ -530,67 +518,10 @@
     </div>
     {% endif %}
 
-    <!-- Fully Costed Orders -->
-    <div class="costing-orders-card">
-        <div class="costing-orders-header fully-costed">
-            <h3><i class="bi bi-check-circle-fill green"></i> Fully Costed Orders ({{ fully_costed|length }})</h3>
-        </div>
-        <div class="costing-orders-body">
-            {% if fully_costed %}
-            <div class="costing-table-container">
-                <table class="costing-table" id="fullyCostedTable">
-                    <thead>
-                        <tr>
-                            <th>Order</th>
-                            <th>Customer</th>
-                            <th>Fit Date</th>
-                            <th class="text-end">Revenue</th>
-                            <th class="text-end">Materials</th>
-                            <th class="text-end">Installation</th>
-                            <th class="text-end">Manufacturing</th>
-                            <th class="text-end">Total Cost</th>
-                            <th class="text-end">Profit</th>
-                            <th class="text-end">Margin</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in fully_costed %}
-                        <tr class="costing-row" data-order="{{ item.order.sale_number }}" data-customer="{{ item.order.first_name }} {{ item.order.last_name }}">
-                            <td>
-                                <a href="{% url 'order_details' item.order.id %}">{{ item.order.sale_number }}</a>
-                            </td>
-                            <td>{{ item.order.first_name }} {{ item.order.last_name }}</td>
-                            <td>{{ item.order.fit_date|date:"d/m/Y" }}</td>
-                            <td class="text-end">£{{ item.revenue|floatformat:0|intcomma }}</td>
-                            <td class="text-end">£{{ item.materials_cost|floatformat:0|intcomma }}</td>
-                            <td class="text-end">£{{ item.installation_cost|floatformat:0|intcomma }}</td>
-                            <td class="text-end">£{{ item.manufacturing_cost|floatformat:0|intcomma }}</td>
-                            <td class="text-end">£{{ item.total_cost|floatformat:0|intcomma }}</td>
-                            <td class="text-end {% if item.profit < 0 %}profit-negative{% else %}profit-positive{% endif %}">
-                                <strong>£{{ item.profit|floatformat:0|intcomma }}</strong>
-                            </td>
-                            <td class="text-end {% if item.profit_margin < 0 %}profit-negative{% elif item.profit_margin < 20 %}profit-warning{% else %}profit-positive{% endif %}">
-                                {{ item.profit_margin|floatformat:1 }}%
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="costing-empty-state">
-                <i class="bi bi-clipboard-x"></i>
-                <p>No fully costed orders yet.</p>
-                <p>Orders need materials, installation, and manufacturing costs to appear here.</p>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-
-    <!-- Partially Costed Orders -->
+    <!-- All Completed Orders - single costing table across every record -->
     <div class="costing-orders-card">
         <div class="costing-orders-header partially-costed costing-orders-header-flex">
-            <h3><i class="bi bi-exclamation-triangle-fill amber"></i> Partially Costed Orders ({{ partially_costed|length }})</h3>
+            <h3><i class="bi bi-table"></i> Order Costing Detail ({{ costing_orders|length }})</h3>
             <div class="costing-search-box">
                 <div class="costing-search-input-wrap">
                     <i class="bi bi-search"></i>
@@ -603,27 +534,31 @@
             </div>
         </div>
         <div class="costing-orders-body">
-            {% if partially_costed %}
+            {% if costing_orders %}
             <div class="costing-table-container">
-                <table class="costing-table" id="partiallyCostedTable">
+                <table class="costing-table" id="costingOrdersTable">
                     <thead>
                         <tr>
                             <th>Order</th>
                             <th>Customer</th>
+                            <th>Fit Date</th>
                             <th class="text-center">Revenue</th>
                             <th class="text-center">Materials</th>
                             <th class="text-center">Installation</th>
                             <th class="text-center">Manufacturing</th>
-                            <th class="text-end">Current Total</th>
+                            <th class="text-end">Total Cost</th>
+                            <th class="text-end">Profit</th>
+                            <th class="text-end">Margin</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for item in partially_costed %}
+                        {% for item in costing_orders %}
                         <tr class="costing-row" data-order="{{ item.order.sale_number }}" data-customer="{{ item.order.first_name }} {{ item.order.last_name }}">
                             <td>
                                 <a href="{% url 'order_details' item.order.id %}">{{ item.order.sale_number }}</a>
                             </td>
                             <td>{{ item.order.first_name }} {{ item.order.last_name }}</td>
+                            <td>{{ item.order.fit_date|date:"d/m/Y" }}</td>
                             <td class="text-center">
                                 {% if item.revenue > 0 %}
                                 <span class="costing-badge success"><i class="bi bi-check"></i> £{{ item.revenue|floatformat:0 }}</span>
@@ -653,6 +588,17 @@
                                 {% endif %}
                             </td>
                             <td class="text-end">£{{ item.total_cost|floatformat:0|intcomma }}</td>
+                            {% if item.revenue > 0 %}
+                            <td class="text-end {% if item.profit < 0 %}profit-negative{% else %}profit-positive{% endif %}">
+                                <strong>£{{ item.profit|floatformat:0|intcomma }}</strong>
+                            </td>
+                            <td class="text-end {% if item.profit_margin < 0 %}profit-negative{% elif item.profit_margin < 20 %}profit-warning{% else %}profit-positive{% endif %}">
+                                {{ item.profit_margin|floatformat:1 }}%
+                            </td>
+                            {% else %}
+                            <td class="text-end">—</td>
+                            <td class="text-end">—</td>
+                            {% endif %}
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -660,8 +606,8 @@
             </div>
             {% else %}
             <div class="costing-empty-state">
-                <i class="bi bi-check-all ic-profit"></i>
-                <p>All completed orders are fully costed!</p>
+                <i class="bi bi-clipboard-x"></i>
+                <p>No completed orders yet.</p>
             </div>
             {% endif %}
         </div>
@@ -711,58 +657,6 @@
     </div>
 </div>
 
-<div class="modal-overlay" id="fullyCostedModal" onclick="if(event.target===this)closeCostingModal('fullyCostedModal')">
-    <div class="modal-content modal--lg">
-        <div class="modal-header">
-            <h3><i class="bi bi-check-circle"></i> Fully Costed Jobs ({{ fully_costed|length }})</h3>
-            <button type="button" class="modal-close" onclick="closeCostingModal('fullyCostedModal')">&times;</button>
-        </div>
-        <div class="modal-body">
-            {% if fully_costed %}
-            <div class="costing-table-container">
-                <table class="costing-table">
-                    <thead>
-                        <tr>
-                            <th>Sale</th>
-                            <th>Customer</th>
-                            <th>Fit Date</th>
-                            <th class="text-end">Revenue</th>
-                            <th class="text-end">Materials</th>
-                            <th class="text-end">Install</th>
-                            <th class="text-end">Mfg</th>
-                            <th class="text-end">Total Cost</th>
-                            <th class="text-end">Profit</th>
-                            <th class="text-end">Margin</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in fully_costed %}
-                        <tr>
-                            <td><a href="{% url 'order_details' item.order.id %}">{{ item.order.sale_number }}</a></td>
-                            <td>{{ item.order.first_name }} {{ item.order.last_name }}</td>
-                            <td>{{ item.order.fit_date|date:"d/m/Y" }}</td>
-                            <td class="text-end">£{{ item.revenue|floatformat:0|intcomma }}</td>
-                            <td class="text-end">£{{ item.materials_cost|floatformat:0|intcomma }}</td>
-                            <td class="text-end">£{{ item.installation_cost|floatformat:0|intcomma }}</td>
-                            <td class="text-end">£{{ item.manufacturing_cost|floatformat:0|intcomma }}</td>
-                            <td class="text-end">£{{ item.total_cost|floatformat:0|intcomma }}</td>
-                            <td class="text-end {% if item.profit < 0 %}profit-negative{% else %}profit-positive{% endif %}">£{{ item.profit|floatformat:0|intcomma }}</td>
-                            <td class="text-end {% if item.profit_margin < 0 %}profit-negative{% elif item.profit_margin < 20 %}profit-warning{% else %}profit-positive{% endif %}">{{ item.profit_margin|floatformat:1 }}%</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="costing-empty-state">
-                <i class="bi bi-clipboard-x"></i>
-                <p>No fully costed orders yet.</p>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-</div>
-
 <script>
 function openCostingModal(id) {
     const m = document.getElementById(id);
@@ -797,8 +691,7 @@ function toggleRangeJobs(id) {
 function filterCostingTables() {
     const searchTerm = document.getElementById('costingSearch').value.toLowerCase().trim();
     
-    // Filter both tables
-    const tables = ['fullyCostedTable', 'partiallyCostedTable'];
+    const tables = ['costingOrdersTable'];
     
     tables.forEach(tableId => {
         const table = document.getElementById(tableId);

@@ -1036,7 +1036,7 @@ def generate_avg_sales_pdf(rows, grand_total=0, grand_count=0, period=''):
 
 # ── COSTING REPORT PDF ──────────────────────────────────────────
 
-def generate_costing_report_pdf(fully_costed, partially_costed, stats):
+def generate_costing_report_pdf(costing_orders, stats):
     """Generate a PDF of the costing report with summary stats and order tables."""
     buffer = io.BytesIO()
     styles = _get_styles()
@@ -1077,12 +1077,11 @@ def generate_costing_report_pdf(fully_costed, partially_costed, stats):
 
     # ── SUMMARY INFO ────────────────────────────────────────────
     info_data = [
-        ['Fully Costed', f'{stats["fully_costed_count"]}',
-         'Partially Costed', f'{stats["partially_costed_count"]}'],
-        ['Completion Rate', f'{stats["costing_completion_rate"]:.1f}%',
-         'Avg Profit Margin', f'{stats["avg_profit_margin"]:.1f}%'],
+        ['Total Orders', f'{stats["total_orders"]}',
+         'Costed Orders', f'{stats["costed_orders_count"]}'],
         ['Avg Sale Value', f'£{stats["avg_sale_value"]:,.0f}',
-         'Generated', datetime.now().strftime('%d %b %Y at %H:%M')],
+         'Avg Profit Margin', f'{stats["avg_profit_margin"]:.1f}%'],
+        ['Generated', datetime.now().strftime('%d %b %Y at %H:%M'), '', ''],
     ]
     info_table = Table(info_data, colWidths=[
         page_width * 0.18, page_width * 0.32,
@@ -1105,7 +1104,7 @@ def generate_costing_report_pdf(fully_costed, partially_costed, stats):
     elements.append(Spacer(1, 6 * mm))
 
     # ── COST BREAKDOWN SUMMARY ──────────────────────────────────
-    if stats['fully_costed_count'] > 0:
+    if stats['costed_orders_count'] > 0:
         elements.append(_section_header('Average Cost Breakdown (% of Revenue)', styles))
         elements.append(Spacer(1, 2 * mm))
 
@@ -1140,9 +1139,9 @@ def generate_costing_report_pdf(fully_costed, partially_costed, stats):
         elements.append(_build_table(breakdown_data, breakdown_widths, has_total_row=True))
         elements.append(Spacer(1, 6 * mm))
 
-    # ── FULLY COSTED ORDERS TABLE ───────────────────────────────
-    if fully_costed:
-        elements.append(_section_header(f'Fully Costed Orders ({len(fully_costed)})', styles))
+    # ── ORDER COSTING DETAIL TABLE ──────────────────────────────
+    if costing_orders:
+        elements.append(_section_header(f'Order Costing Detail ({len(costing_orders)})', styles))
         elements.append(Spacer(1, 2 * mm))
 
         col_widths = [
@@ -1154,53 +1153,24 @@ def generate_costing_report_pdf(fully_costed, partially_costed, stats):
                     'Installation', 'Mfg', 'Profit', 'Margin']
 
         table_data = [headers]
-        for item in fully_costed:
+        for item in costing_orders:
             order = item['order']
             customer = f'{order.first_name} {order.last_name}'
             if len(customer) > 22:
                 customer = customer[:19] + '...'
             fit_date = order.fit_date.strftime('%d/%m/%y') if order.fit_date else '-'
+            has_revenue = float(item['revenue']) > 0
 
             table_data.append([
                 str(order.sale_number),
                 Paragraph(customer, styles['CellText']),
                 fit_date,
-                f'£{float(item["revenue"]):,.0f}',
-                f'£{float(item["materials_cost"]):,.0f}',
-                f'£{float(item["installation_cost"]):,.0f}',
-                f'£{float(item["manufacturing_cost"]):,.0f}',
-                f'£{float(item["profit"]):,.0f}',
-                f'{float(item["profit_margin"]):.1f}%',
-            ])
-
-        elements.append(_build_table(table_data, col_widths))
-
-    # ── PARTIALLY COSTED ORDERS TABLE ───────────────────────────
-    if partially_costed:
-        elements.append(Spacer(1, 6 * mm))
-        elements.append(_section_header(f'Partially Costed Orders ({len(partially_costed)})', styles))
-        elements.append(Spacer(1, 2 * mm))
-
-        col_widths = [
-            page_width * 0.12, page_width * 0.28,
-            page_width * 0.15, page_width * 0.15, page_width * 0.15, page_width * 0.15,
-        ]
-        headers = ['Order', 'Customer', 'Revenue', 'Materials', 'Installation', 'Manufacturing']
-
-        table_data = [headers]
-        for item in partially_costed:
-            order = item['order']
-            customer = f'{order.first_name} {order.last_name}'
-            if len(customer) > 28:
-                customer = customer[:25] + '...'
-
-            table_data.append([
-                str(order.sale_number),
-                Paragraph(customer, styles['CellText']),
-                f'£{float(item["revenue"]):,.0f}' if float(item['revenue']) > 0 else '-',
+                f'£{float(item["revenue"]):,.0f}' if has_revenue else '-',
                 f'£{float(item["materials_cost"]):,.0f}' if float(item['materials_cost']) > 0 else '-',
                 f'£{float(item["installation_cost"]):,.0f}' if float(item['installation_cost']) > 0 else '-',
                 f'£{float(item["manufacturing_cost"]):,.0f}' if float(item['manufacturing_cost']) > 0 else '-',
+                f'£{float(item["profit"]):,.0f}' if has_revenue else '-',
+                f'{float(item["profit_margin"]):.1f}%' if has_revenue else '-',
             ])
 
         elements.append(_build_table(table_data, col_widths))
