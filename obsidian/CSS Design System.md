@@ -1,6 +1,6 @@
-# CSS Design System
+# CSS Design System — Atlas Cobalt
 
-The standing design rules for Sliderobes Atlas. **The single source of truth is the token block in [`static/css/styles.css`](../static/css/styles.css) (`:root`), overridden for light mode in [`static/css/light-mode.css`](../static/css/light-mode.css).** There is also a live, rendered reference page in the app at **Admin → Design Rules** ([`admin_design_rules.html`](../stock_take/templates/stock_take/admin_design_rules.html)) — use it to eyeball swatches/spacing.
+The standing design rules for Sliderobes Atlas, based on the "Atlas Cobalt" brand direction (see `design_handoff_atlas_cobalt/README.md` for the original handoff this was adapted from). **The single source of truth is the token block in [`static/css/styles.css`](../static/css/styles.css) (`:root`), overridden for light mode in [`static/css/light-mode.css`](../static/css/light-mode.css).** There is also a live, rendered reference page in the app at **Admin → Design Rules** ([`admin_design_rules.html`](../stock_take/templates/stock_take/admin_design_rules.html)) — use it to eyeball swatches/spacing.
 
 The one rule that matters most: **never hardcode a colour, radius, shadow, or spacing value in a feature CSS file. Always reference a token below.** That is what makes dark/light mode work — light mode only overrides the variables; every component inherits automatically.
 
@@ -21,13 +21,13 @@ The one rule that matters most: **never hardcode a colour, radius, shadow, or sp
 
 | Token | Dark | Light | Use |
 |---|---|---|---|
-| `--bg-page` | `#0d0d0f` | `#eceef2` | Outermost page background |
-| `--bg-primary` | `#181818` | `#f0f1f3` | Primary surface |
-| `--bg-secondary` | `#2c2c30` | `#ffffff` | Cards, panels |
-| `--bg-tertiary` | `#3a3a3e` | `#e6e8ec` | Raised/nested surface |
-| `--bg-nav` | `#2a2a2e` | `#ffffff` | Sidebar / topbar |
-| `--bg-input` | `#232326` | `#ffffff` | Form inputs |
-| `--bg-hover` | `rgba(255,255,255,.06)` | `rgba(46,122,191,.08)` | Hover states |
+| `--bg-page` | `#0b0c10` | `#eef0f3` | Outermost page background (canvas) |
+| `--bg-primary` | `#0f1116` | `#f5f6f9` | Primary surface |
+| `--bg-secondary` | `#14161c` | `#ffffff` | Cards, panels |
+| `--bg-tertiary` | `#1b1e26` | `#f2f4f7` | Raised/nested surface (sunken) |
+| `--bg-nav` | `#14161c` | `#ffffff` | Sidebar / topbar |
+| `--bg-input` | `#1b1e26` | `#ffffff` | Form inputs |
+| `--bg-hover` | `rgba(47,107,246,.06)` | `rgba(47,107,246,.08)` | Hover states (accent-tinted) |
 | `--bg-card` | dark gradient | white gradient | Card backgrounds |
 | `--overlay-bg` | `rgba(0,0,0,.60)` | `rgba(0,0,0,.40)` | Modal/scrim overlay |
 
@@ -35,9 +35,9 @@ The one rule that matters most: **never hardcode a colour, radius, shadow, or sp
 
 | Token | Dark | Light | Use |
 |---|---|---|---|
-| `--text-primary` | `#d8d8da` | `#1a1c20` | Body / headings |
-| `--text-secondary` | `#a6a6aa` | `#4d5260` | Supporting text |
-| `--text-muted` | `#6a6a6e` | `#888e9c` | Labels, hints, captions |
+| `--text-primary` | `#f2f3f6` | `#1f2430` | Body / headings |
+| `--text-secondary` | `#99a0ad` | `#5a616e` | Supporting text |
+| `--text-muted` | `#636a78` | `#9aa2b0` | Labels, hints, captions |
 | `--text-on-color` | `#ffffff` | `#ffffff` | Text on a coloured fill (buttons, badges) |
 
 ### Semantic colours
@@ -46,40 +46,40 @@ Each has three variants: base (`-color`), `-hover` (darker, for hover), and `-su
 
 | Family | Base (dark) | Base (light) | Meaning |
 |---|---|---|---|
-| `--primary-*` | `#5a9de6` | `#2e7abf` | Primary actions, links, active state |
-| `--success-*` | `#4cc080` | `#2d9d5e` | Success, received, paid, positive |
-| `--warning-*` | `#efb040` | `#c88b1f` | Warnings, pending, attention |
-| `--danger-*` | `#e05258` | `#c23035` | Errors, delete, overdue, negative |
-| `--info-*` | `#56c4e0` | `#2e9dba` | Informational, neutral highlight |
+| `--primary-*` | `#2f6bf6` | `#2f6bf6` | Primary actions, links, active state (Atlas Cobalt accent — same hue both modes) |
+| `--success-*` | `#22c55e` | `#12924a` | Success, received, paid, positive |
+| `--warning-*` | `#f5a524` | `#b07d0a` | Warnings, pending, attention |
+| `--danger-*` | `#f04452` | `#e5484d` | Errors, delete, overdue, negative |
+| `--info-*` | `#38bdf8` | `#2e9dba` | Informational, neutral highlight |
 | `--purple-*` | `#8b5cf6` | `#7c3aed` | Secondary accent / categorisation |
 
 Example: a "pending" badge uses `background: var(--warning-subtle); color: var(--warning-color);`. A primary button uses `background: var(--primary-color);` and `:hover { background: var(--primary-hover); }`.
 
-> **Note:** the primary brand colour token is `--primary-color`, *not* `--accent-color`. `--accent-glow` exists (a soft glow tint) but there is no `--accent-color` token — don't reference it.
+> **Note:** the primary brand colour token is `--primary-color`, *not* `--accent-color`. `--accent-glow` exists (a soft glow tint) but there is no `--accent-color` token — don't reference it. The Atlas Cobalt gradient (`#2563EB → #38BDF8`, 135°) is reserved for decorative/hero surfaces (avatars, badges, logo) — it isn't a token, reference it directly as a `linear-gradient(...)` where needed.
 
 ---
 
 ## Layout, spacing, shape
 
-### Spacing scale — use these, don't invent pixel values
+### Spacing rhythm — use these, don't invent pixel values
 
 | Token | Value |
 |---|---|
 | `--sp-1` | 4px |
 | `--sp-2` | 8px |
 | `--sp-3` | 12px |
-| `--sp-4` | 16px |
-| `--sp-5` | 20px |
-| `--sp-6` | 24px |
+| `--sp-4` | 14px |
+| `--sp-5` | 18px |
+| `--sp-6` | 22px |
 
 ### Radius
 
 | Token | Value | Use |
 |---|---|---|
-| `--radius-sm` | 8px | Inputs, small buttons, swatches |
-| `--radius-md` | 12px | Cards, panels |
-| `--radius-lg` | 16px | Large containers, modals |
-| `--radius-pill` | 16px | Pills / search bars |
+| `--radius-sm` | 9px | Inputs, small buttons, swatches |
+| `--radius-md` | 14px | Cards, panels |
+| `--radius-lg` | 18px | Large containers, modals |
+| `--radius-pill` | 999px | Pills / badges / buttons — always fully rounded |
 
 ### Shadows
 
@@ -87,8 +87,14 @@ Example: a "pending" badge uses `background: var(--warning-subtle); color: var(-
 
 ### Borders & motion
 
-- `--border-color` — the one border colour for dividers, card edges, input borders. (`rgba(255,255,255,.1)` dark / `rgba(0,0,0,.12)` light.)
+- `--border-color` — the one border colour for dividers, card edges, input borders. (`#282c36` dark / `#eceef1` light.)
 - `--transition` — `all 0.2s ease`. Use it for hover/focus transitions instead of writing your own timing.
+
+### Typography
+
+- `--font-display` — `'Chakra Petch'` — headings (`h1`–`h6`), `.page-title`, `.stats-number`, `.stat-value`. Weight 600.
+- `--font-body` — `'Manrope'` — the default `body` font-family; everything not covered above.
+- Both are loaded via the Google Fonts `@import` at the top of `styles.css`. Don't reference "Inter" — it's no longer the site's body font.
 
 ### Layout dimensions
 
