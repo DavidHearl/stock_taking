@@ -11826,12 +11826,37 @@ def calendar_view(request):
         if len(pfp_orders) >= 80:
             break
 
+    # Jobs that have moved on from PFP (they now have an order date) but still
+    # need a fit date — they don't yet appear on the calendar and would
+    # otherwise be invisible in the job list. Ordered jobs with no fit_date and
+    # no appointment, excluding finished ones.
+    _await_candidates = (
+        Order.objects.filter(
+            order_date__isnull=False,
+            fit_date__isnull=True,
+            job_finished=False,
+        )
+        .exclude(id__in=_appointed_order_ids)
+        .order_by('last_name', 'first_name')
+    )
+    awaiting_orders = []
+    _seen_await_sales = set()
+    for _o in _await_candidates:
+        if _o.sale_number:
+            if _o.sale_number in _seen_await_sales:
+                continue
+            _seen_await_sales.add(_o.sale_number)
+        awaiting_orders.append(_o)
+        if len(awaiting_orders) >= 80:
+            break
+
     # Days required per job, taken from the sale coversheet (fit_days). Shown on
     # the job-list cards and used to size the appointment box when dragged onto
     # the calendar. Also resolve each order's AnthillSale pk so the card can link
     # straight to the sale.
     from .models import SaleCoverSheet
-    _cs_nums = [o.sale_number for o in pfp_orders if o.sale_number]
+    _panel_orders = pfp_orders + awaiting_orders
+    _cs_nums = [o.sale_number for o in _panel_orders if o.sale_number]
     _cs_days = {}
     _sale_pk_map = {}
     if _cs_nums:
@@ -11847,7 +11872,7 @@ def calendar_view(request):
             .values('pk', 'anthill_activity_id')
         ):
             _sale_pk_map.setdefault(_s['anthill_activity_id'], _s['pk'])
-    for _o in pfp_orders:
+    for _o in _panel_orders:
         # The coversheet slider defaults to 1 day when unset, so mirror that on
         # the calendar card: show 1d (and span one day) when no value is stored.
         _o.fit_days = _cs_days.get(_o.sale_number) or Decimal('1')
@@ -12033,6 +12058,7 @@ def calendar_view(request):
         'total_fits': total_fits,
         'fits_with_balance': fits_with_balance,
         'pfp_orders': pfp_orders,
+        'awaiting_orders': awaiting_orders,
         'panel_remedials': panel_remedials,
         'calendar_blocks_json': calendar_blocks_json,
         'emp_weeks': emp_weeks,

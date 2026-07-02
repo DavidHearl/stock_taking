@@ -1616,6 +1616,8 @@ Sliderobes</textarea>
                     {% for att in attachments %}
                     <label class="email-attachment-item">
                         <input type="checkbox" class="email-att-checkbox" value="{{ att.id }}"
+                               data-filename="{{ att.filename }}"
+                               data-desc="{{ att.description|default:'' }}"
                                {% if 'angled_preview' in att.filename %}checked{% endif %}>
                         <i class="bi bi-{% if 'angled_preview' in att.filename %}image{% else %}file-earmark-arrow-down{% endif %}"></i>
                         <span>{{ att.filename }}</span>
@@ -1632,6 +1634,32 @@ Sliderobes</textarea>
             </button>
         </div>
     </div>
+</div>
+
+<!-- Missing Board Files Modal (Carnehill PNX/CSV check) -->
+<div class="modal-overlay" id="board-files-modal" style="display:none;" onclick="closeBoardFilesModal(event)">
+	<div class="modal-dialog modal-w-480" onclick="event.stopPropagation()">
+		<div class="modal-header">
+			<h3><i class="bi bi-exclamation-triangle"></i> Missing Board Files</h3>
+			<button class="modal-close" onclick="closeBoardFilesModal()">&times;</button>
+		</div>
+		<div class="modal-body">
+			<p class="po-modal-lead">This Carnehill purchase order is missing the <strong id="board-files-missing"></strong> file(s) from the email attachments. These are normally required so the supplier can process the board order.</p>
+			<label class="email-attachment-item cursor-pointer">
+				<input type="checkbox" id="board-files-confirm-cb" onchange="toggleBoardFilesConfirm()">
+				<i class="bi bi-check2-square"></i>
+				<span>These files are not required for this email &mdash; send without them</span>
+			</label>
+		</div>
+		<div class="modal-footer">
+			<button class="btn btn-md btn-secondary" onclick="closeBoardFilesModal()">
+				<i class="bi bi-arrow-left"></i> Go back &amp; attach files
+			</button>
+			<button class="btn btn-md btn-send" id="board-files-proceed-btn" onclick="confirmSendWithoutBoardFiles()" disabled>
+				<i class="bi bi-send"></i> Send anyway
+			</button>
+		</div>
+	</div>
 </div>
 
 <!-- Split PO Modal -->
@@ -2605,8 +2633,13 @@ function toggleHideDescriptions() {
     if (cb) cb.checked = _hideDescriptions;
 }
 
+// True when this PO is for the Carnehill board supplier, which requires PNX + CSV files.
+const IS_CARNEHILL_PO = '{{ purchase_order.supplier_name|default:""|escapejs }}'.toLowerCase().indexOf('carnehill') !== -1;
+let _boardFilesConfirmed = false;
+
 function openSendModal() {
-    document.getElementById('send-modal').style.display = 'flex';
+	_boardFilesConfirmed = false;
+	document.getElementById('send-modal').style.display = 'flex';
 }
 
 function closeSendModal(event) {
@@ -2641,6 +2674,24 @@ function sendPOEmail() {
         document.getElementById('send-to').focus();
         return;
     }
+
+	// Carnehill POs must include the PNX and CSV board files. If either is missing
+	// from the selected attachments, ask the user to confirm before sending.
+	if (IS_CARNEHILL_PO && !_boardFilesConfirmed) {
+		const selected = [];
+		document.querySelectorAll('.email-att-checkbox:checked').forEach(cb => {
+			selected.push({
+				name: (cb.dataset.filename || '').toLowerCase(),
+				desc: (cb.dataset.desc || '').toLowerCase(),
+			});
+		});
+		const hasPnx = selected.some(a => a.name.endsWith('.pnx') || a.desc.indexOf('pnx') !== -1);
+		const hasCsv = selected.some(a => a.name.endsWith('.csv') || a.desc.indexOf('csv') !== -1);
+		if (!hasPnx || !hasCsv) {
+			openBoardFilesModal(hasPnx, hasCsv);
+			return;
+		}
+	}
 
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Sending...';
@@ -2677,9 +2728,40 @@ function sendPOEmail() {
     });
 }
 
+function openBoardFilesModal(hasPnx, hasCsv) {
+	const missing = [];
+	if (!hasPnx) missing.push('PNX');
+	if (!hasCsv) missing.push('CSV');
+	document.getElementById('board-files-missing').textContent = missing.join(' and ');
+	const cb = document.getElementById('board-files-confirm-cb');
+	cb.checked = false;
+	document.getElementById('board-files-proceed-btn').disabled = true;
+	document.getElementById('board-files-modal').style.display = 'flex';
+}
+
+function closeBoardFilesModal(event) {
+	if (event && event.target !== document.getElementById('board-files-modal')) return;
+	document.getElementById('board-files-modal').style.display = 'none';
+}
+
+function toggleBoardFilesConfirm() {
+	document.getElementById('board-files-proceed-btn').disabled = !document.getElementById('board-files-confirm-cb').checked;
+}
+
+function confirmSendWithoutBoardFiles() {
+	_boardFilesConfirmed = true;
+	closeBoardFilesModal();
+	sendPOEmail();
+}
+
 // Close modal with Escape key
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
+		const boardFilesModal = document.getElementById('board-files-modal');
+		if (boardFilesModal && boardFilesModal.style.display === 'flex') {
+			boardFilesModal.style.display = 'none';
+			return;
+		}
         document.getElementById('send-modal').style.display = 'none';
     }
 });

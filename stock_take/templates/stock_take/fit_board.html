@@ -403,6 +403,19 @@
         <button class="schedule-panel-close" onclick="toggleSchedulePanel()" title="Close">&times;</button>
     </div>
 
+    <div class="schedule-panel-search">
+        <i class="bi bi-search"></i>
+        <input type="text" id="jobSearchInput" class="schedule-panel-search-input"
+               placeholder="Search jobs by name or number…" oninput="filterJobList()"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllSales();}" autocomplete="off">
+        <button type="button" class="schedule-panel-search-clear" id="jobSearchClear"
+                onclick="clearJobSearch()" title="Clear search" style="display:none;">&times;</button>
+    </div>
+    <button type="button" class="schedule-panel-allsales-btn" id="searchAllSalesBtn"
+            onclick="searchAllSales()" style="display:none;">
+        <i class="bi bi-globe"></i> Search all sales for &ldquo;<span id="searchAllSalesTerm"></span>&rdquo;
+    </button>
+
     <div class="schedule-panel-section">
         <div class="schedule-panel-section-title">Tools</div>
         <div class="panel-job-item panel-block-item"
@@ -417,7 +430,7 @@
         </div>
     </div>
 
-    <div class="schedule-panel-section">
+    <div class="schedule-panel-section" data-searchable>
         <div class="schedule-panel-section-title">PFP &mdash; Ready to Schedule</div>
         {% if pfp_orders %}
         {% for order in pfp_orders %}
@@ -439,9 +452,35 @@
         {% else %}
         <p class="schedule-panel-empty">No jobs awaiting scheduling.</p>
         {% endif %}
+        <p class="schedule-panel-empty schedule-panel-noresults" style="display:none;">No matching jobs.</p>
     </div>
 
-    <div class="schedule-panel-section">
+    <div class="schedule-panel-section" data-searchable>
+        <div class="schedule-panel-section-title">Ordered &mdash; Needs Fit Date</div>
+        {% if awaiting_orders %}
+        {% for order in awaiting_orders %}
+        <div class="panel-job-item"
+             draggable="true"
+             data-type="order"
+             data-id="{{ order.id }}"
+             data-name="{{ order.first_name }} {{ order.last_name }}"
+             data-sale-number="{{ order.sale_number }}"
+             data-fit-days="{{ order.fit_days|default_if_none:'' }}"
+             ondragstart="handlePanelDragStart(event)"
+             ondragend="handlePanelDragEnd(event)">
+            {% if order.fit_days %}<span class="panel-job-days" title="Fit days from coversheet">{{ order.fit_days|floatformat:"-1" }}d</span>{% endif %}
+            <span class="panel-job-name">{{ order.first_name }} {{ order.last_name }}</span>
+            <span class="panel-job-meta">{{ order.sale_number }}{% if order.order_date %} &middot; ordered {{ order.order_date|date:"j M" }}{% endif %}</span>
+            {% if order.sale_pk %}<a href="{% url 'sale_detail' order.sale_pk %}" class="panel-job-link" title="Open sale" target="_blank" rel="noopener" draggable="false" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"><i class="bi bi-box-arrow-up-right"></i></a>{% endif %}
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="schedule-panel-empty">No ordered jobs awaiting a fit date.</p>
+        {% endif %}
+        <p class="schedule-panel-empty schedule-panel-noresults" style="display:none;">No matching jobs.</p>
+    </div>
+
+    <div class="schedule-panel-section" data-searchable>
         <div class="schedule-panel-section-title">Remedials &amp; Warranty</div>
         {% if panel_remedials %}
         {% for rem in panel_remedials %}
@@ -460,6 +499,15 @@
         {% else %}
         <p class="schedule-panel-empty">No outstanding remedials.</p>
         {% endif %}
+        <p class="schedule-panel-empty schedule-panel-noresults" style="display:none;">No matching jobs.</p>
+    </div>
+
+    <div class="schedule-panel-section" id="allSalesSection" style="display:none;">
+        <div class="schedule-panel-section-title">
+            <i class="bi bi-globe"></i> All Sales
+            <span class="schedule-panel-section-hint">drag any onto the calendar</span>
+        </div>
+        <div id="allSalesResults"></div>
     </div>
 </div><!-- /.schedule-panel-inner -->
 </div><!-- /#schedulePanel -->
@@ -825,6 +873,115 @@ function handlePanelDragEnd(event) {
     event.currentTarget.classList.remove('dragging');
     document.body.classList.remove('fb-dragging');
     document.querySelectorAll('.mw-drop-zone.drag-over').forEach(z => z.classList.remove('drag-over'));
+}
+
+// ── Job-list search ──────────────────────────────────────────
+function filterJobList() {
+    const input = document.getElementById('jobSearchInput');
+    const q = (input ? input.value : '').trim().toLowerCase();
+    const clearBtn = document.getElementById('jobSearchClear');
+    if (clearBtn) clearBtn.style.display = q ? '' : 'none';
+
+    document.querySelectorAll('.schedule-panel-section[data-searchable]').forEach(section => {
+        let visible = 0;
+        section.querySelectorAll('.panel-job-item').forEach(item => {
+            const name = (item.dataset.name || '').toLowerCase();
+            const num = (item.dataset.saleNumber || '').toLowerCase();
+            const match = !q || name.includes(q) || num.includes(q);
+            item.style.display = match ? '' : 'none';
+            if (match) visible++;
+        });
+        // While searching, hide the static empty placeholder and show a
+        // "no matching jobs" line only when this section has hits to hide.
+        const empty = section.querySelector('.schedule-panel-empty:not(.schedule-panel-noresults)');
+        if (empty) empty.style.display = q ? 'none' : '';
+        const noRes = section.querySelector('.schedule-panel-noresults');
+        const total = section.querySelectorAll('.panel-job-item').length;
+        if (noRes) noRes.style.display = (q && total > 0 && visible === 0) ? '' : 'none';
+    });
+
+    // Offer an "all sales" lookup for the current term (min 2 chars).
+    const allBtn = document.getElementById('searchAllSalesBtn');
+    const term = input ? input.value.trim() : '';
+    if (allBtn) {
+        const show = term.length >= 2;
+        allBtn.style.display = show ? '' : 'none';
+        const termEl = document.getElementById('searchAllSalesTerm');
+        if (termEl) termEl.textContent = term;
+    }
+    // A change to the query invalidates any previous all-sales results.
+    if (_allSalesTerm !== null && term.toLowerCase() !== _allSalesTerm) {
+        hideAllSalesResults();
+    }
+}
+
+function clearJobSearch() {
+    const input = document.getElementById('jobSearchInput');
+    if (input) { input.value = ''; input.focus(); }
+    hideAllSalesResults();
+    filterJobList();
+}
+
+// ── All-sales lookup (searches every unfinished order, not just the panel) ──
+let _allSalesTerm = null;
+
+function hideAllSalesResults() {
+    _allSalesTerm = null;
+    const section = document.getElementById('allSalesSection');
+    if (section) section.style.display = 'none';
+    const box = document.getElementById('allSalesResults');
+    if (box) box.innerHTML = '';
+}
+
+function searchAllSales() {
+    const input = document.getElementById('jobSearchInput');
+    const q = (input ? input.value : '').trim();
+    if (q.length < 2) return;
+    const section = document.getElementById('allSalesSection');
+    const box = document.getElementById('allSalesResults');
+    if (!section || !box) return;
+
+    _allSalesTerm = q.toLowerCase();
+    section.style.display = '';
+    box.innerHTML = '<p class="schedule-panel-empty">Searching…</p>';
+
+    fetch(`{% url "search_orders_api" %}?q=${encodeURIComponent(q)}`)
+        .then(r => r.json())
+        .then(data => {
+            // Ignore stale responses if the term changed while in flight.
+            if (_allSalesTerm !== q.toLowerCase()) return;
+            const orders = (data && data.orders) || [];
+            if (!orders.length) {
+                box.innerHTML = '<p class="schedule-panel-empty">No sales found.</p>';
+                return;
+            }
+            box.innerHTML = orders.map(o => {
+                const name = `${o.first_name || ''} ${o.last_name || ''}`.trim();
+                const fit = o.fit_date ? ` &middot; fit ${o.fit_date}` : '';
+                const meta = `${o.sale_number || ''}${fit}`;
+                return `<div class="panel-job-item"
+                    draggable="true"
+                    data-type="order"
+                    data-id="${o.id}"
+                    data-name="${_esc(name)}"
+                    data-sale-number="${_esc(o.sale_number || '')}"
+                    ondragstart="handlePanelDragStart(event)"
+                    ondragend="handlePanelDragEnd(event)">
+                    <span class="panel-job-name">${_esc(name)}</span>
+                    <span class="panel-job-meta">${_esc(meta)}</span>
+                </div>`;
+            }).join('');
+        })
+        .catch(() => {
+            if (_allSalesTerm === q.toLowerCase()) {
+                box.innerHTML = '<p class="schedule-panel-empty">Search failed — try again.</p>';
+            }
+        });
+}
+
+function _esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ── Week focus & summary ────────────────────────────────────────
