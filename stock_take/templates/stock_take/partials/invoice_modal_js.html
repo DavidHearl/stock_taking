@@ -167,6 +167,7 @@ function modalSearchPO(q) {
     clearTimeout(modalPOSearchTimer);
     const dd = document.getElementById('new-pinv-po-dropdown');
     const input = document.getElementById('new-pinv-po-search');
+    setModalPoNoMatch(false);
     if (!q || q.trim().length < 2) {
         if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
         if (!q) { input.dataset.poId = ''; updateModalPoOpenBtn(); }
@@ -215,7 +216,16 @@ function selectModalPO(id, label, poType) {
     input.dataset.poId = id;
     input.dataset.poType = poType || 'supplier';
     dd.style.display = 'none';
+    setModalPoNoMatch(false);
     updateModalPoOpenBtn();
+}
+
+// Show / hide the "No matching POs found" hint under the PO search field.
+// Surfaced (from the AP create-invoice flow) when nothing confident matched,
+// so a missing PO reads as an explicit "none" rather than an empty field.
+function setModalPoNoMatch(show) {
+    const hint = document.getElementById('new-pinv-po-hint');
+    if (hint) hint.style.display = show ? '' : 'none';
 }
 
 // User picked a PO from the search dropdown - select it and auto-pull its lines.
@@ -229,6 +239,7 @@ function clearModalPO() {
     if (input) { input.value = ''; input.dataset.poId = ''; input.dataset.poType = ''; }
     const dd = document.getElementById('new-pinv-po-dropdown');
     if (dd) { dd.innerHTML = ''; dd.style.display = 'none'; }
+    setModalPoNoMatch(false);
     updateModalPoOpenBtn();
 }
 

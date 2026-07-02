@@ -24,7 +24,7 @@ from django.utils import timezone
 from django.utils.html import strip_tags
 from django.views.decorators.clickjacking import xframe_options_sameorigin
 
-from .models import MailboxEmail, MailboxEmailFilter, MailboxExemption, PurchaseInvoice, PurchaseInvoiceLineItem, Order, Supplier, PurchaseOrder, PurchaseOrderProduct, EnabledGLCode, OverheadPurchaseOrder, SupplierEmailRule
+from .models import MailboxEmail, MailboxEmailFilter, MailboxExemption, PurchaseInvoice, PurchaseInvoiceLineItem, Order, Supplier, PurchaseOrder, PurchaseOrderProduct, EnabledGLCode, OverheadPurchaseOrder, SupplierEmailRule, SupplierContact
 from .permissions import page_permission_required
 from .pricing_utils import apply_invoice_price
 from .purchase_invoice_views import _extract_pdf_fields, _parse_date, _parse_decimal
@@ -353,6 +353,42 @@ def _get_approved_unreceived_pos():
     return result
 
 
+def _build_supplier_email_index():
+	"""Build two lookups from the email addresses stored on supplier records:
+
+	    exact  – {address: supplier_name}   every address on file
+	    domain – {domain: supplier_name}     business domains that belong to a
+	                                          single supplier (unambiguous)
+
+	Addresses come from both ``Supplier.email`` and each ``SupplierContact.email``.
+	The domain map deliberately drops personal domains and any domain shared by
+	more than one supplier, so a fallback match never guesses ambiguously.
+	"""
+	exact = {}
+	domain_names = {}  # domain -> set of supplier names
+	pairs = list(
+		Supplier.objects.filter(is_active=True)
+		.exclude(email__isnull=True).exclude(email='')
+		.values_list('email', 'name')
+	)
+	pairs += list(
+		SupplierContact.objects.exclude(email='')
+		.values_list('email', 'supplier__name')
+	)
+	for raw_email, name in pairs:
+		if not raw_email or not name:
+			continue
+		addr = raw_email.lower().strip()
+		if '@' not in addr:
+			continue
+		exact.setdefault(addr, name)
+		domain = addr.split('@', 1)[1]
+		if domain and domain not in _PERSONAL_DOMAINS:
+			domain_names.setdefault(domain, set()).add(name)
+	domain = {d: next(iter(names)) for d, names in domain_names.items() if len(names) == 1}
+	return exact, domain
+
+
 @login_required
 @page_permission_required('accounts_payable')
 def accounts_payable_inbox(request):
@@ -467,19 +503,29 @@ def accounts_payable_inbox(request):
             email.po_match_fuzzy = False
             email.po_match_class = ''
 
-    # Annotate each email with a matched supplier name from SupplierEmailRule
-    # (_supplier_rules already built above — reuse it here)
+    # Annotate each email with a matched supplier name. A SupplierEmailRule
+    # (explicit mapping) wins first; failing that we fall back to the email
+    # address stored on the Supplier record / its contacts, so a sender whose
+    # address is already on file connects automatically without needing a rule.
+    # (_supplier_rules already built above — reuse it here.)
+    _supplier_email_exact, _supplier_email_domain = _build_supplier_email_index()
 
     def _match_supplier(sender_email):
         if not sender_email:
             return ''
-        addr = sender_email.lower()
+        addr = sender_email.lower().strip()
+        # 1. Explicit SupplierEmailRule — exact address, then domain pattern.
         if addr in _supplier_rules:
             return _supplier_rules[addr]
-        if '@' in addr:
-            domain_key = '@' + addr.split('@', 1)[1]
-            if domain_key in _supplier_rules:
-                return _supplier_rules[domain_key]
+        domain = addr.split('@', 1)[1] if '@' in addr else ''
+        if domain and ('@' + domain) in _supplier_rules:
+            return _supplier_rules['@' + domain]
+        # 2. Address on the supplier record / contacts — exact match first, then
+        #    a business-domain match (personal domains are too ambiguous).
+        if addr in _supplier_email_exact:
+            return _supplier_email_exact[addr]
+        if domain and domain not in _PERSONAL_DOMAINS and domain in _supplier_email_domain:
+            return _supplier_email_domain[domain]
         return ''
 
     for email in page_obj.object_list:

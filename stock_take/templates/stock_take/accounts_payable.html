@@ -308,7 +308,7 @@ MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
                                 data-subject="{{ email.subject|default:'(no subject)'|truncatechars:80 }}"
                                 data-attachments="{{ email.attachment_names }}"
                                 data-matched-supplier="{{ email.matched_supplier|default:'' }}"
-                                {% if email.matched_po %}data-po-id="{{ email.matched_po.workguru_id }}" data-po-label="{{ email.matched_po.display_number|default:email.matched_po.workguru_id }}" data-po-type="{{ email.matched_po.po_type|default:'supplier' }}"{% elif email.po_match %}data-po-id="{{ email.po_match.workguru_id }}" data-po-label="{{ email.po_match.display_number|default:email.po_match.workguru_id }}" data-po-type="{{ email.po_match.po_type|default:'supplier' }}"{% endif %}
+                                {% if email.matched_po %}data-po-id="{{ email.matched_po.workguru_id }}" data-po-label="{{ email.matched_po.display_number|default:email.matched_po.workguru_id }}" data-po-type="{{ email.matched_po.po_type|default:'supplier' }}"{% elif email.po_match and not email.po_match_fuzzy %}data-po-id="{{ email.po_match.workguru_id }}" data-po-label="{{ email.po_match.display_number|default:email.po_match.workguru_id }}" data-po-type="{{ email.po_match.po_type|default:'supplier' }}"{% endif %}
                                 title="Create purchase invoice"
                                 onclick="openCreateModal(this)">
                             <i class="bi bi-plus-circle-fill"></i>
@@ -1470,6 +1470,13 @@ function openCreateModal(btn) {
         list.innerHTML = '<p class="apay-att-no-message">No attachments on this email.</p>';
     }
 
+    // Surface "No matching POs found" straight away unless a PO was pre-filled
+    // or a PDF parse is still pending — in the pending case the parse callback
+    // settles the hint once it knows whether it found a suggested PO.
+    const _willParse = attachments.length
+        && (attachments[0].content_type || '').toLowerCase().includes('pdf');
+    if (!prePoId && !_willParse) setModalPoNoMatch(true);
+
     addModalLine();
     document.getElementById('create-invoice-modal').classList.add('open');
 }
@@ -1539,7 +1546,7 @@ function parseEmailAttachment(attachmentId, hasMatchedSupplier = false) {
     .then(r => r.json())
     .then(data => {
         statusEl.textContent = '';
-        if (!data.success || !data.extracted) return;
+        if (!data.success || !data.extracted) { refreshPoNoMatchHint(); return; }
         const ex = data.extracted;
         applyExtractedToModal(ex, { skipSupplier: hasMatchedSupplier });
 
@@ -1550,8 +1557,16 @@ function parseEmailAttachment(attachmentId, hasMatchedSupplier = false) {
             statusEl.textContent = `\u2713 PO matched: ${spo.display_number}${spo.supplier_name ? ' \u2013 ' + spo.supplier_name : ''}`;
             setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 5000);
         }
+        refreshPoNoMatchHint();
     })
-    .catch(() => { statusEl.textContent = ''; });
+    .catch(() => { statusEl.textContent = ''; refreshPoNoMatchHint(); });
+}
+
+// After a parse settles, show the "No matching POs found" hint only when no PO
+// ended up selected (either pre-filled from the email or found in the PDF).
+function refreshPoNoMatchHint() {
+    const poInput = document.getElementById('new-pinv-po-search');
+    setModalPoNoMatch(!(poInput && poInput.dataset.poId));
 }
 
 function submitCreateInvoice() {

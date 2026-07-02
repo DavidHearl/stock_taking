@@ -7,7 +7,7 @@
 
 {% block nav_purchase_orders_active %}active{% endblock %}
 
-{% block page_title %}<a href="{% url 'purchase_orders_list' %}" style="color: inherit; text-decoration: none; margin-right: 8px;" title="Back to Purchase Orders"><i class="bi bi-arrow-left"></i></a>Purchase Order Details{% endblock %}
+{% block page_title %}<a href="{% url 'purchase_orders_list' %}" class="po-back-link" title="Back to Purchase Orders"><i class="bi bi-arrow-left"></i></a>Purchase Order Details{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/purchase_orders.css' %}">
@@ -55,13 +55,13 @@
                 <span>Last synced: {{ purchase_order.last_synced|date:"d/m/Y H:i" }}</span>
                 {% if parent_po %}
                 <span class="po-meta-sep">|</span>
-                <span><i class="bi bi-arrow-return-left"></i> Split from <a href="{% url 'purchase_order_detail' parent_po.workguru_id %}" style="color:var(--primary-color); text-decoration:none; font-weight:500;">{{ parent_po.display_number }}</a></span>
+                <span><i class="bi bi-arrow-return-left"></i> Split from <a href="{% url 'purchase_order_detail' parent_po.workguru_id %}" class="po-split-link">{{ parent_po.display_number }}</a></span>
                 {% endif %}
                 {% if split_children %}
                 <span class="po-meta-sep">|</span>
                 <span><i class="bi bi-diagram-2"></i> Splits:
                 {% for child in split_children %}
-                    <a href="{% url 'purchase_order_detail' child.workguru_id %}" style="color:var(--primary-color); text-decoration:none; font-weight:500;">{{ child.display_number }}</a>{% if not forloop.last %}, {% endif %}
+                    <a href="{% url 'purchase_order_detail' child.workguru_id %}" class="po-split-link">{{ child.display_number }}</a>{% if not forloop.last %}, {% endif %}
                 {% endfor %}
                 </span>
                 {% endif %}
@@ -337,7 +337,7 @@
                 <span class="po-board-count-badge">{{ products.count }} items</span>
                 {% endif %}
             </h3>
-            <div style="display:flex;gap:8px;align-items:center;">
+            <div class="po-products-actions">
                 <button class="btn btn-sm btn-save" id="products-save-btn" onclick="savePO()" style="display:none;">
                     <i class="bi bi-floppy"></i> Save Changes
                 </button>
@@ -385,7 +385,7 @@
                         <th class="text-center">Rec'd Qty</th>
                         <th class="text-center">Invoice Price</th>
                         <th class="text-right">Line Total</th>
-                        <th class="text-center" style="width: 50px;"></th>
+                        <th class="text-center"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -539,8 +539,8 @@
                     {% endif %}
                     {% if not products and not board_product_rows %}
                     <tr id="no-products-row">
-                        <td colspan="9" class="text-center" style="padding: 24px; color: var(--text-secondary);">
-                            <i class="bi bi-inbox" style="font-size: 1.5rem; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
+                        <td colspan="9" class="text-center po-empty-cell">
+                            <i class="bi bi-inbox po-empty-cell-icon"></i>
                             No products yet. Click <strong>Add Product</strong> above to get started.
                         </td>
                     </tr>
@@ -571,7 +571,7 @@
                 </div>
                 {% if purchase_order.freight_cost %}
                 <div class="po-totals-row">
-                    <div class="po-totals-label"><i class="bi bi-truck" style="margin-right:4px;"></i> Freight</div>
+                    <div class="po-totals-label"><i class="bi bi-truck po-freight-icon"></i> Freight</div>
                     <div class="po-totals-value" id="freight-display">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.freight_cost|floatformat:2|intcomma }}</div>
                 </div>
                 {% endif %}
@@ -591,7 +591,7 @@
                 {# ── No VAT rate set — original display ── #}
                 {% if purchase_order.freight_cost %}
                 <div class="po-totals-row">
-                    <div class="po-totals-label"><i class="bi bi-truck" style="margin-right:4px;"></i> Freight</div>
+                    <div class="po-totals-label"><i class="bi bi-truck po-freight-icon"></i> Freight</div>
                     <div class="po-totals-value" id="freight-display">{{ purchase_order.currency|default:"GBP" }} {{ purchase_order.freight_cost|floatformat:2|intcomma }}</div>
                 </div>
                 {% endif %}
@@ -607,9 +607,9 @@
                 {% endif %}
                 <div class="po-totals-row">
                     <div class="po-totals-label">VAT Rate</div>
-                    <div class="po-totals-value" style="opacity:.6;font-size:.85em;">
+                    <div class="po-totals-value po-totals-value-muted">
                         {% if supplier_obj %}
-                        <a href="{% url 'supplier_detail' supplier_obj.workguru_id %}" style="color:var(--primary-color);">Set on Supplier &rarr;</a>
+                        <a href="{% url 'supplier_detail' supplier_obj.workguru_id %}" class="po-link-primary">Set on Supplier &rarr;</a>
                         {% else %}
                         No supplier linked
                         {% endif %}
@@ -651,36 +651,34 @@
                 <span class="po-board-count-badge">{{ po_timesheets|length }} entries &middot; £{{ po_timesheets_total|floatformat:2 }}</span>
                 {% endif %}
             </h3>
-            <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+            <div class="po-section-actions">
                 <button class="btn btn-sm btn-add-product" onclick="toggleAddTimesheetRow()">
                     <i class="bi bi-plus-lg"></i> Add Timesheet
                 </button>
                 {% if linked_purchase_invoices %}
-                <button class="btn btn-sm btn-add-product" onclick="pullFromInvoice()" style="background:var(--info-color,#0dcaf0);color:var(--text-on-color);border-color:transparent;">
+                <button class="btn btn-sm btn-add-product btn-pull-invoice" onclick="pullFromInvoice()">
                     <i class="bi bi-cloud-download"></i> Pull from Invoice
                 </button>
                 {% endif %}
                 <button class="btn btn-sm btn-delete" id="ts-delete-selected-btn" onclick="deleteSelectedTimesheets()" style="display:none;">
                     <i class="bi bi-trash"></i> Delete Selected
                 </button>
-                <div style="position:relative;">
-                    <button onclick="toggleTsKebab(event)" title="Available timesheets &amp; bulk actions" style="background:var(--bg-secondary);color:var(--text-secondary);border:1px solid var(--border-color);padding:4px 10px;border-radius:var(--radius-pill);display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:0.8rem;font-weight:600;">
-                        <i class="bi bi-three-dots-vertical"></i>{% if unlinked_timesheets %}<span style="background:var(--primary-color);color:var(--text-on-color);border-radius:10px;padding:1px 6px;font-size:0.7rem;font-weight:700;">{{ unlinked_timesheets|length }}</span>{% endif %}
+                <div class="po-ts-kebab-wrap">
+                    <button onclick="toggleTsKebab(event)" title="Available timesheets &amp; bulk actions" class="po-ts-kebab-btn">
+                        <i class="bi bi-three-dots-vertical"></i>{% if unlinked_timesheets %}<span class="po-ts-count-badge">{{ unlinked_timesheets|length }}</span>{% endif %}
                     </button>
                     <div id="ts-kebab-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:200;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;min-width:240px;box-shadow:0 4px 12px rgba(0,0,0,.15);overflow:hidden;">
                         {% if unlinked_timesheets %}
-                        <div style="padding:8px 14px;cursor:pointer;font-size:0.85rem;border-bottom:1px solid var(--border-color);"
-                             onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''"
+                        <div class="po-ts-kebab-item po-ts-kebab-item-bordered"
                              onclick="openAvailableTsModal()">
                             <i class="bi bi-table"></i> View Available ({{ unlinked_timesheets|length }})
                         </div>
-                        <div style="padding:8px 14px;cursor:pointer;font-size:0.85rem;"
-                             onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''"
+                        <div class="po-ts-kebab-item"
                              onclick="linkAllTimesheets()">
                             <i class="bi bi-link-45deg"></i> Link All Available
                         </div>
                         {% else %}
-                        <div style="padding:8px 14px;font-size:0.85rem;color:var(--text-muted);">No available timesheets</div>
+                        <div class="po-ts-kebab-empty">No available timesheets</div>
                         {% endif %}
                     </div>
                 </div>
@@ -690,14 +688,14 @@
             <table class="po-products-table" id="timesheets-table">
                 <thead>
                     <tr>
-                        <th style="width: 30px;"><input type="checkbox" id="ts-select-all" title="Select all" onchange="toggleSelectAllTimesheets(this)"></th>
+                        <th><input type="checkbox" id="ts-select-all" title="Select all" onchange="toggleSelectAllTimesheets(this)"></th>
                         <th class="text-left">Date</th>
                         <th class="text-left">Order</th>
                         <th class="text-left">Description</th>
                         <th class="text-right">Hours</th>
                         <th class="text-right">Rate (£/hr)</th>
                         <th class="text-right">Total</th>
-                        <th class="text-center" style="width: 60px;"></th>
+                        <th class="text-center"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -718,8 +716,8 @@
                         <td><input type="text" class="po-inline-input" id="new-ts-description" placeholder="Description of work..."></td>
                         <td>
                             <div class="ts-hours-editor">
-                                <input type="number" class="po-inline-input text-right" id="new-ts-hours" placeholder="0" step="0.5" min="0" oninput="calcNewTsTotal()" style="min-width:55px;">
-                                <button type="button" class="btn btn-sm btn-add-product" onclick="setFullDay()" title="Set to full day (8 hours)" style="white-space:nowrap;padding:2px 7px;font-size:0.75rem;line-height:1.6;">8h</button>
+                                <input type="number" class="po-inline-input text-right po-ts-hours-input" id="new-ts-hours" placeholder="0" step="0.5" min="0" oninput="calcNewTsTotal()">
+                                <button type="button" class="btn btn-sm btn-add-product po-ts-fullday-btn" onclick="setFullDay()" title="Set to full day (8 hours)">8h</button>
                             </div>
                         </td>
                         <td><input type="number" class="po-inline-input text-right no-pnx-spinner" id="new-ts-rate" placeholder="0.00" step="0.01" min="0" value="{% if purchase_order.fitter and purchase_order.fitter.hourly_rate %}{{ purchase_order.fitter.hourly_rate }}{% endif %}" oninput="calcNewTsTotal()"></td>
@@ -737,7 +735,7 @@
                             {% if ts.order %}
                             <a href="{% url 'order_details' ts.order.id %}" class="po-project-link">{{ ts.order.sale_number }}{% if ts.order.customer_name %} — {{ ts.order.customer_name }}{% endif %}</a>
                             {% else %}
-                            <span style="color: var(--text-muted);">—</span>
+                            <span class="po-dash">—</span>
                             {% endif %}
                         </td>
                         <td class="ts-desc-cell">{{ ts.display_description|default:"-" }}</td>
@@ -764,8 +762,8 @@
                     </tr>
                     {% empty %}
                     <tr id="no-timesheets-row">
-                        <td colspan="8" class="text-center" style="padding: 24px; color: var(--text-secondary);">
-                            <i class="bi bi-clock" style="font-size: 1.5rem; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
+                        <td colspan="8" class="text-center po-empty-cell">
+                            <i class="bi bi-clock po-empty-cell-icon"></i>
                             No timesheet entries yet. Click <strong>Add Timesheet</strong> above to add one.
                         </td>
                     </tr>
@@ -786,17 +784,17 @@
         {% if unlinked_timesheets %}
         <!-- Available Timesheets Modal -->
         <div id="available-ts-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.45);" onclick="closeAvailableTsModal(event)">
-            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:92%;max-width:960px;max-height:85vh;background:var(--bg-primary);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.2);display:flex;flex-direction:column;overflow:hidden;" onclick="event.stopPropagation()">
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-color);flex-shrink:0;">
-                    <h3 style="margin:0;font-size:1rem;"><i class="bi bi-link-45deg"></i> Available Timesheets
+            <div class="po-ts-modal-box" onclick="event.stopPropagation()">
+                <div class="po-ts-modal-header">
+                    <h3 class="po-ts-modal-title"><i class="bi bi-link-45deg"></i> Available Timesheets
                         <span class="po-board-count-badge">{{ unlinked_timesheets|length }} available</span>
                     </h3>
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <button class="btn btn-sm btn-add-product" onclick="linkAllTimesheets()" style="font-size:0.78rem;"><i class="bi bi-link-45deg"></i> Link All</button>
-                        <button onclick="closeAvailableTsModal()" style="background:none;border:none;font-size:1.5rem;cursor:pointer;color:var(--text-secondary);padding:0 4px;line-height:1;">&times;</button>
+                    <div class="po-ts-modal-actions">
+                        <button class="btn btn-sm btn-add-product po-btn-xs" onclick="linkAllTimesheets()"><i class="bi bi-link-45deg"></i> Link All</button>
+                        <button onclick="closeAvailableTsModal()" class="po-modal-x">&times;</button>
                     </div>
                 </div>
-                <div style="padding:16px 20px;overflow-y:auto;">
+                <div class="po-ts-modal-body">
                     <div class="po-table-container">
                         <table class="po-products-table" id="unlinked-timesheets-table">
                             <thead>
@@ -808,7 +806,7 @@
                                     <th class="text-right">Hours</th>
                                     <th class="text-right">Rate (£/hr)</th>
                                     <th class="text-right">Total</th>
-                                    <th class="text-center" style="width:50px;"></th>
+                                    <th class="text-center po-th-w50"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -819,7 +817,7 @@
                                         {% if ts.order %}
                                         <a href="{% url 'order_details' ts.order.id %}" class="po-project-link">{{ ts.order.sale_number }}{% if ts.order.customer_name %} — {{ ts.order.customer_name }}{% endif %}</a>
                                         {% else %}
-                                        <span style="color:var(--text-muted);">—</span>
+                                        <span class="po-dash">—</span>
                                         {% endif %}
                                     </td>
                                     <td>{{ ts.worker_name }}</td>
@@ -849,7 +847,7 @@
                 <span class="po-board-count-badge">{{ po_expenses|length }} entries &middot; £{{ po_expenses_total|floatformat:2 }}</span>
                 {% endif %}
             </h3>
-            <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+            <div class="po-section-actions">
                 <button class="btn btn-sm btn-add-product" onclick="toggleAddExpenseRow()">
                     <i class="bi bi-plus-lg"></i> Add Expense
                 </button>
@@ -867,7 +865,7 @@
                         <th class="text-left">Order</th>
                         <th class="text-left">Description</th>
                         <th class="text-right">Amount</th>
-                        <th class="text-center" style="width: 50px;"></th>
+                        <th class="text-center po-th-w50"></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -906,13 +904,12 @@
                             {% if exp.order %}
                             <a href="{% url 'order_details' exp.order.id %}" class="po-project-link">{{ exp.order.sale_number }}{% if exp.order.customer_name %} — {{ exp.order.customer_name }}{% endif %}</a>
                             {% else %}
-                            <span style="color: var(--text-muted);">—</span>
+                            <span class="po-dash">—</span>
                             {% endif %}
                         </td>
                         <td>{{ exp.description|default:"-" }}</td>
                         <td class="text-right">
-                            <span class="exp-amount-display" onclick="startEditExpenseAmount({{ exp.id }}, this)" title="Click to edit"
-                                  style="cursor:pointer;border-bottom:1px dashed var(--border-color);">£{{ exp.amount|floatformat:2 }}</span>
+                            <span class="exp-amount-display" onclick="startEditExpenseAmount({{ exp.id }}, this)" title="Click to edit">£{{ exp.amount|floatformat:2 }}</span>
                         </td>
                         <td class="text-center">
                             <button class="btn-inline-delete" onclick="deleteExpense({{ exp.id }}, this)" title="Delete"><i class="bi bi-trash"></i></button>
@@ -920,8 +917,8 @@
                     </tr>
                     {% empty %}
                     <tr id="no-expenses-row">
-                        <td colspan="6" class="text-center" style="padding: 24px; color: var(--text-secondary);">
-                            <i class="bi bi-fuel-pump" style="font-size: 1.5rem; display: block; margin-bottom: 8px; opacity: 0.4;"></i>
+                        <td colspan="6" class="text-center po-empty-cell">
+                            <i class="bi bi-fuel-pump po-empty-cell-icon"></i>
                             No expenses yet. Click <strong>Add Expense</strong> above to add one.
                         </td>
                     </tr>
@@ -1025,9 +1022,9 @@
 
     <!-- Attachments Section -->
     <div class="po-products-section">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div class="po-section-header">
             <h3><i class="bi bi-paperclip"></i> Attachments</h3>
-            <div style="display: flex; gap: 8px;">
+            <div class="po-btn-group">
                 <button class="btn btn-md btn-info" onclick="openMediaFilesModal()" title="Attach from Media">
                     <i class="bi bi-paperclip"></i>
                 </button>
@@ -1050,7 +1047,7 @@
                             <th>Description</th>
                             <th>Uploaded By</th>
                             <th>Date</th>
-                            <th style="width: 80px;"></th>
+                            <th class="po-th-w80"></th>
                         </tr>
                     </thead>
                     <tbody id="attachments-tbody">
@@ -1079,7 +1076,7 @@
                         {% if att.filename|lower|slice:"-4:" == ".png" or att.filename|lower|slice:"-4:" == ".jpg" or att.filename|lower|slice:"-5:" == ".jpeg" %}
                         <tr class="attachment-preview-row">
                             <td colspan="5">
-                                <img src="{{ att.file.url }}" alt="{{ att.description }}" style="max-width: 380px; border-radius: 6px; border: 1px solid var(--border-color);">
+                                <img src="{{ att.file.url }}" alt="{{ att.description }}" class="po-attachment-preview-img">
                             </td>
                         </tr>
                         {% endif %}
@@ -1101,12 +1098,12 @@
                 {% if purchase_order.invoice_not_required %}
                 <button type="button" id="po-no-invoice-badge" onclick="clearInvoiceNotRequired()"
                       title="Marked as not requiring a supplier invoice — click to undo"
-                      style="display:inline-flex;align-items:center;gap:4px;margin-left:10px;padding:2px 10px;font-size:0.72rem;font-weight:600;border:none;border-radius:12px;background:rgba(220,53,69,0.12);color:var(--danger-color);vertical-align:middle;cursor:pointer;">
+                      class="po-no-invoice-badge">
                     <i class="bi bi-slash-circle"></i> No invoice required
                 </button>
                 {% endif %}
             </h3>
-            <div style="display: flex; gap: 8px;">
+            <div class="po-btn-group">
                 <button class="btn btn-md btn-primary" onclick="toggleLinkedInvoiceSearch()">
                     <i class="bi bi-search"></i> Link Invoice
                 </button>
@@ -1179,10 +1176,10 @@
                 </div>
 
                 <!-- Line Items -->
-                <div style="margin-bottom: 12px;">
-                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                        <label style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.5px;">Line Items</label>
-                        <button type="button" class="btn btn-sm btn-primary" onclick="addInvoiceLineItem()" style="font-size:0.75rem;padding:3px 10px;">
+                <div class="po-form-section">
+                    <div class="po-line-items-header">
+                        <label class="po-form-label">Line Items</label>
+                        <button type="button" class="btn btn-sm btn-primary po-btn-xs" onclick="addInvoiceLineItem()">
                             <i class="bi bi-plus"></i> Add Item
                         </button>
                     </div>
@@ -1195,23 +1192,23 @@
                 </div>
 
                 <!-- Drag & Drop Attachment -->
-                <div style="margin-bottom: 12px;">
-                    <label style="display:block;font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Invoice Attachment</label>
+                <div class="po-form-section">
+                    <label class="po-form-label-block">Invoice Attachment</label>
                     <div id="inv-drop-zone" class="inv-drop-zone" onclick="document.getElementById('inv-file-input').click()">
                         <input type="file" id="inv-file-input" style="display:none;" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.msg,.eml" onchange="handleInvFileSelect(this)">
                         <div id="inv-drop-zone-content">
-                            <i class="bi bi-cloud-arrow-up" style="font-size:1.8rem;color:var(--text-secondary);"></i>
-                            <p style="margin:6px 0 0;font-size:0.85rem;color:var(--text-secondary);">
+                            <i class="bi bi-cloud-arrow-up inv-drop-icon"></i>
+                            <p class="inv-drop-text">
                                 Drag & drop invoice file here, or click to browse
                             </p>
-                            <p style="margin:2px 0 0;font-size:0.75rem;color:var(--text-secondary);opacity:0.7;">
+                            <p class="inv-drop-subtext">
                                 PDF, images, Word, Excel, or email files
                             </p>
                         </div>
                         <div id="inv-drop-zone-file" style="display:none;">
-                            <i class="bi bi-file-earmark-check" style="font-size:1.4rem;color:var(--success-color);"></i>
-                            <span id="inv-file-name" style="margin-left:8px;font-size:0.85rem;color:var(--text-primary);"></span>
-                            <button type="button" class="btn btn-sm btn-danger" onclick="event.stopPropagation();clearInvFile()" style="margin-left:auto;font-size:0.7rem;padding:2px 8px;">
+                            <i class="bi bi-file-earmark-check inv-file-icon"></i>
+                            <span id="inv-file-name" class="inv-file-name"></span>
+                            <button type="button" class="btn btn-sm btn-danger inv-file-remove-btn" onclick="event.stopPropagation();clearInvFile()">
                                 <i class="bi bi-x"></i> Remove
                             </button>
                         </div>
@@ -1231,12 +1228,11 @@
 
         <!-- Search / attach form (hidden by default) -->
         <div id="linked-invoice-search-form" style="display: none; margin-bottom: 16px;">
-            <div style="position: relative;">
+            <div class="po-search-rel">
                 <input type="text" id="linked-invoice-search-input"
-                       class="po-invoice-input"
+                       class="po-invoice-input po-search-full"
                        placeholder="Search by invoice number, client name, or project..."
-                       autocomplete="off"
-                       style="width: 100%; padding: 8px 12px;">
+                       autocomplete="off">
                 <div id="linked-invoice-search-results"
                      style="display:none; position:absolute; top:100%; left:0; right:0; z-index:100;
                             background:var(--bg-primary); border:1px solid var(--border-color);
@@ -1255,12 +1251,12 @@
                             <th>Invoice #</th>
                             <th>Client</th>
                             <th>Date</th>
-                            <th style="text-align: right;">Total</th>
-                            <th style="text-align: right;">Freight</th>
+                            <th class="text-right">Total</th>
+                            <th class="text-right">Freight</th>
                             <th>Status</th>
                             <th>Payment</th>
                             <th>File</th>
-                            <th style="width: 80px;"></th>
+                            <th class="po-th-w80"></th>
                         </tr>
                     </thead>
                     <tbody id="linked-invoices-tbody">
@@ -1273,11 +1269,11 @@
                             </td>
                             <td>{{ inv.client_name|default:"—" }}</td>
                             <td>{{ inv.date|date:"d/m/Y"|default:"—" }}</td>
-                            <td style="text-align: right;">
+                            <td class="text-right">
                                 {% if inv.currency == 'EUR' %}€{% elif inv.currency == 'USD' %}${% else %}£{% endif %}{{ inv.total|floatformat:2 }}
-                                {% if inv.is_vat_inclusive %}<span style="font-size:0.7rem;color:var(--text-secondary);"> inc {{ inv.vat_rate|floatformat:0 }}% VAT</span>{% else %}<span style="font-size:0.7rem;color:var(--text-secondary);"> exc VAT ({{ inv.vat_rate|floatformat:0 }}%)</span>{% endif %}
+                                {% if inv.is_vat_inclusive %}<span class="po-vat-note"> inc {{ inv.vat_rate|floatformat:0 }}% VAT</span>{% else %}<span class="po-vat-note"> exc VAT ({{ inv.vat_rate|floatformat:0 }}%)</span>{% endif %}
                             </td>
-                            <td style="text-align: right;">
+                            <td class="text-right">
                                 {% if inv.freight_cost %}
                                 {% if inv.currency == 'EUR' %}€{% elif inv.currency == 'USD' %}${% else %}£{% endif %}{{ inv.freight_cost|floatformat:2 }}
                                 {% else %}—{% endif %}
@@ -1294,11 +1290,11 @@
                             </td>
                             <td>
                                 {% if inv.attachment %}
-                                <a href="{{ inv.attachment.url }}" target="_blank" title="View attachment" style="color:var(--success-color);">
+                                <a href="{{ inv.attachment.url }}" target="_blank" title="View attachment" class="po-link-success">
                                     <i class="bi bi-file-earmark-check"></i>
                                 </a>
                                 {% else %}
-                                <span style="color:var(--text-secondary);opacity:0.4;"><i class="bi bi-file-earmark"></i></span>
+                                <span class="po-file-none"><i class="bi bi-file-earmark"></i></span>
                                 {% endif %}
                             </td>
                             <td>
@@ -1328,13 +1324,12 @@
 
         <!-- Search box -->
         <div id="pi-search-form" style="display:none;margin-bottom:16px;">
-            <div style="position:relative;">
+            <div class="po-search-rel">
                 <input type="text" id="pi-search-input"
-                       class="po-invoice-input"
+                       class="po-invoice-input po-search-full"
                        placeholder="Search by invoice number or supplier…"
                        autocomplete="off"
-                       oninput="searchPurchaseInvoices(this)"
-                       style="width:100%;padding:8px 12px;">
+                       oninput="searchPurchaseInvoices(this)">
                 <div id="pi-search-dd"
                      style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;
                             background:var(--bg-primary);border:1px solid var(--border-color);
@@ -1342,7 +1337,7 @@
                             max-height:250px;overflow-y:auto;margin-top:2px;">
                 </div>
             </div>
-            <button class="btn btn-sm btn-secondary" onclick="togglePurchaseInvoiceSearch()" style="margin-top:6px;">Cancel</button>
+            <button class="btn btn-sm btn-secondary po-mt-6" onclick="togglePurchaseInvoiceSearch()">Cancel</button>
         </div>
 
         <!-- Table of linked purchase invoices -->
@@ -1355,28 +1350,28 @@
                             <th>Invoice #</th>
                             <th>Supplier</th>
                             <th>Date</th>
-                            <th style="text-align:right;">Total</th>
-                            <th style="text-align:right;">Outstanding</th>
+                            <th class="text-right">Total</th>
+                            <th class="text-right">Outstanding</th>
                             <th>Status</th>
                             <th>Payment</th>
-                            <th style="width:60px;"></th>
+                            <th class="po-th-w60"></th>
                         </tr>
                     </thead>
                     <tbody id="linked-purchase-invoices-tbody">
                         {% for pinv in linked_purchase_invoices %}
                         <tr id="linked-pinv-row-{{ pinv.id }}">
                             <td>
-                                <a href="{% url 'purchase_invoice_detail' pinv.id %}" style="color:var(--primary-color);text-decoration:none;">
-                                    <i class="bi bi-box-arrow-up-right" style="font-size:.75rem;"></i> {{ pinv.invoice_number }}
+                                <a href="{% url 'purchase_invoice_detail' pinv.id %}" class="po-link-primary-plain">
+                                    <i class="bi bi-box-arrow-up-right po-link-icon-sm"></i> {{ pinv.invoice_number }}
                                 </a>
                             </td>
                             <td>{{ pinv.supplier_name|default:"—" }}</td>
                             <td>{{ pinv.date|date:"d/m/Y"|default:"—" }}</td>
-                            <td style="text-align:right;">£{{ pinv.total|floatformat:2 }}</td>
-                            <td style="text-align:right;">£{{ pinv.amount_outstanding|floatformat:2 }}</td>
+                            <td class="text-right">£{{ pinv.total|floatformat:2 }}</td>
+                            <td class="text-right">£{{ pinv.amount_outstanding|floatformat:2 }}</td>
                             <td><span class="pinv-status {{ pinv.status|lower }}">{{ pinv.status }}</span></td>
                             <td><span class="pinv-payment {{ pinv.payment_status }}">{{ pinv.get_payment_status_display }}</span></td>
-                            <td style="text-align:center;">
+                            <td class="text-center">
                                 <button class="btn btn-sm btn-danger" onclick="unlinkPurchaseInvoice({{ pinv.id }})" title="Unlink">
                                     <i class="bi bi-x-lg"></i>
                                 </button>
@@ -1385,10 +1380,10 @@
                         {% endfor %}
                     </tbody>
                     <tfoot id="linked-pinv-tfoot">
-                        <tr style="border-top:2px solid var(--border-color);font-weight:600;">
-                            <td colspan="3" style="text-align:right;padding:8px 12px;">Total</td>
-                            <td id="linked-pinv-total" style="text-align:right;padding:8px 12px;">£{{ linked_pi_total|floatformat:2 }}</td>
-                            <td id="linked-pinv-outstanding" style="text-align:right;padding:8px 12px;">£{{ linked_pi_outstanding|floatformat:2 }}</td>
+                        <tr class="po-pinv-total-row">
+                            <td colspan="3" class="text-right">Total</td>
+                            <td id="linked-pinv-total" class="text-right">£{{ linked_pi_total|floatformat:2 }}</td>
+                            <td id="linked-pinv-outstanding" class="text-right">£{{ linked_pi_outstanding|floatformat:2 }}</td>
                             <td colspan="3"></td>
                         </tr>
                     </tfoot>
@@ -1408,17 +1403,17 @@
 
 <!-- Unreceive PO Modal -->
 <div class="modal-overlay" id="unreceive-modal" style="display:none;" onclick="closeUnreceiveModal(event)">
-    <div class="modal-dialog" onclick="event.stopPropagation()" style="max-width: 480px;">
+    <div class="modal-dialog modal-w-480" onclick="event.stopPropagation()">
         <div class="modal-header">
             <h3><i class="bi bi-arrow-counterclockwise"></i> Unreceive Purchase Order</h3>
             <button class="modal-close" onclick="closeUnreceiveModal()">&times;</button>
         </div>
         <div class="modal-body">
-            <p style="margin-bottom: 14px; color: var(--text-secondary);">You are about to unreceive:</p>
+            <p class="po-modal-lead">You are about to unreceive:</p>
             <div class="approve-summary">
                 <div class="approve-summary-row">
                     <span class="approve-label">PO Number</span>
-                    <span class="approve-value" style="font-weight:600;">{{ purchase_order.display_number }}</span>
+                    <span class="approve-value approve-value-strong">{{ purchase_order.display_number }}</span>
                 </div>
                 <div class="approve-summary-row">
                     <span class="approve-label">Supplier</span>
@@ -1433,7 +1428,7 @@
                     <span class="approve-value">{{ purchase_order.received_date|default:"—" }}</span>
                 </div>
             </div>
-            <p style="margin-top: 14px; font-size: 0.82rem; color: var(--text-muted);">
+            <p class="po-modal-note">
                 <i class="bi bi-exclamation-triangle"></i> This will reset all received quantities to zero, reverse any stock adjustments, and revert the status to <strong>Approved</strong>.
             </p>
         </div>
@@ -1448,17 +1443,17 @@
 
 <!-- Approve PO Modal -->
 <div class="modal-overlay" id="approve-modal" style="display:none;" onclick="closeApproveModal(event)">
-    <div class="modal-dialog" onclick="event.stopPropagation()" style="max-width: 480px;">
+    <div class="modal-dialog modal-w-480" onclick="event.stopPropagation()">
         <div class="modal-header">
             <h3><i class="bi bi-check-circle"></i> Approve Purchase Order</h3>
             <button class="modal-close" onclick="closeApproveModal()">&times;</button>
         </div>
         <div class="modal-body">
-            <p style="margin-bottom: 14px; color: var(--text-secondary);">Confirm approval for the following purchase order:</p>
+            <p class="po-modal-lead">Confirm approval for the following purchase order:</p>
             <div class="approve-summary">
                 <div class="approve-summary-row">
                     <span class="approve-label">PO Number</span>
-                    <span class="approve-value" style="font-weight:600;">{{ purchase_order.display_number }}</span>
+                    <span class="approve-value approve-value-strong">{{ purchase_order.display_number }}</span>
                 </div>
                 <div class="approve-summary-row">
                     <span class="approve-label">Supplier</span>
@@ -1487,15 +1482,15 @@
                 <div class="approve-summary-row approve-summary-total">
                     <span class="approve-label">Total</span>
                     {% if purchase_order.po_type == 'fitter' %}
-                        <span class="approve-value" style="font-weight:700; font-size:1.05rem;">£{{ po_fitter_total|floatformat:2 }}</span>
+                        <span class="approve-value approve-value-total">£{{ po_fitter_total|floatformat:2 }}</span>
                     {% elif purchase_order.total %}
-                        <span class="approve-value" style="font-weight:700; font-size:1.05rem;">£{{ purchase_order.total|floatformat:2 }}</span>
+                        <span class="approve-value approve-value-total">£{{ purchase_order.total|floatformat:2 }}</span>
                     {% else %}
-                        <span class="approve-value" style="font-weight:700; font-size:1.05rem;">£{{ linked_pi_total|floatformat:2 }}</span>
+                        <span class="approve-value approve-value-total">£{{ linked_pi_total|floatformat:2 }}</span>
                     {% endif %}
                 </div>
             </div>
-            <p style="margin-top: 14px; font-size: 0.8rem; color: var(--text-muted);">
+            <p class="po-modal-note">
                 <i class="bi bi-info-circle"></i> This will mark the PO as approved by <strong>{{ request.user.get_full_name|default:request.user.username }}</strong> on today's date.
             </p>
         </div>
@@ -1517,9 +1512,9 @@
         </div>
         <div class="modal-body">
             <p>Select items that have arrived for <strong>{{ purchase_order.display_number }}</strong>:</p>
-            <div style="margin: 8px 0;">
-                <label for="receive-date" style="display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 6px;">Received Date</label>
-                <input type="date" id="receive-date" class="form-input" style="width: 100%;">
+            <div class="po-receive-date-group">
+                <label for="receive-date" class="po-receive-date-label">Received Date</label>
+                <input type="date" id="receive-date" class="form-input po-input-full">
             </div>
             <div class="receive-item-controls">
                 <button type="button" class="btn btn-sm btn-success" onclick="receiveSelectAll(true)"><i class="bi bi-check-all"></i> Receive All</button>
@@ -1541,7 +1536,7 @@
 
 <!-- Attach from Media Modal -->
 <div class="modal-overlay" id="media-files-modal" style="display:none;" onclick="closeMediaFilesModal(event)">
-    <div class="modal-dialog" style="max-width: 700px;" onclick="event.stopPropagation()">
+    <div class="modal-dialog modal-w-700" onclick="event.stopPropagation()">
         <div class="modal-header">
             <h3><i class="bi bi-folder2-open"></i> Attach from Media</h3>
             <button class="modal-close" onclick="closeMediaFilesModal()">&times;</button>
@@ -1572,7 +1567,7 @@
                         {% if c.first_name or c.last_name %}<span class="email-recipient-name">{{ c.first_name }} {{ c.last_name }}</span> &mdash; {% endif %}
                         <span class="email-recipient-email">{{ c.email }}</span>
                         {% if c.position %}<span class="email-recipient-position">({{ c.position }})</span>{% endif %}
-                        {% if c.is_default %}<span class="attachment-auto-tag" style="margin-left:auto;">default</span>{% endif %}
+                        {% if c.is_default %}<span class="attachment-auto-tag ml-auto">default</span>{% endif %}
                     </label>
                     {% endfor %}
                 </div>
@@ -1603,7 +1598,7 @@ Sliderobes</textarea>
             </div>
             <div class="modal-form-group">
                 <label>PDF Options</label>
-                <label class="email-attachment-item" style="cursor:pointer;">
+                <label class="email-attachment-item cursor-pointer">
                     <input type="checkbox" id="hide-descriptions-cb">
                     <i class="bi bi-eye-slash"></i>
                     <span>Hide product descriptions</span>
@@ -1641,22 +1636,22 @@ Sliderobes</textarea>
 
 <!-- Split PO Modal -->
 <div class="modal-overlay" id="split-modal" style="display:none;" onclick="closeSplitModal(event)">
-    <div class="modal-dialog" style="max-width: 800px;" onclick="event.stopPropagation()">
+    <div class="modal-dialog modal-w-800" onclick="event.stopPropagation()">
         <div class="modal-header">
             <h3><i class="bi bi-scissors"></i> Split Purchase Order</h3>
             <button class="modal-close" onclick="closeSplitModal()">&times;</button>
         </div>
         <div class="modal-body">
             <p>Split <strong>{{ purchase_order.display_number }}</strong> into two purchase orders. Assign quantities for each product line below.</p>
-            <div class="split-po-labels" style="display:flex; gap:6px; align-items:center;">
-                <div style="flex:1;"></div>
-                <div style="width:90px; text-align:center; font-weight:600; font-size:0.8rem; color:var(--primary-color);" id="split-label-1">Original</div>
-                <div style="width:26px;"></div>
-                <div style="width:90px; text-align:center; font-weight:600; font-size:0.8rem; color:var(--primary-color);" id="split-label-2">New</div>
-                <div style="width:50px;"></div>
+            <div class="split-po-labels">
+                <div class="split-col-flex"></div>
+                <div class="split-label" id="split-label-1">Original</div>
+                <div class="split-col-gap"></div>
+                <div class="split-label" id="split-label-2">New</div>
+                <div class="split-col-actions"></div>
             </div>
-            <div id="split-product-list" class="receive-product-list" style="max-height:400px; overflow-y:auto;"></div>
-            <p style="font-size:0.8rem; color:var(--text-secondary);">The original PO will be updated with the remaining quantities. The new PO is created as <strong>Draft</strong>.</p>
+            <div id="split-product-list" class="receive-product-list split-product-list"></div>
+            <p class="po-modal-hint-sm">The original PO will be updated with the remaining quantities. The new PO is created as <strong>Draft</strong>.</p>
         </div>
         <div class="modal-footer">
             <button type="button" class="btn-cancel" onclick="closeSplitModal()">Cancel</button>
@@ -1669,37 +1664,37 @@ Sliderobes</textarea>
 
 <!-- History Modal -->
 <div class="modal-overlay" id="history-modal" style="display:none;" onclick="closeHistoryModal(event)">
-    <div class="modal-dialog" style="max-width: 600px;" onclick="event.stopPropagation()">
+    <div class="modal-dialog modal-w-600" onclick="event.stopPropagation()">
         <div class="modal-header">
             <h3><i class="bi bi-clock-history"></i> PO History</h3>
             <button class="modal-close" onclick="closeHistoryModal()">&times;</button>
         </div>
         <div class="modal-body">
             {% if po_activity_logs %}
-            <div style="max-height:400px; overflow-y:auto;">
+            <div class="po-history-scroll">
                 {% for log in po_activity_logs %}
-                <div style="display:flex; gap:10px; padding:10px 0; border-bottom:1px solid var(--border-color); font-size:0.85rem;">
-                    <div style="min-width:0; flex:1;">
-                        <div style="color:var(--text-primary);">{{ log.description }}</div>
+                <div class="po-history-row">
+                    <div class="po-history-body">
+                        <div class="po-history-desc">{{ log.description }}</div>
                         {% if log.event_type == 'po_split' and log.extra_data.moved_items %}
-                        <div style="margin-top:6px; padding:6px 8px; background:var(--bg-tertiary); border-radius:6px; font-size:0.78rem;">
-                            <div style="color:var(--text-secondary); margin-bottom:4px; font-weight:600;">
+                        <div class="po-history-split">
+                            <div class="po-history-split-head">
                                 <i class="bi bi-arrow-right-circle"></i> Moved to {{ log.extra_data.new_po }}:
                             </div>
                             {% for item in log.extra_data.moved_items %}
-                            <div style="color:var(--text-primary); padding:1px 0;">{{ item.sku }} — {{ item.name }} × {{ item.qty }}</div>
+                            <div class="po-history-split-item">{{ item.sku }} — {{ item.name }} × {{ item.qty }}</div>
                             {% endfor %}
                             {% if log.extra_data.remaining_items %}
-                            <div style="color:var(--text-secondary); margin-top:6px; margin-bottom:4px; font-weight:600;">
+                            <div class="po-history-split-head po-mt-6">
                                 <i class="bi bi-box-seam"></i> Remaining on {{ log.extra_data.original_po }}:
                             </div>
                             {% for item in log.extra_data.remaining_items %}
-                            <div style="color:var(--text-primary); padding:1px 0;">{{ item.sku }} — {{ item.name }} × {{ item.qty }}</div>
+                            <div class="po-history-split-item">{{ item.sku }} — {{ item.name }} × {{ item.qty }}</div>
                             {% endfor %}
                             {% endif %}
                         </div>
                         {% endif %}
-                        <div style="color:var(--text-secondary); font-size:0.75rem; margin-top:2px;">
+                        <div class="po-history-meta">
                             {{ log.timestamp|date:"d M Y H:i" }}
                             {% if log.user %} &middot; {{ log.user.get_full_name|default:log.user.username }}{% endif %}
                         </div>
@@ -1708,7 +1703,7 @@ Sliderobes</textarea>
                 {% endfor %}
             </div>
             {% else %}
-            <p style="color:var(--text-secondary); text-align:center; padding:20px;">No history recorded for this PO.</p>
+            <p class="po-history-empty">No history recorded for this PO.</p>
             {% endif %}
         </div>
         <div class="modal-footer">
@@ -1719,13 +1714,13 @@ Sliderobes</textarea>
 
 <!-- Board Preview Modal -->
 <div class="modal-overlay" id="board-preview-modal" style="display:none;" onclick="closeBoardPreviewModal(event)">
-    <div class="modal-dialog" onclick="event.stopPropagation()" style="max-width: 440px;">
+    <div class="modal-dialog modal-w-440" onclick="event.stopPropagation()">
         <div class="modal-header">
             <h3><i class="bi bi-eye"></i> Board Shape Preview</h3>
             <button class="modal-close" onclick="closeBoardPreviewModal()">&times;</button>
         </div>
-        <div class="modal-body" style="display: flex; justify-content: center; padding: 16px;">
-            <canvas id="board-preview-canvas-po" width="380" height="260" style="border-radius: 6px; background: var(--bg-primary);"></canvas>
+        <div class="modal-body po-board-preview-body">
+            <canvas id="board-preview-canvas-po" width="380" height="260" class="po-board-preview-canvas"></canvas>
         </div>
     </div>
 </div>
