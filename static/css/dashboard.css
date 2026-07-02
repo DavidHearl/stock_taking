@@ -864,6 +864,24 @@ html:has(.dash-report-modal[open]) {
     }
 }
 
+@media (max-width: 768px) {
+    /* Tighter gaps between cards on mobile */
+    .db-stats,
+    .db-charts,
+    .db-bottom {
+        gap: 8px;
+        margin-bottom: 8px;
+    }
+    .db-chart-wide,
+    .db-stock-take-alert {
+        margin-bottom: 8px;
+    }
+    /* Safety net: keep the dashboard from ever scrolling sideways on mobile */
+    .dashboard-page {
+        overflow-x: hidden;
+    }
+}
+
 @media (max-width: 480px) {
     .db-stats {
         grid-template-columns: 1fr;
@@ -881,6 +899,10 @@ html:has(.dash-report-modal[open]) {
     padding: 16px 20px;
     display: flex;
     flex-direction: column;
+    /* Allow the container to shrink below the canvas's intrinsic width
+       (grid/flex items default to min-width:auto) so charts compress on
+       mobile instead of forcing horizontal scroll. */
+    min-width: 0;
 }
 
 .chart-header {
@@ -948,18 +970,33 @@ html:has(.dash-report-modal[open]) {
     flex: 1;
     min-height: 150px;
     width: 100%;
+    min-width: 0;
+}
+
+/* Never let Chart.js's inline canvas width push the container wider than
+   its column — keeps charts inside the viewport on narrow screens. */
+.chart-wrapper > canvas {
+    max-width: 100% !important;
 }
 
 .month-switcher-inline {
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
     width: 100%;
     font-size: 0.8rem;
     font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
     gap: 8px;
+}
+
+/* Centre the label between the two arrows so it stays balanced
+   regardless of month-name length. */
+.month-switcher-inline #monthLabel {
+    flex: 1;
+    text-align: center;
+    min-width: 0;
 }
 
 .month-arrow {
@@ -977,19 +1014,7 @@ html:has(.dash-report-modal[open]) {
     font-size: 0.8rem;
     transition: all 0.15s ease;
     line-height: 1;
-    position: absolute;
-    z-index: 2;
-}
-
-.month-arrow:first-child {
-    left: 10px;
-    top: 10px;
-}
-
-.month-arrow:last-child,
-.month-arrow#nextMonthBtn {
-    right: 10px;
-    top: 10px;
+    flex-shrink: 0;
 }
 
 .month-arrow:hover:not(:disabled) {

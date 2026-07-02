@@ -5767,8 +5767,10 @@ function toggleWorkflowAccordion() {
     if (btn) btn.classList.toggle('open');
 }
 
-// Waiting period progress bar
-(function () {
+// Waiting/manufacture period progress bar — counts days since the sale was
+// ordered (data-started = order date). Deferred to DOMContentLoaded because the
+// bar markup is rendered by the parent page after this partial is included.
+function initWaitingProgressBar() {
     const el = document.querySelector('.wf-waiting-progress');
     if (!el) return;
     const started = new Date(el.dataset.started + 'T00:00:00');
@@ -5792,7 +5794,12 @@ function toggleWorkflowAccordion() {
         }
     }
     if (label) label.textContent = 'Day ' + daysIn;
-})();
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initWaitingProgressBar);
+} else {
+    initWaitingProgressBar();
+}
 
 function toggleStageTasks() {
     const content = document.getElementById('stage-tasks-content');

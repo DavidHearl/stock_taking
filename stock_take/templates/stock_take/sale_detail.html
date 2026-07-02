@@ -9,7 +9,7 @@
 <span class="page-breadcrumb">
     <a href="{% url 'sales_list' %}">Sales</a>
     <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current">Sale Detail{% if sale.contract_number %}: <span class="sale-number-suffix">{{ sale.contract_number }}</span>{% else %}: {{ sale.anthill_activity_id }}{% endif %}</span>
+    <span class="breadcrumb-current">{% if sale.contract_number %}<span class="sale-number-suffix">{{ sale.contract_number }}</span>{% else %}{{ sale.anthill_activity_id }}{% endif %}</span>
 </span>
 {% endblock %}
 
@@ -2153,9 +2153,10 @@
                     <span class="wf-stage-name">{{ workflow_progress.current_stage.name }}</span>
                     {% if stage_criteria_met %}<i class="bi bi-check-circle-fill wf-stage-tick" title="Stage criteria met"></i>{% endif %}
                 </div>
-                {% if workflow_progress.current_stage.role == 'waiting' and workflow_progress.current_stage.expected_days %}
+                {% if workflow_progress.current_stage.name == 'Manufacture Product' or workflow_progress.current_stage.role == 'waiting' %}
+                {% if workflow_progress.current_stage.expected_days %}
                 <div class="wf-waiting-progress"
-                     data-started="{{ workflow_progress.stage_started_at|date:'Y-m-d' }}"
+                     data-started="{% if order.order_date %}{{ order.order_date|date:'Y-m-d' }}{% else %}{{ workflow_progress.stage_started_at|date:'Y-m-d' }}{% endif %}"
                      data-days="{{ workflow_progress.current_stage.expected_days }}">
                     <div class="wf-waiting-bar-track">
                         <div class="wf-waiting-bar-fill" id="wf-waiting-fill"></div>
@@ -2165,6 +2166,7 @@
                         <span class="wf-waiting-total-label">{{ workflow_progress.current_stage.expected_days }}d</span>
                     </div>
                 </div>
+                {% endif %}
                 {% endif %}
                 {% else %}
                 <span class="wf-badge wf-none">No stage set</span>
