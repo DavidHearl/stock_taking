@@ -1953,6 +1953,8 @@ def sync_xero_purchase_invoice_reference(request, invoice_id):
 @login_required
 def push_purchase_invoice_to_xero(request, invoice_id):
     """Push a purchase invoice to Xero as a DRAFT accounts-payable (ACCPAY) invoice."""
+    import traceback
+
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
 
@@ -1973,196 +1975,201 @@ def push_purchase_invoice_to_xero(request, invoice_id):
 
     from stock_take.services import xero_api
 
-    supplier_name = (invoice.supplier_name or '').strip()
-    if not supplier_name:
-        return JsonResponse({'success': False, 'error': 'Invoice has no supplier name'}, status=400)
+    try:
+        supplier_name = (invoice.supplier_name or '').strip()
+        if not supplier_name:
+            return JsonResponse({'success': False, 'error': 'Invoice has no supplier name'}, status=400)
 
-    # ── Find or create the supplier contact in Xero ───────────
-    contact_id = xero_api.find_contact_by_name(supplier_name)
-
-    if not contact_id:
-        # Try to look up from the Supplier model for richer contact data
-        supplier_obj = Supplier.objects.filter(name__iexact=supplier_name).first()
-        create_kwargs = dict(
-            name=supplier_name,
-            first_name='',
-            last_name='',
-            email='',
-            phone='',
-            address_line1='',
-            address_line2='',
-            city='',
-            region='',
-            postal_code='',
-            country='',
-        )
-        if supplier_obj:
-            create_kwargs.update({
-                'email': supplier_obj.email or '',
-                'phone': supplier_obj.phone or '',
-                'address_line1': supplier_obj.address or '',
-            })
-
-        create_res = xero_api.create_contact(**create_kwargs)
-        contacts = (create_res or {}).get('Contacts', []) if isinstance(create_res, dict) else []
-        if contacts:
-            contact_id = contacts[0].get('ContactID', '')
+        # ── Find or create the supplier contact in Xero ───────────
+        contact_id = xero_api.find_contact_by_name(supplier_name)
 
         if not contact_id:
-            err = xero_api.get_last_api_error() or f'Contact "{supplier_name}" not found in Xero and auto-create failed.'
-            return JsonResponse({'success': False, 'error': err})
-
-    # ── Build line items ──────────────────────────────────────
-    line_items_qs = invoice.line_items.all().order_by('sort_order', 'id')
-    has_vat = invoice.vat_rate and invoice.vat_rate > 0
-
-    # Known UK Xero tax codes by rate.  Any other rate is looked up (or created)
-    # in the account via the TaxRates API.
-    _UK_VAT_CODE_MAP = {
-        0:  'ZERORATEDINPUT',
-        5:  'RRINPUT',
-        20: 'INPUT2',
-    }
-    if has_vat:
-        vat_rate_int = int(invoice.vat_rate)
-        tax_type = _UK_VAT_CODE_MAP.get(vat_rate_int)
-        if tax_type is None:
-            # Look up or create the rate in Xero
-            tax_type = xero_api.find_or_create_tax_rate(vat_rate_int)
-        if tax_type is None:
-            # Auto-create failed — check if the caller wants to push anyway without a tax code
-            force_no_vat = body.get('force_no_vat') is True
-            if not force_no_vat:
-                xero_err = xero_api.get_last_api_error()
-                detail = f' Xero said: {xero_err}' if xero_err else ''
-                return JsonResponse({
-                    'success': False,
-                    'error': (
-                        f'Could not find or create a {vat_rate_int}% VAT rate in Xero.{detail} '
-                        f'You can either add a tax rate named "VAT {vat_rate_int}%" in Xero, '
-                        f'or push the invoice without a VAT code and assign the tax in Xero manually.'
-                    ),
-                    'can_force_no_vat': True,
-                    'vat_rate_int': vat_rate_int,
+            # Try to look up from the Supplier model for richer contact data
+            supplier_obj = Supplier.objects.filter(name__iexact=supplier_name).first()
+            create_kwargs = dict(
+                name=supplier_name,
+                first_name='',
+                last_name='',
+                email='',
+                phone='',
+                address_line1='',
+                address_line2='',
+                city='',
+                region='',
+                postal_code='',
+                country='',
+            )
+            if supplier_obj:
+                create_kwargs.update({
+                    'email': supplier_obj.email or '',
+                    'phone': supplier_obj.phone or '',
+                    'address_line1': supplier_obj.address_1 or '',
                 })
-            # Force push: use NOINPUT so Xero accepts the invoice without a tax code
-            tax_type = 'NOINPUT'
-            line_amount_type = 'NoTax'
-        else:
-            line_amount_type = 'Exclusive'
-    else:
-        tax_type = None
-        line_amount_type = 'NoTax'
 
-    if line_items_qs.exists():
-        xero_lines = []
-        for li in line_items_qs:
-            # Send the full line total as the unit amount with quantity 1.
-            # Xero rounds UnitAmount to 2 dp, so pushing a 4-dp unit price ×
-            # quantity would round the cost incorrectly — using the already
-            # computed line total keeps the amount exact.
+            create_res = xero_api.create_contact(**create_kwargs)
+            contacts = (create_res or {}).get('Contacts', []) if isinstance(create_res, dict) else []
+            if contacts:
+                contact_id = contacts[0].get('ContactID', '')
+
+            if not contact_id:
+                err = xero_api.get_last_api_error() or f'Contact "{supplier_name}" not found in Xero and auto-create failed.'
+                return JsonResponse({'success': False, 'error': err})
+
+        # ── Build line items ──────────────────────────────────────
+        line_items_qs = invoice.line_items.all().order_by('sort_order', 'id')
+        has_vat = invoice.vat_rate and invoice.vat_rate > 0
+
+        # Known UK Xero tax codes by rate.  Any other rate is looked up (or created)
+        # in the account via the TaxRates API.
+        _UK_VAT_CODE_MAP = {
+            0:  'ZERORATEDINPUT',
+            5:  'RRINPUT',
+            20: 'INPUT2',
+        }
+        if has_vat:
+            vat_rate_int = int(invoice.vat_rate)
+            tax_type = _UK_VAT_CODE_MAP.get(vat_rate_int)
+            if tax_type is None:
+                # Look up or create the rate in Xero
+                tax_type = xero_api.find_or_create_tax_rate(vat_rate_int)
+            if tax_type is None:
+                # Auto-create failed — check if the caller wants to push anyway without a tax code
+                force_no_vat = body.get('force_no_vat') is True
+                if not force_no_vat:
+                    xero_err = xero_api.get_last_api_error()
+                    detail = f' Xero said: {xero_err}' if xero_err else ''
+                    return JsonResponse({
+                        'success': False,
+                        'error': (
+                            f'Could not find or create a {vat_rate_int}% VAT rate in Xero.{detail} '
+                            f'You can either add a tax rate named "VAT {vat_rate_int}%" in Xero, '
+                            f'or push the invoice without a VAT code and assign the tax in Xero manually.'
+                        ),
+                        'can_force_no_vat': True,
+                        'vat_rate_int': vat_rate_int,
+                    })
+                # Force push: use NOINPUT so Xero accepts the invoice without a tax code
+                tax_type = 'NOINPUT'
+                line_amount_type = 'NoTax'
+            else:
+                line_amount_type = 'Exclusive'
+        else:
+            tax_type = None
+            line_amount_type = 'NoTax'
+
+        if line_items_qs.exists():
+            xero_lines = []
+            for li in line_items_qs:
+                # Send the full line total as the unit amount with quantity 1.
+                # Xero rounds UnitAmount to 2 dp, so pushing a 4-dp unit price ×
+                # quantity would round the cost incorrectly — using the already
+                # computed line total keeps the amount exact.
+                line = {
+                    'Description': li.description or 'Item',
+                    'Quantity': '1',
+                    'UnitAmount': str(li.line_total),
+                }
+                if gl_code:
+                    line['AccountCode'] = gl_code
+                if tax_type:
+                    line['TaxType'] = tax_type
+                xero_lines.append(line)
+        else:
+            # Fallback: single line using invoice total (already gross)
             line = {
-                'Description': li.description or 'Item',
+                'Description': invoice.notes or invoice.invoice_number,
                 'Quantity': '1',
-                'UnitAmount': str(li.line_total),
+                'UnitAmount': str(invoice.total),
             }
             if gl_code:
                 line['AccountCode'] = gl_code
             if tax_type:
                 line['TaxType'] = tax_type
-            xero_lines.append(line)
-    else:
-        # Fallback: single line using invoice total (already gross)
-        line = {
-            'Description': invoice.notes or invoice.invoice_number,
-            'Quantity': '1',
-            'UnitAmount': str(invoice.total),
+            xero_lines = [line]
+
+        # ── Build the Xero invoice payload ────────────────────────
+        invoice_data = {
+            'Type': 'ACCPAY',
+            'Contact': {'ContactID': contact_id},
+            'Status': 'DRAFT',
+            # For ACCPAY bills, Xero displays the API "InvoiceNumber" field as
+            # "Reference" in its UI. Use the supplier's own reference there so the
+            # bill shows the supplier reference, falling back to our invoice number.
+            'InvoiceNumber': invoice.supplier_reference or invoice.invoice_number,
+            'CurrencyCode': invoice.currency or 'GBP',
+            'LineAmountTypes': line_amount_type,
+            'LineItems': xero_lines,
+            'Reference': invoice.supplier_reference or '',
         }
-        if gl_code:
-            line['AccountCode'] = gl_code
-        if tax_type:
-            line['TaxType'] = tax_type
-        xero_lines = [line]
 
-    # ── Build the Xero invoice payload ────────────────────────
-    invoice_data = {
-        'Type': 'ACCPAY',
-        'Contact': {'ContactID': contact_id},
-        'Status': 'DRAFT',
-        # For ACCPAY bills, Xero displays the API "InvoiceNumber" field as
-        # "Reference" in its UI. Use the supplier's own reference there so the
-        # bill shows the supplier reference, falling back to our invoice number.
-        'InvoiceNumber': invoice.supplier_reference or invoice.invoice_number,
-        'CurrencyCode': invoice.currency or 'GBP',
-        'LineAmountTypes': line_amount_type,
-        'LineItems': xero_lines,
-        'Reference': invoice.supplier_reference or '',
-    }
+        if invoice.date:
+            invoice_data['Date'] = invoice.date.isoformat()
+        if invoice.due_date:
+            invoice_data['DueDate'] = invoice.due_date.isoformat()
+        elif invoice.date:
+            invoice_data['DueDate'] = invoice.date.isoformat()
 
-    if invoice.date:
-        invoice_data['Date'] = invoice.date.isoformat()
-    if invoice.due_date:
-        invoice_data['DueDate'] = invoice.due_date.isoformat()
-    elif invoice.date:
-        invoice_data['DueDate'] = invoice.date.isoformat()
+        payload = {'Invoices': [invoice_data]}
+        result = xero_api._api_put('Invoices', payload)
 
-    payload = {'Invoices': [invoice_data]}
-    result = xero_api._api_put('Invoices', payload)
+        if result is None:
+            err = xero_api.get_last_api_error() or 'Unknown Xero API error'
+            return JsonResponse({'success': False, 'error': err})
 
-    if result is None:
-        err = xero_api.get_last_api_error() or 'Unknown Xero API error'
-        return JsonResponse({'success': False, 'error': err})
+        invoices_resp = result.get('Invoices', [])
+        if not invoices_resp:
+            return JsonResponse({'success': False, 'error': 'Xero returned no invoice data'})
 
-    invoices_resp = result.get('Invoices', [])
-    if not invoices_resp:
-        return JsonResponse({'success': False, 'error': 'Xero returned no invoice data'})
+        xero_invoice_id = invoices_resp[0].get('InvoiceID', '')
+        if xero_invoice_id:
+            invoice.xero_id = xero_invoice_id
+            invoice.save(update_fields=['xero_id'])
 
-    xero_invoice_id = invoices_resp[0].get('InvoiceID', '')
-    if xero_invoice_id:
-        invoice.xero_id = xero_invoice_id
-        invoice.save(update_fields=['xero_id'])
+        # Attach the PDF if requested and available
+        pdf_attached = False
+        attach_warning = None
+        if xero_invoice_id and attach_pdf and invoice.attachment:
+            try:
+                filename = invoice.attachment.name.split('/')[-1]
+                with invoice.attachment.open('rb') as f:
+                    file_bytes = f.read()
+                content_type = 'application/pdf' if filename.lower().endswith('.pdf') else 'application/octet-stream'
+                attach_result = xero_api.attach_file_to_invoice(xero_invoice_id, filename, file_bytes, content_type)
+                if attach_result is not None:
+                    pdf_attached = True
+                else:
+                    attach_warning = xero_api.get_last_api_error() or 'Attachment upload returned no data'
+                    logger.warning(f'PDF attach returned None for Xero invoice {xero_invoice_id}: {attach_warning}')
+            except Exception as attach_err:
+                attach_warning = str(attach_err)
+                logger.warning(f'Could not attach PDF to Xero invoice {xero_invoice_id}: {attach_err}')
+        elif xero_invoice_id and attach_pdf and not invoice.attachment:
+            attach_warning = 'No attachment on this invoice'
 
-    # Attach the PDF if requested and available
-    pdf_attached = False
-    attach_warning = None
-    if xero_invoice_id and attach_pdf and invoice.attachment:
-        try:
-            filename = invoice.attachment.name.split('/')[-1]
-            with invoice.attachment.open('rb') as f:
-                file_bytes = f.read()
-            content_type = 'application/pdf' if filename.lower().endswith('.pdf') else 'application/octet-stream'
-            attach_result = xero_api.attach_file_to_invoice(xero_invoice_id, filename, file_bytes, content_type)
-            if attach_result is not None:
-                pdf_attached = True
-            else:
-                attach_warning = xero_api.get_last_api_error() or 'Attachment upload returned no data'
-                logger.warning(f'PDF attach returned None for Xero invoice {xero_invoice_id}: {attach_warning}')
-        except Exception as attach_err:
-            attach_warning = str(attach_err)
-            logger.warning(f'Could not attach PDF to Xero invoice {xero_invoice_id}: {attach_err}')
-    elif xero_invoice_id and attach_pdf and not invoice.attachment:
-        attach_warning = 'No attachment on this invoice'
+        log_activity(
+            user=request.user,
+            event_type='xero_push',
+            description=(
+                f'{request.user.get_full_name() or request.user.username} pushed purchase invoice '
+                f'{invoice.invoice_number} to Xero as draft ACCPAY (Xero ID: {xero_invoice_id}).'
+            ),
+        )
 
-    log_activity(
-        user=request.user,
-        event_type='xero_push',
-        description=(
-            f'{request.user.get_full_name() or request.user.username} pushed purchase invoice '
-            f'{invoice.invoice_number} to Xero as draft ACCPAY (Xero ID: {xero_invoice_id}).'
-        ),
-    )
+        xero_url = f'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={xero_invoice_id}'
+        response_data = {
+            'success': True,
+            'xero_id': xero_invoice_id,
+            'xero_url': xero_url,
+            'pdf_attached': pdf_attached,
+            'message': f'Invoice pushed to Xero as a draft bill (ID: {xero_invoice_id})',
+        }
+        if attach_warning:
+            response_data['attach_warning'] = attach_warning
+        return JsonResponse(response_data)
 
-    xero_url = f'https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={xero_invoice_id}'
-    response_data = {
-        'success': True,
-        'xero_id': xero_invoice_id,
-        'xero_url': xero_url,
-        'pdf_attached': pdf_attached,
-        'message': f'Invoice pushed to Xero as a draft bill (ID: {xero_invoice_id})',
-    }
-    if attach_warning:
-        response_data['attach_warning'] = attach_warning
-    return JsonResponse(response_data)
+    except Exception as e:
+        logger.error(f'Push purchase invoice to Xero failed: {traceback.format_exc()}')
+        return JsonResponse({'success': False, 'error': f'Server error: {str(e)}'}, status=500)
 
 
 # ── Generate / re-sync timesheets from invoice lines ─────────────

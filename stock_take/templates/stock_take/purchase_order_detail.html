@@ -663,22 +663,21 @@
                 <button class="btn btn-sm btn-delete" id="ts-delete-selected-btn" onclick="deleteSelectedTimesheets()" style="display:none;">
                     <i class="bi bi-trash"></i> Delete Selected
                 </button>
-                <div class="po-ts-kebab-wrap">
-                    <button onclick="toggleTsKebab(event)" title="Available timesheets &amp; bulk actions" class="po-ts-kebab-btn">
+                <div class="kebab-menu">
+                    <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Available timesheets &amp; bulk actions">
                         <i class="bi bi-three-dots-vertical"></i>{% if unlinked_timesheets %}<span class="po-ts-count-badge">{{ unlinked_timesheets|length }}</span>{% endif %}
                     </button>
-                    <div id="ts-kebab-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);z-index:200;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:6px;min-width:240px;box-shadow:0 4px 12px rgba(0,0,0,.15);overflow:hidden;">
+                    <div class="kebab-dropdown">
                         {% if unlinked_timesheets %}
-                        <div class="po-ts-kebab-item po-ts-kebab-item-bordered"
-                             onclick="openAvailableTsModal()">
+                        <button class="kebab-item" onclick="openAvailableTsModal()">
                             <i class="bi bi-table"></i> View Available ({{ unlinked_timesheets|length }})
-                        </div>
-                        <div class="po-ts-kebab-item"
-                             onclick="linkAllTimesheets()">
+                        </button>
+                        <div class="kebab-divider"></div>
+                        <button class="kebab-item" onclick="linkAllTimesheets()">
                             <i class="bi bi-link-45deg"></i> Link All Available
-                        </div>
+                        </button>
                         {% else %}
-                        <div class="po-ts-kebab-empty">No available timesheets</div>
+                        <span class="kebab-label">No available timesheets</span>
                         {% endif %}
                     </div>
                 </div>
@@ -4106,13 +4105,8 @@ function copyTimesheet(btn) {
     addRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-function toggleTsKebab(e) {
-    e.stopPropagation();
-    const menu = document.getElementById('ts-kebab-menu');
-    menu.style.display = menu.style.display === 'none' ? '' : 'none';
-}
 function openAvailableTsModal() {
-    document.getElementById('ts-kebab-menu').style.display = 'none';
+    closeAllKebabs();
     const modal = document.getElementById('available-ts-modal');
     if (modal) modal.style.display = '';
 }
@@ -4122,13 +4116,9 @@ function closeAvailableTsModal(e) {
         if (modal) modal.style.display = 'none';
     }
 }
-document.addEventListener('click', function() {
-    const menu = document.getElementById('ts-kebab-menu');
-    if (menu) menu.style.display = 'none';
-});
 
 async function linkAllTimesheets() {
-    document.getElementById('ts-kebab-menu').style.display = 'none';
+    closeAllKebabs();
     const rows = document.querySelectorAll('#unlinked-timesheets-table tbody tr[data-timesheet-id]');
     if (!rows.length) { showNotification('No available timesheets to link', 'error'); return; }
     const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';
@@ -4145,7 +4135,7 @@ async function linkAllTimesheets() {
 }
 
 async function linkAllAndAddExpenses() {
-    document.getElementById('ts-kebab-menu').style.display = 'none';
+    closeAllKebabs();
     const rows = document.querySelectorAll('#unlinked-timesheets-table tbody tr[data-timesheet-id]');
     if (!rows.length) { showNotification('No available timesheets to link', 'error'); return; }
     const csrf = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '{{ csrf_token }}';

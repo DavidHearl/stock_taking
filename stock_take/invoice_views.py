@@ -310,7 +310,7 @@ def _purchase_invoices_context(status_filter, search_query, page_num):
             | Q(notes__icontains=search_query)
         )
 
-    qs = qs.order_by('-date', '-id')
+    qs = qs.order_by('-invoice_number')
 
     # Aggregate stats over the full filtered set (before pagination).
     # amount_outstanding is a @property (total - amount_paid), so we must derive it.
