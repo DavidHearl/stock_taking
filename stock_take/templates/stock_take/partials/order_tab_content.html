@@ -3920,15 +3920,23 @@ function showAlert(message, type) {
     toast.setAttribute('role', 'alert');
     toast.innerHTML = `
         <span class="toast-text">${message}</span>
+        ${(type === 'danger' || type === 'error') ? '<button type="button" class="toast-copy" onclick="copyToastMessage(this)" title="Copy message" aria-label="Copy message"><i class="bi bi-copy"></i></button>' : ''}
         <button type="button" class="toast-close" onclick="dismissToast(this.parentElement)">&times;</button>
     `;
     container.appendChild(toast);
     requestAnimationFrame(() => toast.classList.add('toast-visible'));
-    setTimeout(() => dismissToast(toast), 4000);
+    toast.addEventListener('mouseenter', function() {
+        clearToastDismissTimer(toast);
+    });
+    toast.addEventListener('mouseleave', function() {
+        scheduleToastDismiss(toast, 4000);
+    });
+    scheduleToastDismiss(toast, 4000);
 }
 
 function dismissToast(el) {
-    if (!el) return;
+    if (!el || el.classList.contains('toast-hiding')) return;
+    clearToastDismissTimer(el);
     el.classList.add('toast-hiding');
     setTimeout(() => el.remove(), 300);
 }

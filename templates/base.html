@@ -397,6 +397,11 @@
         {% for message in messages %}
         <div class="toast toast-{{ message.tags }}" role="alert">
             <span class="toast-text">{{ message }}</span>
+            {% if 'error' in message.tags or 'danger' in message.tags %}
+            <button type="button" class="toast-copy" onclick="copyToastMessage(this)" title="Copy message" aria-label="Copy message">
+                <i class="bi bi-copy"></i>
+            </button>
+            {% endif %}
             <button type="button" class="toast-close" onclick="dismissToast(this.parentElement)">&times;</button>
         </div>
         {% endfor %}
@@ -798,7 +803,86 @@
 
     <script>
     // ── Toast auto-dismiss ──────────────────────────────────
+    const toastDismissTimers = new WeakMap();
+    const toastCopyResetTimers = new WeakMap();
+
+    function clearToastDismissTimer(el) {
+        if (!el) return;
+        const timer = toastDismissTimers.get(el);
+        if (timer) {
+            clearTimeout(timer);
+            toastDismissTimers.delete(el);
+        }
+    }
+
+    function scheduleToastDismiss(el, delay) {
+        if (!el || el.classList.contains('toast-hiding')) return;
+        clearToastDismissTimer(el);
+        const timer = setTimeout(() => dismissToast(el), delay);
+        toastDismissTimers.set(el, timer);
+    }
+
+    function fallbackCopyToastText(text) {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', 'readonly');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        textarea.style.pointerEvents = 'none';
+        document.body.appendChild(textarea);
+        textarea.select();
+        textarea.setSelectionRange(0, text.length);
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+    }
+
+    function resetToastCopyButton(button) {
+        const timer = toastCopyResetTimers.get(button);
+        if (timer) clearTimeout(timer);
+        button.classList.remove('toast-copy-success');
+        button.innerHTML = button.dataset.originalHtml || '<i class="bi bi-copy"></i>';
+        button.title = 'Copy message';
+        button.setAttribute('aria-label', 'Copy message');
+        toastCopyResetTimers.delete(button);
+    }
+
+    function copyToastMessage(button) {
+        const toast = button.closest('.toast');
+        if (!toast) return;
+
+        const textElement = toast.querySelector('.toast-text');
+        const text = textElement ? textElement.innerText.trim() : '';
+        if (!text) return;
+
+        if (!button.dataset.originalHtml) {
+            button.dataset.originalHtml = button.innerHTML;
+        }
+
+        const markCopied = function() {
+            button.classList.add('toast-copy-success');
+            button.innerHTML = '<i class="bi bi-check2"></i>';
+            button.title = 'Copied';
+            button.setAttribute('aria-label', 'Copied');
+            const resetTimer = setTimeout(function() {
+                resetToastCopyButton(button);
+            }, 1500);
+            toastCopyResetTimers.set(button, resetTimer);
+        };
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(markCopied).catch(function() {
+                fallbackCopyToastText(text);
+                markCopied();
+            });
+        } else {
+            fallbackCopyToastText(text);
+            markCopied();
+        }
+    }
+
     function dismissToast(el) {
+        if (!el || el.classList.contains('toast-hiding')) return;
+        clearToastDismissTimer(el);
         el.classList.add('toast-hiding');
         setTimeout(() => el.remove(), 300);
     }
@@ -806,8 +890,14 @@
         document.querySelectorAll('.toast').forEach(function(toast, i) {
             // Stagger the appearance slightly
             setTimeout(() => toast.classList.add('toast-visible'), i * 80);
+            toast.addEventListener('mouseenter', function() {
+                clearToastDismissTimer(toast);
+            });
+            toast.addEventListener('mouseleave', function() {
+                scheduleToastDismiss(toast, 4000);
+            });
             // Auto-dismiss after 4 seconds
-            setTimeout(() => dismissToast(toast), 4000 + i * 500);
+            scheduleToastDismiss(toast, 4000 + i * 500);
         });
     });
     </script>

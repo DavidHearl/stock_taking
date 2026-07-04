@@ -8,8 +8,8 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 
 class Customer(models.Model):
-    """Customer model to store customer information synced from WorkGuru"""
-    # WorkGuru identifiers
+    """Customer model. Retains the legacy `workguru_id` as its stable identifier (WorkGuru sync has been removed)."""
+    # Legacy identifier, retained for lookup/routing
     workguru_id = models.IntegerField(unique=True, null=True, blank=True, help_text='WorkGuru Client ID')
     
     # Legacy fields
@@ -18,8 +18,8 @@ class Customer(models.Model):
     last_name = models.CharField(max_length=100, blank=True)
     anthill_customer_id = models.CharField(max_length=20, blank=True, help_text='Anthill CRM Customer ID')
     
-    # Core details (from WorkGuru)
-    name = models.CharField(max_length=255, blank=True, help_text='Client name from WorkGuru')
+    # Core details
+    name = models.CharField(max_length=255, blank=True, help_text='Client name')
     code = models.CharField(max_length=100, blank=True, null=True, help_text='Client code')
     email = models.EmailField(max_length=254, blank=True, null=True)
     phone = models.CharField(max_length=100, blank=True, null=True)
@@ -1015,6 +1015,7 @@ class StockItem(models.Model):
     supplier = models.ForeignKey('Supplier', on_delete=models.SET_NULL, null=True, blank=True, related_name='stock_items')
     supplier_code = models.CharField(max_length=100, blank=True, default='', help_text="Supplier's own product/part code")
     supplier_sku = models.CharField(max_length=100, blank=True, default='', help_text="Supplier's SKU for this product")
+    cad_sku = models.CharField(max_length=100, blank=True, default='', db_index=True, help_text="CAD component code (CODCOMP) that matches this product when generating accessories from CAD data")
     category_name = models.CharField(max_length=100, blank=True)  # For CSV compatibility
     location = models.CharField(max_length=100)
     quantity = models.IntegerField(db_index=True)
@@ -1157,7 +1158,7 @@ class PriceHistory(models.Model):
 
 
 class Supplier(models.Model):
-    """Local copy of WorkGuru Suppliers - extracted from PO details"""
+    """Supplier records, extracted from purchase order details."""
     workguru_id = models.IntegerField(unique=True, help_text='WorkGuru Supplier ID')
     name = models.CharField(max_length=255)
     
@@ -1237,7 +1238,7 @@ class SupplierContact(models.Model):
 
 
 class PurchaseOrder(models.Model):
-    """Local copy of WorkGuru Purchase Orders"""
+    """Purchase Orders (managed locally; WorkGuru sync has been removed)."""
     PO_TYPE_CHOICES = [
         ('supplier', 'Supplier'),
         ('fitter', 'Fitter'),
@@ -2135,7 +2136,7 @@ class Expense(models.Model):
 
 
 # =============================================
-# Invoices (synced from WorkGuru)
+# Invoices (synced from Xero)
 # =============================================
 
 class Invoice(models.Model):
@@ -2254,7 +2255,7 @@ class Invoice(models.Model):
 
 
 class InvoiceLineItem(models.Model):
-    """Line item on a WorkGuru invoice."""
+    """Line item on an invoice."""
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='line_items')
     workguru_id = models.IntegerField(null=True, blank=True)
 
@@ -2276,7 +2277,7 @@ class InvoiceLineItem(models.Model):
 
 
 class InvoicePayment(models.Model):
-    """Payment recorded against a WorkGuru invoice."""
+    """Payment recorded against an invoice."""
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='payments')
     workguru_id = models.IntegerField(null=True, blank=True)
 
@@ -3485,7 +3486,7 @@ class DesktopComponent(models.Model):
 class OverheadPurchaseOrder(models.Model):
     """Manually-created purchase order for overhead / non-Cost-of-Sales spend.
 
-    These are NOT synced from WorkGuru. They cover things like rent, utilities,
+    These are NOT synced from any external system. They cover things like rent, utilities,
     insurance, marketing, IT, professional services, etc. — anything that is
     not stock or installation.
     """

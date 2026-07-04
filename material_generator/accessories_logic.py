@@ -8,7 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _workguru_system_diagnostics(conn, system_number):
+def _accessories_system_diagnostics(conn, system_number):
     """Collect counts that explain why a system may produce no accessory rows.
 
     Never raises - diagnostics must not break generation.
@@ -51,9 +51,9 @@ def _workguru_system_diagnostics(conn, system_number):
     return info
 
 
-def generate_workguru_csv(system_number, conn, products_db_path, summary=None):
+def generate_accessories_csv(system_number, conn, products_db_path, summary=None):
     """
-    Generates the CSV content for a single system number for WorkGuru import.
+    Generates the CSV content for a single system number for the accessories import.
     This now includes Accessories, Glass, and Raumplus components.
 
     Args:
@@ -66,7 +66,7 @@ def generate_workguru_csv(system_number, conn, products_db_path, summary=None):
     Returns:
         str: The content of the generated CSV file as a string.
     """
-    logger.info(f"Starting WorkGuru CSV generation for system {system_number}")
+    logger.info(f"Starting accessories CSV generation for system {system_number}")
     output_in_memory = io.StringIO()
     csvwriter = csv.writer(output_in_memory, delimiter=',')
     csvwriter.writerow(["Sku", "Name", "Description", "CostPrice", "SellPrice", "Quantity", "Billable"])
@@ -76,7 +76,7 @@ def generate_workguru_csv(system_number, conn, products_db_path, summary=None):
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            cursor.execute(f"ATTACH DATABASE '{products_db_path}' AS workguru_db")
+            cursor.execute(f"ATTACH DATABASE '{products_db_path}' AS products_db")
 
             # --- Check for Vinyl Doors / Cornice ---
             vinyl_query = """
@@ -93,7 +93,7 @@ def generate_workguru_csv(system_number, conn, products_db_path, summary=None):
                 SELECT p.wg_sku, p.name, p.description, p.cost_price, p.sell_price, SUM(d.QTACOMP) as QTY
                 FROM DISTINTAT d
                 JOIN articoli a ON d.CODCOMP = a.cod
-                JOIN workguru_db.products p ON d.CODCOMP = p.cad_sku
+                JOIN products_db.products p ON d.CODCOMP = p.cad_sku
                 WHERE a.REPARTO = '005' AND d.NUMERO = ?
                 GROUP BY p.wg_sku, p.name, p.description, p.cost_price, p.sell_price;
             """
@@ -107,7 +107,7 @@ def generate_workguru_csv(system_number, conn, products_db_path, summary=None):
                     p.wg_sku, p.name, p.cost_price, p.sell_price
                 FROM DISTINTAT d
                 JOIN articoli a ON d.CODCOMP = a.cod
-                LEFT JOIN workguru_db.products p ON d.CODCOMP = p.cad_sku
+                LEFT JOIN products_db.products p ON d.CODCOMP = p.cad_sku
                 WHERE a.REPARTO = '004' AND d.NUMERO = ? AND d.LIVELLO > 1
                 AND d.CODCOMP NOT LIKE '10.01.237'
                 GROUP BY d.CODCOMP, d.DIML
@@ -122,7 +122,7 @@ def generate_workguru_csv(system_number, conn, products_db_path, summary=None):
                     if row['wg_sku']:
                         csvwriter.writerow([row['wg_sku'], row['name'], row['Description'], row['cost_price'], row['sell_price'], row['QTY'], "FALSE"])
                     else:
-                        print(f"Warning: No WorkGuru product found for Raumplus component {row['CODCOMP']}")
+                        print(f"Warning: No product found for Raumplus component {row['CODCOMP']}")
 
                 # Process items that are measured by length (e.g., profiles, tracks)
                 length_items = [r for r in rows if r['DIML'] and r['DIML'] > 0]
@@ -169,14 +169,14 @@ def generate_workguru_csv(system_number, conn, products_db_path, summary=None):
                         if final_qty > 0 and wg_details and wg_details['sku']:
                              csvwriter.writerow([wg_details['sku'], wg_details['name'], wg_details['desc'], wg_details['cost'], wg_details['sell'], final_qty, "FALSE"])
                         elif not wg_details['sku']:
-                            print(f"Warning: No WorkGuru product found for Raumplus component {current_code}")
+                            print(f"Warning: No product found for Raumplus component {current_code}")
 
             # --- Hettich Query ---
             acc_query = """
                 SELECT p.wg_sku, d.CODCOMP, p.name, p.description, a.DES as CAD_des, p.cost_price, p.sell_price, SUM(d.QTACOMP) as QTY
                 FROM DISTINTAT d
                 JOIN articoli a ON d.CODCOMP = a.cod
-                LEFT JOIN workguru_db.products p ON d.CODCOMP = p.cad_sku
+                LEFT JOIN products_db.products p ON d.CODCOMP = p.cad_sku
                 WHERE a.REPARTO IN ('006') AND d.NUMERO = ?
                 GROUP BY p.wg_sku, d.CODCOMP, p.name, p.description, p.cost_price, p.sell_price
             """
@@ -218,7 +218,7 @@ def generate_workguru_csv(system_number, conn, products_db_path, summary=None):
                 SELECT p.wg_sku, d.CODCOMP, p.name, p.description, a.DES as CAD_des, p.cost_price, p.sell_price, SUM(d.QTACOMP) as QTY
                 FROM DISTINTAT d
                 JOIN articoli a ON d.CODCOMP = a.cod
-                LEFT JOIN workguru_db.products p ON d.CODCOMP = p.cad_sku
+                LEFT JOIN products_db.products p ON d.CODCOMP = p.cad_sku
                 WHERE a.REPARTO IN ('002', '003') AND d.NUMERO = ?
                 GROUP BY p.wg_sku, d.CODCOMP, p.name, p.description, p.cost_price, p.sell_price
             """
@@ -253,7 +253,7 @@ def generate_workguru_csv(system_number, conn, products_db_path, summary=None):
                     else:
                         csvwriter.writerow([row['CODCOMP'], row['CAD_des'], row['QTY'], 'MISSING'])
 
-            cursor.execute("DETACH DATABASE workguru_db")
+            cursor.execute("DETACH DATABASE products_db")
 
     except sqlite3.Error as e:
         logger.error(f"Database error for system number {system_number}: {e}")
@@ -267,7 +267,7 @@ def generate_workguru_csv(system_number, conn, products_db_path, summary=None):
 
     # Populate the per-system summary for the caller / UI
     if summary is not None:
-        info = _workguru_system_diagnostics(conn, system_number)
+        info = _accessories_system_diagnostics(conn, system_number)
         data_rows = 0
         missing_rows = 0
         reader = csv.reader(io.StringIO(content))
@@ -300,7 +300,7 @@ def generate_workguru_csv(system_number, conn, products_db_path, summary=None):
             )
         if missing_rows > 0:
             info['messages'].append(
-                f"System {system_number}: {missing_rows} item(s) have no matching WorkGuru product and "
+                f"System {system_number}: {missing_rows} item(s) have no matching product and "
                 f"were written as 'MISSING'."
             )
 

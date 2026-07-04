@@ -10976,7 +10976,7 @@ def download_processed_csv(request, order_id):
     
     # Create response with proper headers for download
     response = HttpResponse(file_content, content_type='text/csv')
-    filename = f"{order.customer_number}_WG_Accessories.csv"
+    filename = f"{order.customer_number}_Accessories.csv"
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
     response['Content-Length'] = len(file_content)
     
@@ -11199,6 +11199,8 @@ def update_stock_items_batch(request):
                         item.supplier_code = item_data['supplier_code']
                     if 'supplier_sku' in item_data:
                         item.supplier_sku = item_data['supplier_sku']
+                    if 'cad_sku' in item_data:
+                        item.cad_sku = item_data['cad_sku']
                     # Product dimensions
                     for dim_field in ('length', 'width', 'height', 'weight', 'box_length', 'box_width', 'box_height'):
                         if dim_field in item_data:
@@ -13973,7 +13975,7 @@ def delete_pnx_items(request):
 @login_required
 def generate_and_upload_accessories_csv(request, order_id):
     """Generate accessories CSV from CAD database and upload it to the order"""
-    from material_generator import workguru_logic
+    from material_generator import accessories_logic
     from django.conf import settings
     import os
     from django.core.files.storage import default_storage
@@ -13986,6 +13988,7 @@ def generate_and_upload_accessories_csv(request, order_id):
         return redirect('order_details', order_id=order_id)
     
     cad_db_path = None
+    products_db_path = None
     try:
         # Always fetch cad_data.db from DigitalOcean Spaces
         import tempfile
@@ -13999,17 +14002,17 @@ def generate_and_upload_accessories_csv(request, order_id):
             messages.error(request, 'CAD database not found in DigitalOcean Spaces. Please ensure the CAD sync has been run.')
             return redirect('order_details', order_id=order_id)
 
-        products_db_path = os.path.join(settings.BASE_DIR, 'order_generator_files', 'src', 'products.db')
-        if not os.path.exists(products_db_path):
-            messages.error(request, f'Products database not found at: {products_db_path}.')
-            return redirect('order_details', order_id=order_id)
+        # Build the products lookup live from StockItem (each product's CAD code
+        # is stored in StockItem.cad_sku) rather than a standalone products.db file.
+        from stock_take.services.accessory_products import build_products_db_from_stock_items
+        products_db_path = build_products_db_from_stock_items()
 
         # Generate CSV content using customer number (CAD number)
         logger.info(f"Generating accessories CSV for CAD Number: {order.customer_number}")
         import sqlite3 as _sqlite3
         cad_conn = _sqlite3.connect(cad_db_path)
         try:
-            csv_content = workguru_logic.generate_workguru_csv(
+            csv_content = accessories_logic.generate_accessories_csv(
                 int(order.customer_number),
                 cad_conn,
                 products_db_path
@@ -14022,7 +14025,7 @@ def generate_and_upload_accessories_csv(request, order_id):
             return redirect('order_details', order_id=order_id)
         
         # Save to order
-        filename = f"{order.customer_number}_WG_Accessories.csv"
+        filename = f"{order.customer_number}_Accessories.csv"
         order.processed_csv.save(filename, io.BytesIO(csv_content.encode('utf-8')))
         order.processed_csv_created_at = timezone.now()
         
@@ -14273,6 +14276,12 @@ def generate_and_upload_accessories_csv(request, order_id):
                 os.unlink(cad_db_path)
             except OSError as cleanup_error:
                 logger.warning(f"Could not delete temp CAD DB {cad_db_path}: {cleanup_error}")
+        # Remove the throwaway products DB projected from StockItem
+        if products_db_path and os.path.exists(products_db_path):
+            try:
+                os.unlink(products_db_path)
+            except OSError as cleanup_error:
+                logger.warning(f"Could not delete temp products DB {products_db_path}: {cleanup_error}")
 
 
 # Timesheet API Views

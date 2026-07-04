@@ -260,6 +260,42 @@ class StockItemModelTests(TestCase):
         self.assertEqual(str(item), 'ABC - Bracket')
 
 
+class AccessoryProductsServiceTests(TestCase):
+    """The accessory generator sources its products lookup live from
+    StockItem (keyed on cad_sku) instead of a standalone products.db file."""
+
+    def test_only_cad_bearing_items_included_and_join_shape(self):
+        import os
+        import sqlite3
+        from stock_take.services.accessory_products import build_products_db_from_stock_items
+
+        _create_stock_item(sku='WG_MATCH', name='Knob', cost=Decimal('2.350'), cad_sku='10.01.015')
+        _create_stock_item(sku='WG_NOCAD', name='No CAD code', cost=Decimal('5.000'))
+
+        path = build_products_db_from_stock_items()
+        try:
+            conn = sqlite3.connect(path)
+            conn.row_factory = sqlite3.Row
+            cols = [r[1] for r in conn.execute('PRAGMA table_info(products)')]
+            self.assertEqual(
+                cols,
+                ['wg_sku', 'cad_sku', 'name', 'description', 'cost_price', 'sell_price'],
+            )
+            rows = conn.execute('SELECT * FROM products').fetchall()
+            # Only the item carrying a cad_sku is projected in.
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertEqual(row['wg_sku'], 'WG_MATCH')
+            self.assertEqual(row['cad_sku'], '10.01.015')
+            self.assertAlmostEqual(row['cost_price'], 2.35)
+            # sell_price is intentionally 0 so the downstream system keeps its own sell price.
+            self.assertEqual(row['sell_price'], 0)
+            conn.close()
+        finally:
+            os.unlink(path)
+        self.assertFalse(os.path.exists(path))
+
+
 class AnthillSaleModelTests(TestCase):
     def test_str(self):
         sale = AnthillSale.objects.create(

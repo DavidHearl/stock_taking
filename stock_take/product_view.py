@@ -281,6 +281,7 @@ def add_product(request):
             supplier_sku = data.get('supplier_sku', '')
             product.supplier_sku = supplier_sku
             product.supplier_code = supplier_sku
+            product.cad_sku = data.get('cad_sku', '')
 
             # Optional FK fields
             category_id = data.get('category_id')
