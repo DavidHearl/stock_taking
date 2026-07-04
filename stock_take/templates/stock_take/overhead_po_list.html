@@ -8,59 +8,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/purchase_invoices.css' %}">
-<style>
-/* ── Overhead PO overrides ───────────────────────────────────── */
-.opo-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: var(--radius-sm, 4px);
-    font-size: 0.78rem;
-    font-weight: 600;
-    letter-spacing: .02em;
-    text-transform: uppercase;
-}
-.opo-badge.draft      { background: var(--bg-tertiary); color: var(--text-muted); }
-.opo-badge.approved   { background: var(--info-subtle); color: var(--info-color); }
-.opo-badge.invoiced   { background: var(--warning-subtle); color: var(--warning-color); }
-.opo-badge.paid       { background: var(--success-subtle); color: var(--success-color); }
-.opo-badge.cancelled  { background: var(--danger-subtle); color: var(--danger-color); }
-
-.opo-cat {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    font-weight: 500;
-}
-
-.opo-filter-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    flex-wrap: wrap;
-    margin-bottom: 12px;
-}
-.opo-filter-row select {
-    padding: 5px 10px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm, 4px);
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    font-size: 0.85rem;
-}
-
-/* Match search box background to page */
-.pinv-search-box {
-    background: var(--bg-primary) !important;
-}
-.pinv-search-box input {
-    background: transparent !important;
-}
-.pinv-search-box input:-webkit-autofill,
-.pinv-search-box input:-webkit-autofill:hover,
-.pinv-search-box input:-webkit-autofill:focus {
-    -webkit-box-shadow: 0 0 0px 1000px var(--bg-primary) inset !important;
-    transition: background-color 5000s ease-in-out 0s;
-}
-</style>
+<link rel="stylesheet" href="{% static 'css/overhead_po_list.css' %}">
 {% endblock %}
 
 {% block content %}
@@ -75,30 +23,30 @@
 </div>
 
 <!-- Stats -->
-<div class="stats-grid" style="margin-bottom:16px;">
+<div class="stats-grid opo-mb-16">
     <div class="stats-card">
         <div class="stats-label">Total POs</div>
         <div class="stats-number">{{ total_count|intcomma }}</div>
     </div>
     <div class="stats-card">
         <div class="stats-label">Total Net</div>
-        <div class="stats-number" style="font-size:1.5rem;">£{{ total_net|floatformat:2|intcomma }}</div>
+        <div class="stats-number opo-stat-lg">£{{ total_net|floatformat:2|intcomma }}</div>
     </div>
     <div class="stats-card">
         <div class="stats-label">Total Gross</div>
-        <div class="stats-number" style="font-size:1.5rem;">£{{ total_gross|floatformat:2|intcomma }}</div>
+        <div class="stats-number opo-stat-lg">£{{ total_gross|floatformat:2|intcomma }}</div>
     </div>
     <div class="stats-card">
         <div class="stats-label">Draft</div>
-        <div class="stats-number" {% if status_counts.draft > 0 %}style="color:var(--text-muted);"{% endif %}>{{ status_counts.draft }}</div>
+        <div class="stats-number{% if status_counts.draft > 0 %} opo-muted{% endif %}">{{ status_counts.draft }}</div>
     </div>
     <div class="stats-card">
         <div class="stats-label">Approved</div>
-        <div class="stats-number" style="color:var(--primary-color);">{{ status_counts.approved }}</div>
+        <div class="stats-number opo-primary">{{ status_counts.approved }}</div>
     </div>
     <div class="stats-card">
         <div class="stats-label">Paid</div>
-        <div class="stats-number" style="color:var(--success-color);">{{ status_counts.paid }}</div>
+        <div class="stats-number opo-success">{{ status_counts.paid }}</div>
     </div>
 </div>
 
@@ -132,7 +80,7 @@
         {% endfor %}
     </select>
     {% if status_filter or category_filter %}
-    <a href="?{% if search_query %}q={{ search_query }}{% endif %}" style="font-size:0.85rem;color:var(--text-muted);text-decoration:none;">
+    <a href="?{% if search_query %}q={{ search_query }}{% endif %}" class="opo-clear-link">
         <i class="bi bi-x-circle"></i> Clear filters
     </a>
     {% endif %}
@@ -150,14 +98,14 @@
                 <th>Description</th>
                 <th>Date</th>
                 <th>Status</th>
-                <th style="text-align:right;">Net</th>
-                <th style="text-align:right;">Gross</th>
-                <th style="text-align:center;" title="Linked Invoices"><i class="bi bi-receipt"></i></th>
+                <th class="text-right">Net</th>
+                <th class="text-right">Gross</th>
+                <th class="text-center" title="Linked Invoices"><i class="bi bi-receipt"></i></th>
             </tr>
         </thead>
         <tbody>
             {% for po in overhead_pos %}
-            <tr onclick="window.location='{% url 'overhead_po_detail' po.id %}'" style="cursor:pointer;">
+            <tr onclick="window.location='{% url 'overhead_po_detail' po.id %}'" class="opo-pointer">
                 <td>
                     <a href="{% url 'overhead_po_detail' po.id %}" class="pinv-number" onclick="event.stopPropagation()">{{ po.reference }}</a>
                 </td>
@@ -170,12 +118,12 @@
                 <td><span class="opo-badge {{ po.status }}">{{ po.get_status_display }}</span></td>
                 <td class="number-cell">£{{ po.amount_net|floatformat:2|intcomma }}</td>
                 <td class="number-cell">£{{ po.amount_gross|floatformat:2|intcomma }}</td>
-                <td style="text-align:center;">
+                <td class="text-center">
                     {% with cnt=po.purchase_invoices.count %}
                     {% if cnt > 0 %}
-                    <span style="font-weight:600;color:var(--primary-color);">{{ cnt }}</span>
+                    <span class="opo-count">{{ cnt }}</span>
                     {% else %}
-                    <span style="color:var(--text-muted);">—</span>
+                    <span class="opo-muted">—</span>
                     {% endif %}
                     {% endwith %}
                 </td>
@@ -193,19 +141,19 @@
 
 <!-- ── Create Overhead PO Modal ─────────────────────────────── -->
 <div class="pinv-modal-overlay" id="create-opo-modal" onclick="closeCreateOPOModal(event)">
-    <div class="pinv-modal-box" style="max-width:560px;" onclick="event.stopPropagation()">
+    <div class="pinv-modal-box opo-w-560" onclick="event.stopPropagation()">
         <div class="modal-header">
-            <h3 style="margin:0;font-size:1rem;"><i class="bi bi-bag-plus"></i> New Overhead Purchase Order</h3>
-            <button type="button" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--text-secondary);line-height:1;" onclick="closeCreateOPOModal()">&times;</button>
+            <h3 class="opo-modal-title"><i class="bi bi-bag-plus"></i> New Overhead Purchase Order</h3>
+            <button type="button" class="opo-modal-close" onclick="closeCreateOPOModal()">&times;</button>
         </div>
         <div class="pinv-modal-body">
             <div class="pinv-form-rows">
                 <!-- Supplier -->
                 <div class="pinv-form-row">
-                    <label class="pinv-label">Supplier <span style="color:var(--danger-color);">*</span></label>
-                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
-                        <div class="order-search-wrap" style="flex:1;min-width:0;">
-                            <input type="text" id="opo-supplier-name" class="pinv-input" style="width:100%;"
+                    <label class="pinv-label">Supplier <span class="opo-req">*</span></label>
+                    <div class="opo-input-row">
+                        <div class="order-search-wrap opo-flex-min">
+                            <input type="text" id="opo-supplier-name" class="pinv-input opo-w-full"
                                    placeholder="Type to search…" autocomplete="off"
                                    oninput="filterSupplierDd(this.value)"
                                    onfocus="filterSupplierDd(this.value)"
@@ -213,7 +161,7 @@
                             <div class="order-search-dropdown modal-order-dd" id="opo-supplier-dd"></div>
                         </div>
                         <a href="{% url 'suppliers_list' %}" target="_blank"
-                           class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;flex-shrink:0;"
+                           class="btn btn-sm btn-outline-secondary opo-nowrap-shrink"
                            title="Go to Suppliers page (opens in new tab)">
                             <i class="bi bi-plus-lg"></i>
                         </a>
@@ -240,9 +188,9 @@
                 <!-- PO Date -->
                 <div class="pinv-form-row">
                     <label class="pinv-label">PO Date</label>
-                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
-                        <input type="date" id="opo-date" class="pinv-input" style="flex:1;">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;" onclick="document.getElementById('opo-date').value=todayISO()">Today</button>
+                    <div class="opo-input-row">
+                        <input type="date" id="opo-date" class="pinv-input opo-flex-1">
+                        <button type="button" class="btn btn-sm btn-outline-secondary opo-nowrap" onclick="document.getElementById('opo-date').value=todayISO()">Today</button>
                     </div>
                 </div>
                 <!-- Expected Date -->
@@ -258,9 +206,9 @@
                 <!-- VAT -->
                 <div class="pinv-form-row">
                     <label class="pinv-label">VAT (£)</label>
-                    <div style="display:flex;gap:6px;flex:1;min-width:0;">
-                        <input type="number" id="opo-amount-vat" class="pinv-input" step="0.01" min="0" placeholder="0.00" oninput="calcOPOGross()" onchange="roundTo2(this)" style="flex:1;">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" style="white-space:nowrap;" onclick="calcOPOVAT()">20%</button>
+                    <div class="opo-input-row">
+                        <input type="number" id="opo-amount-vat" class="pinv-input opo-flex-1" step="0.01" min="0" placeholder="0.00" oninput="calcOPOGross()" onchange="roundTo2(this)">
+                        <button type="button" class="btn btn-sm btn-outline-secondary opo-nowrap" onclick="calcOPOVAT()">20%</button>
                     </div>
                 </div>
                 <!-- Gross -->
@@ -279,18 +227,18 @@
                     </select>
                 </div>
                 <!-- Description -->
-                <div class="pinv-form-row" style="align-items:flex-start;">
-                    <label class="pinv-label" style="padding-top:6px;">Description</label>
+                <div class="pinv-form-row opo-row-top">
+                    <label class="pinv-label opo-label-top">Description</label>
                     <textarea id="opo-description" class="pinv-input" rows="2" placeholder="Brief description of the purchase…"></textarea>
                 </div>
                 <!-- Notes -->
-                <div class="pinv-form-row" style="align-items:flex-start;">
-                    <label class="pinv-label" style="padding-top:6px;">Notes</label>
+                <div class="pinv-form-row opo-row-top">
+                    <label class="pinv-label opo-label-top">Notes</label>
                     <textarea id="opo-notes" class="pinv-input" rows="2" placeholder="Internal notes…"></textarea>
                 </div>
             </div>
         </div>
-        <div class="pinv-modal-footer" style="justify-content:flex-end;">
+        <div class="pinv-modal-footer opo-footer-end">
             <button type="button" class="btn btn-outline-secondary" onclick="closeCreateOPOModal()">Cancel</button>
             <button type="button" class="btn btn-primary" onclick="submitCreateOPO()">
                 <i class="bi bi-check-lg"></i> Create
