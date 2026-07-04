@@ -188,7 +188,14 @@ STATICFILES_DIRS = [BASE_DIR / 'static']
 
 STATIC_ROOT = os.environ.get("STATIC_ROOT", BASE_DIR / "staticfiles")
 
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+# In development use the plain finders-based storage so new/renamed static
+# files are served without running collectstatic first. Only production uses
+# WhiteNoise's manifest storage (hashed, compressed, long-cache-safe).
+_STATICFILES_BACKEND = (
+	"django.contrib.staticfiles.storage.StaticFilesStorage"
+	if DEBUG
+	else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+)
 
 # Media files (uploads) — DigitalOcean Spaces (S3-compatible)
 AWS_ACCESS_KEY_ID = os.getenv('BUCKET_ACCESS_ID')
@@ -208,7 +215,7 @@ STORAGES = {
         "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
     },
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        "BACKEND": _STATICFILES_BACKEND,
     },
 }
 
