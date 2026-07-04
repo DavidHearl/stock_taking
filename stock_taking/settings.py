@@ -219,6 +219,10 @@ STORAGES = {
     },
 }
 
+# Avoid hard failures if a stale manifest is deployed; WhiteNoise will fall
+# back to the unhashed path for missing entries instead of raising ValueError.
+WHITENOISE_MANIFEST_STRICT = False
+
 MEDIA_URL = f'{AWS_S3_ENDPOINT_URL}/{AWS_STORAGE_BUCKET_NAME}/{AWS_LOCATION}/'
 
 # Default primary key field type
