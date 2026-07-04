@@ -37,9 +37,15 @@ RUN playwright install chromium
 
 COPY . .
 
-# Collect static files into /app/staticfiles
-# SECRET_KEY is needed by Django settings at build time; the real key is set at runtime via env vars
-RUN SECRET_KEY=build-placeholder python manage.py collectstatic --noinput
+# Collect static files into /app/staticfiles.
+# DEBUG=0 is REQUIRED here: the static storage backend is chosen by DEBUG in
+# settings.py, so without it the build defaults to DEBUG=1 and uses the plain
+# (non-manifest) storage — producing no hashed manifest, while runtime (DEBUG=0)
+# uses ManifestStaticFilesStorage and serves hashed URLs whose files aren't in
+# the image (=> every /static/*.hash.* 404s). --clear wipes any stale committed
+# staticfiles/ copied in by "COPY . ." so the manifest is clean and complete.
+# SECRET_KEY is needed by Django settings at build time; the real key is set at runtime via env vars.
+RUN SECRET_KEY=build-placeholder DEBUG=0 python manage.py collectstatic --noinput --clear
 
 # Search the name from WSGI in the settings file, ie WSGI_APPLICATION = 'stock_taking.wsgi.application'
 CMD ["gunicorn","stock_taking.wsgi:application","-w","3","-b",":8000"]
