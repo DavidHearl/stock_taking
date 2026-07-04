@@ -11,11 +11,12 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/purchase_orders.css' %}">
+<link rel="stylesheet" href="{% static 'css/purchase_orders_list.css' %}">
 {% endblock %}
 
 {% block content %}
 <div class="po-toolbar">
-    <div class="view-mode-switcher" style="margin-bottom:0;">
+    <div class="view-mode-switcher pol-vm-switcher">
         <a href="{% url 'purchase_orders_list' %}" class="view-mode-btn active">
             <i class="bi bi-cart3"></i>&nbsp; Purchase Orders
         </a>
@@ -71,7 +72,7 @@
             <a class="kebab-item {% if show_zero %}active{% endif %}" onclick="toggleZeroFilter()">
                 <i class="bi bi-exclamation-triangle"></i>
                 £0 Balance
-                {% if zero_count %}<span class="po-filter-badge po-zero-badge" style="margin-left:auto;">{{ zero_count }}</span>{% endif %}
+                {% if zero_count %}<span class="po-filter-badge po-zero-badge pol-zero-badge-end">{{ zero_count }}</span>{% endif %}
             </a>
             <div class="kebab-divider"></div>
             <a class="kebab-item" onclick="document.getElementById('carnehillModal').style.display='flex'">
@@ -93,7 +94,7 @@
     <!-- Sync Progress -->
     <div id="sync-progress" class="sync-progress" style="display: none;">
         <div class="sync-progress-bar">
-            <div class="sync-progress-fill" id="sync-fill" style="width: 0%"></div>
+            <div class="sync-progress-fill pol-sync-fill-init" id="sync-fill"></div>
         </div>
         <div class="sync-progress-text" id="sync-status">Starting sync...</div>
     </div>
@@ -153,7 +154,7 @@
                             {% if po.supplier_id %}
                             <a href="{% url 'supplier_detail' po.supplier_id %}" class="po-supplier-name" title="View supplier">{{ po.supplier_name|default:"-" }}</a>
                             {% else %}
-                            <span class="po-supplier-name" style="color:var(--text-primary);">{{ po.supplier_name|default:"-" }}</span>
+                            <span class="po-supplier-name pol-supplier-name-plain">{{ po.supplier_name|default:"-" }}</span>
                             {% endif %}
                             <button class="po-supplier-filter-btn" title="Filter by {{ po.supplier_name|escapejs }}" onclick="filterBySingleSupplier('{{ po.supplier_name|escapejs }}')">
                                 <i class="bi bi-funnel"></i>
@@ -190,7 +191,7 @@
                         </a>
                         {% endwith %}
                         {% elif po.invoice_not_required %}
-                        <span class="po-icon-link" title="Marked as not requiring a supplier invoice" style="color:var(--danger-color,#dc3545);">
+                        <span class="po-icon-link pol-icon-danger" title="Marked as not requiring a supplier invoice">
                             <i class="bi bi-slash-circle"></i>
                         </span>
                         {% endif %}
@@ -584,29 +585,29 @@ function selectOrder(id, saleNumber, customerName) {
 
 <!-- Carnehill Summary Modal -->
 <div class="modal-overlay" id="carnehillModal" style="display:none;">
-    <div class="modal-box" style="max-width: 520px;">
+    <div class="modal-box pol-modal-520">
         <div class="modal-header">
             <h2><i class="bi bi-truck"></i> Carnehill Summary</h2>
             <button class="modal-close" onclick="document.getElementById('carnehillModal').style.display='none'">&times;</button>
         </div>
         <div class="modal-body">
             {% if carnehill_pos %}
-            <p style="margin: 0 0 12px; color: var(--text-secondary); font-size: 13px;">Select POs to include in the summary report:</p>
-            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                <button type="button" class="btn btn-sm btn-secondary" onclick="toggleAllCarnehill(true)" style="font-size: 12px; padding: 3px 10px;">Select All</button>
-                <button type="button" class="btn btn-sm btn-secondary" onclick="toggleAllCarnehill(false)" style="font-size: 12px; padding: 3px 10px;">Deselect All</button>
+            <p class="pol-modal-hint">Select POs to include in the summary report:</p>
+            <div class="pol-btn-row">
+                <button type="button" class="btn btn-sm btn-secondary pol-btn-xs" onclick="toggleAllCarnehill(true)">Select All</button>
+                <button type="button" class="btn btn-sm btn-secondary pol-btn-xs" onclick="toggleAllCarnehill(false)">Deselect All</button>
             </div>
-            <div style="max-height: 320px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px;">
+            <div class="pol-scroll-box">
                 {% for po in carnehill_pos %}
-                <label style="display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--border-color);{% if forloop.last %} border-bottom: none;{% endif %}">
+                <label class="pol-check-row{% if forloop.last %} pol-no-border{% endif %}">
                     <input type="checkbox" class="carnehill-po-cb" value="{{ po.id }}" checked>
-                    <span style="font-weight: 600; min-width: 70px;">{{ po.display_number }}</span>
-                    <span style="color: var(--text-secondary); font-size: 13px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ po.description|default:"—" }}</span>
+                    <span class="pol-po-num">{{ po.display_number }}</span>
+                    <span class="pol-po-desc">{{ po.description|default:"—" }}</span>
                 </label>
                 {% endfor %}
             </div>
             {% else %}
-            <p style="color: var(--text-secondary); margin: 0;">No ordered Carnehill POs found.</p>
+            <p class="pol-empty-note">No ordered Carnehill POs found.</p>
             {% endif %}
         </div>
         <div class="modal-footer">
@@ -620,47 +621,47 @@ function selectOrder(id, saleNumber, customerName) {
 
 <!-- Approved POs Report Modal -->
 <div class="modal-overlay" id="approvedReportModal" style="display:none;">
-    <div class="modal-box" style="max-width: 900px;">
+    <div class="modal-box pol-modal-900">
         <div class="modal-header">
             <h2><i class="bi bi-file-earmark-bar-graph"></i> Ordered Purchase Orders</h2>
             <button class="modal-close" onclick="document.getElementById('approvedReportModal').style.display='none'">&times;</button>
         </div>
         <div class="modal-body">
             {% if approved_report_pos %}
-            <div style="max-height: 60vh; overflow-y: auto;">
+            <div class="pol-report-scroll">
                 <table class="approved-report-table">
                     <thead>
                         <tr>
-                            <th style="text-align: left;">PO</th>
-                            <th style="text-align: left;">Supplier</th>
-                            <th style="text-align: left;">Expected Date</th>
-                            <th style="text-align: right;">Value</th>
+                            <th class="text-left">PO</th>
+                            <th class="text-left">Supplier</th>
+                            <th class="text-left">Expected Date</th>
+                            <th class="text-right">Value</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for po in approved_report_pos %}
                         <tr>
-                            <td style="font-weight: 600; white-space: nowrap;">
-                                <a href="{% url 'purchase_order_detail' po.workguru_id %}" style="color: var(--primary-color); text-decoration: none;">{{ po.display_number }}</a>
+                            <td class="pol-cell-po">
+                                <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="pol-po-link">{{ po.display_number }}</a>
                             </td>
-                            <td style="color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px;">{{ po.supplier_name|default:"—" }}</td>
-                            <td style="white-space: nowrap; color: var(--text-secondary);">{{ po.expected_date|format_date_str|default:"—" }}</td>
-                            <td style="white-space: nowrap; text-align: right;"><span style="display: inline-flex; gap: 12px;"><span style="color: var(--text-muted);">{{ po.currency|currency_symbol }}</span><span style="font-variant-numeric: tabular-nums;">{{ po.total|floatformat:2|intcomma }}</span></span></td>
+                            <td class="pol-cell-supplier">{{ po.supplier_name|default:"—" }}</td>
+                            <td class="pol-cell-date">{{ po.expected_date|format_date_str|default:"—" }}</td>
+                            <td class="pol-cell-value"><span class="pol-amt-wrap"><span class="pol-amt-sym">{{ po.currency|currency_symbol }}</span><span class="pol-amt-num">{{ po.total|floatformat:2|intcomma }}</span></span></td>
                         </tr>
                         {% endfor %}
                     </tbody>
                     <tfoot>
                         {% for ct in approved_report_currency_totals %}
                         <tr>
-                            <td colspan="3" style="text-align: right; color: var(--text-secondary); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em;">Total</td>
-                            <td style="white-space: nowrap; text-align: right;"><span style="display: inline-flex; gap: 12px;"><span style="color: var(--text-muted);">{{ ct.symbol }}</span><span style="font-variant-numeric: tabular-nums;">{{ ct.amount|floatformat:2|intcomma }}</span></span></td>
+                            <td colspan="3" class="pol-total-label">Total</td>
+                            <td class="pol-cell-value"><span class="pol-amt-wrap"><span class="pol-amt-sym">{{ ct.symbol }}</span><span class="pol-amt-num">{{ ct.amount|floatformat:2|intcomma }}</span></span></td>
                         </tr>
                         {% endfor %}
                     </tfoot>
                 </table>
             </div>
             {% else %}
-            <p style="padding: 24px; color: var(--text-secondary); margin: 0;">No ordered Purchase Orders found.</p>
+            <p class="pol-empty-pad">No ordered Purchase Orders found.</p>
             {% endif %}
         </div>
         <div class="modal-footer">

@@ -11,18 +11,7 @@
     <link rel="stylesheet" href="{% static 'css/stock_manager.css' %}">
     <link rel="stylesheet" href="{% static 'css/ordering.css' %}">
     <link rel="stylesheet" href="{% static 'css/customers.css' %}">
-    <style>
-        /* Undo ordering.css viewport-lock — this page scrolls normally */
-        .main-content {
-            height: auto;
-            overflow: visible;
-            display: block;
-        }
-        .content-wrapper {
-            display: block;
-            overflow: visible;
-        }
-    </style>
+    <link rel="stylesheet" href="{% static 'css/stock_list.css' %}">
 {% endblock %}
 
 {% block content %}
@@ -117,7 +106,7 @@
                 {% for item in all_stock_items %}
                 <tr data-sku="{{ item.sku|lower }}" data-name="{{ item.name|lower }}" data-serial="{{ item.serial_or_batch|lower }}" data-category="{{ item.category.name|default:''|lower }}" data-tracking="{{ item.tracking_type|lower }}" data-status="{{ item.stock_status }}" data-supplier="{{ item.supplier.name|default:''|lower }}">
                     <td class="text-center cb-col"><input type="checkbox" class="row-cb" value="{{ item.id }}" onclick="updateSelection()"></td>
-                    <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a>{% if item.sku in missing_skus %}<i class="bi bi-arrow-left-right sub-marker" style="color: var(--danger-color);" title="Being replaced"></i>{% endif %}{% if item.sku in replacement_skus %}<i class="bi bi-arrow-left-right sub-marker" style="color: var(--success-color);" title="Replaces another product"></i>{% endif %}</td>
+                    <td><a href="{% url 'product_detail' item.id %}" class="sku-link">{{ item.sku }}</a>{% if item.sku in missing_skus %}<i class="bi bi-arrow-left-right sub-marker sl-marker-danger" title="Being replaced"></i>{% endif %}{% if item.sku in replacement_skus %}<i class="bi bi-arrow-left-right sub-marker sl-marker-success" title="Replaces another product"></i>{% endif %}</td>
                     <td>{{ item.name }}</td>
                     <td>{% if item.supplier %}{{ item.supplier.name }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
                     <td class="text-right">£{{ item.cost|floatformat:2|intcomma }}</td>
@@ -130,7 +119,7 @@
                     </td>
                     <td class="text-center qty-cell" data-item-id="{{ item.id }}" data-qty="{{ item.quantity }}" onclick="startQtyEdit(this)">{{ item.quantity }} {% if item.stock_status == 'in-stock' %}<i class="bi bi-check-circle stock-icon-in" title="In Stock"></i>{% elif item.stock_status == 'low-stock' %}<i class="bi bi-exclamation-triangle stock-icon-low" title="Low Stock"></i>{% elif item.stock_status == 'out-of-stock' %}<i class="bi bi-x-circle stock-icon-out" title="Out of Stock"></i>{% else %}<i class="bi bi-dash-circle stock-icon-non" title="Non-Stock"></i>{% endif %}</td>
                     <td class="text-right">£{{ item.total_value|floatformat:2|intcomma }}</td>
-                    <td class="text-center img-col">{% if item.product_url and 'http' in item.product_url %}<a href="{{ item.product_url }}" target="_blank" rel="noopener noreferrer" title="View product page" style="color: var(--primary-color);"><i class="bi bi-link-45deg"></i></a>{% endif %}</td>
+                    <td class="text-center img-col">{% if item.product_url and 'http' in item.product_url %}<a href="{{ item.product_url }}" target="_blank" rel="noopener noreferrer" title="View product page" class="sl-product-link"><i class="bi bi-link-45deg"></i></a>{% endif %}</td>
                     <td class="text-center img-col">{% if item.image %}<span class="img-preview-trigger" onclick="event.stopPropagation(); showImageLightbox('{{ item.image.url }}', '{{ item.name|escapejs }}')"><i class="bi bi-camera-fill stock-has-image" title="View image"></i><span class="img-preview-popup"><img src="{{ item.image.url }}" alt="{{ item.name }}"></span></span>{% endif %}</td>
                 </tr>
                 {% endfor %}
@@ -186,7 +175,7 @@
                 <div class="form-group">
                     <label for="bulkImage">Image</label>
                     <input type="file" id="bulkImage" accept="image/*" class="form-control">
-                    <small class="bulk-edit-hint" style="margin-top:4px;">Applies the same image to all selected items.</small>
+                    <small class="bulk-edit-hint sl-hint-spaced">Applies the same image to all selected items.</small>
                 </div>
             </div>
             <div class="modal-footer">
@@ -245,7 +234,7 @@
                                 <tr>
                                     <th class="check-col"><input type="checkbox" id="subSelectAll" onchange="toggleSelectAllSubs(this)"></th>
                                     <th>Missing SKU</th>
-                                    <th style="width:20px;"></th>
+                                    <th class="sl-th-arrow"></th>
                                     <th>Replacement SKU</th>
                                     <th class="actions-col"></th>
                                 </tr>
@@ -258,7 +247,7 @@
                                         <code>{{ sub.missing_sku }}</code>
                                         {% if sub.missing_name %}<div class="sub-name">{{ sub.missing_name }}</div>{% endif %}
                                     </td>
-                                    <td class="text-center"><i class="bi bi-arrow-right" style="color:var(--text-secondary);"></i></td>
+                                    <td class="text-center"><i class="bi bi-arrow-right sl-arrow-muted"></i></td>
                                     <td>
                                         <code>{{ sub.replacement_sku }}</code>
                                         {% if sub.replacement_name %}<div class="sub-name">{{ sub.replacement_name }}</div>{% endif %}
@@ -316,9 +305,9 @@
 
                     <!-- Add new group -->
                     <div class="sub-add-row sub-group-add-row">
-                        <input type="text" id="addGroupKitSku" class="form-control" placeholder="Kit SKU *" style="flex:1.5;">
+                        <input type="text" id="addGroupKitSku" class="form-control sl-kit-sku-input" placeholder="Kit SKU *">
                         <input type="text" id="addGroupKitName" class="form-control" placeholder="Kit name">
-                        <input type="number" id="addGroupCost" class="form-control" placeholder="Cost £" step="0.01" min="0" style="flex:0.6;">
+                        <input type="number" id="addGroupCost" class="form-control sl-cost-input" placeholder="Cost £" step="0.01" min="0">
                         <label class="sub-billable-label">
                             <input type="checkbox" id="addGroupBillable"> Billable
                         </label>
@@ -374,7 +363,7 @@
                             </div>
                         </div>
                         {% empty %}
-                        <div class="empty-row text-center" id="noGroupsMsg" style="padding:24px 0;">No groups defined yet.</div>
+                        <div class="empty-row text-center sl-no-groups" id="noGroupsMsg">No groups defined yet.</div>
                         {% endfor %}
                     </div>
                 </div>
@@ -395,7 +384,7 @@
             </div>
             <div class="modal-body">
                 <div id="eggerColoursGrid" class="egger-grid">
-                    <div class="text-center" style="padding: 40px; color: var(--text-secondary);">Loading...</div>
+                    <div class="text-center sl-egger-loading">Loading...</div>
                 </div>
             </div>
         </div>
@@ -459,7 +448,7 @@
                     <label for="raumplusAddNameInput" id="raumplusAddNameLabel">Name</label>
                     <input type="text" id="raumplusAddNameInput" class="form-control" placeholder="Enter name..." onkeydown="handleRaumplusInputKey(event)">
                 </div>
-                <div class="form-group" style="margin-top: 12px;">
+                <div class="form-group sl-form-group-spaced">
                     <label for="raumplusAddImageInput">Image</label>
                     <input type="file" id="raumplusAddImageInput" class="form-control" accept="image/*">
                 </div>
