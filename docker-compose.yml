@@ -17,22 +17,12 @@ services:
       - /srv/static/stock_taking:/app/staticfiles
       - /srv/media/stock_taking:/app/media
     restart: unless-stopped
-    command: [
-      "gunicorn",
-      "stock_taking.wsgi:application",
-      "--bind",
-      "0.0.0.0:8000",
-      "--workers",
-      "3",
-      "--timeout",
-      "120",
-      "--log-level",
-      "debug",
-      "--access-logfile",
-      "-",
-      "--error-logfile",
-      "-"
-    ]
+    command:
+      [
+        "sh",
+        "-c",
+        "python manage.py collectstatic --noinput && exec gunicorn stock_taking.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120 --log-level debug --access-logfile - --error-logfile -"
+      ]
     environment:
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE}
       SECRET_KEY: ${SECRET_KEY}
