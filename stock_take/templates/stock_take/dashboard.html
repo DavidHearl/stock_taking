@@ -145,6 +145,15 @@
 
     </div><!-- /db-stats -->
 
+    <!-- Sales Targets Row -->
+    <div class="db-targets-section">
+        <div class="db-targets-header">
+            <h3><i class="bi bi-bullseye"></i> Sales Targets</h3>
+            <span class="db-targets-subtitle">Fits scheduled per period vs objective &middot; paid vs outstanding</span>
+        </div>
+        <div class="db-targets" id="targetsGrid"></div>
+    </div><!-- /db-targets-section -->
+
     <!-- Charts Row -->
     <div class="db-charts">
         <div class="chart-container">
@@ -980,6 +989,99 @@ function fetchSalesAfter() {
             if (countEl) countEl.style.opacity = '1';
         });
 }
+</script>
+
+<script>
+// Sales Targets — doughnut per period (paid / outstanding vs target)
+document.addEventListener('DOMContentLoaded', function() {
+    const targets = {{ targets_json|safe }};
+    const grid = document.getElementById('targetsGrid');
+    if (!grid || !targets) return;
+
+    const css = getComputedStyle(document.documentElement);
+    const tok = (name, fallback) => (css.getPropertyValue(name).trim() || fallback);
+    const cPaid = tok('--success-color', '#22c55e');
+    const cOutstanding = tok('--warning-color', '#f5a524');
+    const cTrack = tok('--border-color', '#34363b');
+    const cText = tok('--text-primary', '#f5f6f8');
+    const cMuted = tok('--text-muted', '#9da1a9');
+    const money = v => '£' + Math.round(v).toLocaleString();
+
+    targets.forEach(function(t) {
+        const met = t.actual >= t.target;
+        const pctClass = met ? 'target-pct-met' : (t.pct >= 75 ? 'target-pct-near' : 'target-pct-low');
+
+        const card = document.createElement('div');
+        card.className = 'target-card';
+        card.innerHTML =
+            '<div class="target-card-head">' +
+                '<span class="target-card-label">' + t.label + '</span>' +
+                '<span class="target-card-sub">' + t.sublabel + '</span>' +
+            '</div>' +
+            '<div class="target-chart-wrap">' +
+                '<canvas id="targetChart_' + t.key + '"></canvas>' +
+                '<div class="target-center">' +
+                    '<span class="target-pct ' + pctClass + '">' + Math.round(t.pct) + '%</span>' +
+                    '<span class="target-pct-label">of ' + money(t.target) + '</span>' +
+                '</div>' +
+            '</div>' +
+            '<div class="target-figures">' +
+                '<div class="target-figure"><span class="target-dot" style="background:' + cPaid + '"></span>Paid' +
+                    '<strong>' + money(t.paid) + '</strong></div>' +
+                '<div class="target-figure"><span class="target-dot" style="background:' + cOutstanding + '"></span>Outstanding' +
+                    '<strong>' + money(t.outstanding) + '</strong></div>' +
+                '<div class="target-figure target-figure-total">' +
+                    '<span>Booked</span><strong>' + money(t.actual) + '</strong></div>' +
+                '<div class="target-figure target-figure-gap">' +
+                    (met
+                        ? '<span class="target-met-badge"><i class="bi bi-check-circle-fill"></i> Target met</span>'
+                        : '<span>To target</span><strong>' + money(t.remaining) + '</strong>') +
+                '</div>' +
+            '</div>';
+        grid.appendChild(card);
+
+        const ctx = card.querySelector('canvas').getContext('2d');
+        const segLabels = ['Paid', 'Outstanding'];
+        const segValues = [t.paid, t.outstanding];
+        const segColors = [cPaid, cOutstanding];
+        if (!met && t.remaining > 0) {
+            segLabels.push('Remaining to target');
+            segValues.push(t.remaining);
+            segColors.push(cTrack);
+        }
+        // Guard against an all-zero doughnut (nothing scheduled): show a full track ring.
+        if (t.actual === 0 && t.remaining === 0) {
+            segValues[0] = 1;
+        }
+
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: segLabels,
+                datasets: [{
+                    data: segValues,
+                    backgroundColor: segColors,
+                    borderColor: 'transparent',
+                    borderWidth: 0,
+                    hoverOffset: 4,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '72%',
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: c => ' ' + c.label + ': ' + money(c.parsed),
+                        },
+                    },
+                },
+            },
+        });
+    });
+});
 </script>
 
 <script>

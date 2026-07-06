@@ -28,6 +28,63 @@ def _contract_prefix_for_location(location: str) -> str:
     return _LOCATION_CONTRACT_PREFIX.get(location.strip().lower(), '')
 
 
+# ── Sales targets ──────────────────────────────────────────────────────────
+# Fixed company sales objectives, measured against fits scheduled in the period
+# (AnthillSale.sale_value bucketed by fit_date, same source as the sales cards).
+WEEKLY_SALES_TARGET = Decimal('25000')
+MONTHLY_SALES_TARGET = Decimal('100000')
+YEARLY_SALES_TARGET = Decimal('1250000')
+
+
+def _get_target_breakdown(start_date, end_date, target, contract_prefix=''):
+	"""Break sales fitting in [start_date, end_date] into paid / outstanding vs a target.
+
+	``actual`` is gross ``sale_value`` (matches the "This Week's Sales" / "Monthly
+	Sales" cards). ``paid`` is confirmed payments capped at each sale's value, and
+	``outstanding`` is the remainder, so paid + outstanding == actual. ``remaining``
+	is the shortfall against the target (0 once the target is met or beaten).
+	"""
+	payments_subquery = Subquery(
+		AnthillPayment.objects.filter(sale=OuterRef('pk'), ignored=False)
+		.values('sale')
+		.annotate(total=Sum('amount'))
+		.values('total'),
+		output_field=DecimalField(max_digits=14, decimal_places=2),
+	)
+	qs = (
+		AnthillSale.objects
+		.filter(fit_date__gte=start_date, fit_date__lte=end_date, sale_value__gt=0)
+		.exclude(status__in=['cancelled', 'dead'])
+		.annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
+		.values('sale_value', 'total_paid')
+	)
+	if contract_prefix:
+		qs = qs.filter(contract_number__istartswith=contract_prefix)
+
+	actual = Decimal('0')
+	paid = Decimal('0')
+	count = 0
+	for row in qs:
+		value = row['sale_value'] or Decimal('0')
+		row_paid = min(row['total_paid'] or Decimal('0'), value)
+		actual += value
+		paid += row_paid
+		count += 1
+	outstanding = actual - paid
+	target = Decimal(str(target))
+	remaining = max(target - actual, Decimal('0'))
+	pct = float(actual / target * 100) if target else 0.0
+	return {
+		'target': float(target),
+		'actual': float(actual),
+		'paid': float(paid),
+		'outstanding': float(outstanding),
+		'remaining': float(remaining),
+		'count': count,
+		'pct': round(pct, 1),
+	}
+
+
 def _get_monthly_sales_data(year, month, contract_prefix=''):
     """Calculate monthly sales stats for a given year/month using fit_date."""
     from calendar import monthrange
@@ -753,7 +810,37 @@ def dashboard(request):
         and (now.weekday() >= 5 or now.hour < 13)
     )
 
+    # ── Sales targets (paid/outstanding vs fixed objectives) ──
+    # Weekly pies for last / this / next week, plus this month and this year.
+    from calendar import monthrange as _monthrange
+    next_week_start = this_week_start + timedelta(days=7)
+    next_week_end = next_week_start + timedelta(days=6)
+    month_start = today.replace(day=1)
+    month_end = today.replace(day=_monthrange(today.year, today.month)[1])
+    year_start = today.replace(month=1, day=1)
+    year_end = today.replace(month=12, day=31)
+
+    def _target_period(key, label, sublabel, start, end, target):
+        data = _get_target_breakdown(start, end, target, contract_prefix)
+        data.update({'key': key, 'label': label, 'sublabel': sublabel})
+        return data
+
+    _wk_range = lambda s, e: f"{s.strftime('%d %b')} – {e.strftime('%d %b')}"
+    targets_data = [
+        _target_period('last_week', 'Last Week', _wk_range(last_week_start, last_week_end),
+                       last_week_start, last_week_end, WEEKLY_SALES_TARGET),
+        _target_period('this_week', 'This Week', _wk_range(this_week_start, this_week_end),
+                       this_week_start, this_week_end, WEEKLY_SALES_TARGET),
+        _target_period('next_week', 'Next Week', _wk_range(next_week_start, next_week_end),
+                       next_week_start, next_week_end, WEEKLY_SALES_TARGET),
+        _target_period('this_month', 'This Month', today.strftime('%B %Y'),
+                       month_start, month_end, MONTHLY_SALES_TARGET),
+        _target_period('this_year', 'This Year', str(today.year),
+                       year_start, year_end, YEARLY_SALES_TARGET),
+    ]
+
     context = {
+        'targets_json': json.dumps(targets_data),
         'fits_chart_data': json.dumps({
             'labels': labels,
             'values': fits_values,
