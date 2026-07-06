@@ -478,13 +478,7 @@
         }
     }
 
-    function editOrder(orderId) {
-        // Placeholder for edit functionality
-        // You can implement inline editing or redirect to an edit page
-        console.log('Edit order:', orderId);
-        alert('Edit functionality for order ' + orderId + ' - to be implemented');
-    }
-
+    
     function updateBoardsOrdered(poId, isChecked) {
         // Send AJAX request to update the boards_ordered status for a Boards PO
         fetch(`/stock-take/boards-po/${poId}/update-boards-ordered/`, {
@@ -726,15 +720,7 @@
     }
 
     // Toggle PO section function
-    function togglePOSection(sectionId) {
-        const section = document.getElementById(sectionId);
-        if (section) {
-            section.classList.toggle('hidden');
-        } else {
-            console.error('Section not found:', sectionId);
-        }
-    }
-
+    
     // Add event listeners for modal triggers
     document.addEventListener('DOMContentLoaded', function() {
         // Update existing event listeners that reference Bootstrap modals
@@ -1002,39 +988,7 @@
     // Replace file modal functionality
     let currentReplacePOId = null;
 
-    function openReplaceFileModal(poId) {
-        currentReplacePOId = poId;
-        const modalHtml = `
-            <div class="modal show" id="replaceFileModal" style="display: block;">
-                <div class="modal-overlay" onclick="closeReplaceFileModal()"></div>
-                <div class="modal-dialog">
-                    <div class="modal-content">
-                        <div class="modal-header">
-                            <h3>Replace PNX File</h3>
-                            <button type="button" class="modal-close" onclick="closeReplaceFileModal()">✕</button>
-                        </div>
-                        <form method="POST" enctype="multipart/form-data" action="/stock-take/boards-po/${poId}/replace-pnx/">
-                            <input type="hidden" name="csrfmiddlewaretoken" value="${document.querySelector('[name=csrfmiddlewaretoken]').value}">
-                            <div class="modal-body">
-                                <div class="form-group">
-                                    <label for="pnx_file">Select PNX File</label>
-                                    <input type="file" name="pnx_file" id="pnx_file" accept=".pnx" required class="form-control">
-                                </div>
-                            </div>
-                            <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" onclick="closeReplaceFileModal()">Cancel</button>
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="bi bi-upload"></i> Upload
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        `;
-        document.body.insertAdjacentHTML('beforeend', modalHtml);
-    }
-
+    
     function closeReplaceFileModal() {
         const modal = document.getElementById('replaceFileModal');
         if (modal) {
@@ -1044,103 +998,9 @@
     }
 
     // Update PO Number
-    function updatePONumber(poId, newPONumber) {
-        const originalValue = document.querySelector(`input[data-po-id="${poId}"]`).defaultValue;
-        
-        // If value hasn't changed, don't make request
-        if (newPONumber === originalValue) {
-            return;
-        }
-        
-        fetch(`/stock-take/boards-po/${poId}/update-po-number/`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-            },
-            body: JSON.stringify({
-                po_number: newPONumber
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                // Update the default value
-                document.querySelector(`input[data-po-id="${poId}"]`).defaultValue = newPONumber;
-                console.log('PO number updated successfully');
-            } else {
-                alert('Error updating PO number: ' + (data.error || 'Unknown error'));
-                // Revert to original value
-                document.querySelector(`input[data-po-id="${poId}"]`).value = originalValue;
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('Error updating PO number');
-            // Revert to original value
-            document.querySelector(`input[data-po-id="${poId}"]`).value = originalValue;
-        });
-    }
-
+    
     // Preview PNX file
-    function previewPNX(poId) {
-        fetch(`/stock-take/boards-po/${poId}/preview-pnx/`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Build table HTML
-                    let tableHtml = '<div style="overflow-x: auto;"><table id="previewTable" class="table table-striped" style="font-size: 11px;"><thead><tr>';
-                    
-                    // Header row
-                    data.header.forEach(col => {
-                        tableHtml += `<th style="white-space: nowrap; padding: 6px;">${col || '&nbsp;'}</th>`;
-                    });
-                    tableHtml += '</tr></thead><tbody>';
-                    
-                    // Data rows
-                    data.rows.forEach((row, rowIndex) => {
-                        tableHtml += '<tr>';
-                        row.forEach((cell, cellIndex) => {
-                            tableHtml += `<td contenteditable="true" data-row="${rowIndex}" data-col="${cellIndex}" style="white-space: nowrap; padding: 6px; cursor: text;">${cell || ''}</td>`;
-                        });
-                        tableHtml += '</tr>';
-                    });
-                    tableHtml += '</tbody></table></div>';
-                    
-                    const modalHtml = `
-                        <div class="modal show" id="previewPNXModal" style="display: block;">
-                            <div class="modal-overlay" onclick="closePreviewModal()"></div>
-                            <div class="modal-dialog" style="max-width: 95%;">
-                                <div class="modal-content-csv-table">
-                                    <div class="modal-header">
-                                        <h3>PNX Preview - ${data.po_number}</h3>
-                                        <button type="button" class="modal-close" onclick="closePreviewModal()">✕</button>
-                                    </div>
-                                    <div class="modal-body" style="overflow: auto; max-height: 70vh;">
-                                        ${tableHtml}
-                                        <div style="margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 6px;">
-                                            <strong>Total Lines:</strong> ${data.line_count} | 
-                                            <strong>Total Items:</strong> ${data.item_count}
-                                        </div>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-secondary" onclick="closePreviewModal()">Close</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    document.body.insertAdjacentHTML('beforeend', modalHtml);
-                } else {
-                    alert('Error loading preview: ' + (data.error || 'Unknown error'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error loading preview');
-            });
-    }
-
+    
     function closePreviewModal() {
         const modal = document.getElementById('previewPNXModal');
         if (modal) {
@@ -1196,152 +1056,11 @@
     }
 
     // Preview Accessory CSV file
-    function previewAccessoryCSV(csvId) {
-        fetch(`/stock-take/accessory-csv/${csvId}/preview/`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Build table HTML
-                    let tableHtml = '<div style="overflow-x: auto;"><table id="previewTable" class="table table-striped" style="font-size: 11px;"><thead><tr>';
-                    
-                    // Header row
-                    data.header.forEach(col => {
-                        tableHtml += `<th style="white-space: nowrap; padding: 6px;">${col || '&nbsp;'}</th>`;
-                    });
-                    tableHtml += '</tr></thead><tbody>';
-                    
-                    // Data rows
-                    data.rows.forEach((row, rowIndex) => {
-                        tableHtml += '<tr>';
-                        row.forEach((cell, cellIndex) => {
-                            tableHtml += `<td style="white-space: nowrap; padding: 6px;">${cell || '&nbsp;'}</td>`;
-                        });
-                        tableHtml += '</tr>';
-                    });
-                    tableHtml += '</tbody></table></div>';
-                    
-                    const modalHtml = `
-                        <div class="modal show" id="previewPNXModal" style="display: block;">
-                            <div class="modal-overlay" onclick="closePreviewModal()"></div>
-                            <div class="modal-dialog" style="max-width: 95%;">
-                                <div class="modal-content-csv-table">
-                                    <div class="modal-header">
-                                        <h3>Accessories CSV Preview - ${data.sale_number}</h3>
-                                        <button type="button" class="modal-close" onclick="closePreviewModal()">✕</button>
-                                    </div>
-                                    <div class="modal-body" style="overflow: auto; max-height: 70vh;">
-                                        ${tableHtml}
-                                        <div style="margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 6px;">
-                                            <strong>Total Lines:</strong> ${data.line_count} | 
-                                            <strong>Total Items:</strong> ${data.item_count}
-                                        </div>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-secondary" onclick="closePreviewModal()">Close</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    document.body.insertAdjacentHTML('beforeend', modalHtml);
-                } else {
-                    alert('Error loading preview: ' + (data.error || 'Unknown error'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error loading preview');
-            });
-    }
-
+    
     // Preview CSV file
-    function previewCSV(poId) {
-        fetch(`/stock-take/boards-po/${poId}/preview-csv/`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Build table HTML
-                    let tableHtml = '<div style="overflow-x: auto;"><table id="previewTable" class="table table-striped" style="font-size: 11px;"><thead><tr>';
-                    
-                    // Header row
-                    data.header.forEach(col => {
-                        tableHtml += `<th style="white-space: nowrap; padding: 6px;">${col || '&nbsp;'}</th>`;
-                    });
-                    tableHtml += '</tr></thead><tbody>';
-                    
-                    // Data rows
-                    data.rows.forEach((row, rowIndex) => {
-                        tableHtml += '<tr>';
-                        row.forEach((cell, cellIndex) => {
-                            tableHtml += `<td contenteditable="true" data-row="${rowIndex}" data-col="${cellIndex}" style="white-space: nowrap; padding: 6px; cursor: text;">${cell || ''}</td>`;
-                        });
-                        tableHtml += '</tr>';
-                    });
-                    tableHtml += '</tbody></table></div>';
-                    
-                    const modalHtml = `
-                        <div class="modal show" id="previewPNXModal" style="display: block;">
-                            <div class="modal-overlay" onclick="closePreviewModal()"></div>
-                            <div class="modal-dialog" style="max-width: 95%;">
-                                <div class="modal-content-csv-table">
-                                    <div class="modal-header">
-                                        <h3>CSV Preview - ${data.po_number}</h3>
-                                        <button type="button" class="modal-close" onclick="closePreviewModal()">✕</button>
-                                    </div>
-                                    <div class="modal-body" style="overflow: auto; max-height: 70vh;">
-                                        ${tableHtml}
-                                        <div style="margin-top: 16px; padding: 12px; background: var(--bg-secondary); border-radius: 6px;">
-                                            <strong>Total Lines:</strong> ${data.line_count} | 
-                                            <strong>Total Items:</strong> ${data.item_count}
-                                        </div>
-                                    </div>
-                                    <div class="modal-footer">
-                                        <button type="button" class="btn btn-secondary" onclick="closePreviewModal()">Close</button>
-                                        <button type="button" class="btn btn-success" onclick="savePreview(${poId}, 'csv')">Save Changes</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    document.body.insertAdjacentHTML('beforeend', modalHtml);
-                } else {
-                    alert('Error loading preview: ' + (data.error || 'Unknown error'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error loading preview');
-            });
-    }
-
+    
     // Generate CSV file from PNX
-    function generateCSV(poId) {
-        if (!confirm('Generate CSV file from PNX? This will create a comma-delimited version of the boards order.')) {
-            return;
-        }
-
-        fetch(`/stock-take/boards-po/${poId}/generate-csv/`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                alert('CSV file generated successfully!');
-                location.reload();
-            } else {
-                alert('Error generating CSV: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('Error generating CSV');
-        });
-    }
-
+    
     // Customer Search and Designer Management
     document.addEventListener('DOMContentLoaded', function() {
         // Customer Search Functionality

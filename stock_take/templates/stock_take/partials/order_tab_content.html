@@ -2545,10 +2545,6 @@ function confirmGenerateAccessoriesCSV() {
 }
 
 // Open Add PO Modal
-function openAddPOModal() {
-    document.getElementById('add-po-form').reset();
-    openModal('addPOModal');
-}
 
 // Toggle Customer Edit Mode
 function toggleCustomerEdit() {
@@ -2599,229 +2595,18 @@ function pullAnthillDates(orderId) {
 }
 
 // Save Customer Info
-function saveCustomerInfo(orderId) {
-    const data = {
-        first_name: document.getElementById('first-name-input').value,
-        last_name: document.getElementById('last-name-input').value,
-        anthill_id: document.getElementById('anthill-id-input').value,
-        address: document.getElementById('address-input').value,
-        postcode: document.getElementById('postcode-input').value
-    };
-    
-    fetch(`/order/${orderId}/update-customer/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(result => {
-        if (result.success) {
-            // Update display values
-            document.getElementById('customer-name-display').textContent = `${data.first_name} ${data.last_name}`;
-            document.getElementById('anthill-id-display').textContent = data.anthill_id || 'Not specified';
-            document.getElementById('address-display').textContent = data.address || 'Not specified';
-            document.getElementById('postcode-display').textContent = data.postcode || 'Not specified';
-            
-            // Toggle back to display mode
-            toggleCustomerEdit();
-            showAlert('Customer information updated successfully!', 'success');
-        } else {
-            showAlert('Error updating customer information', 'danger');
-        }
-    })
-    .catch(error => {
-        showAlert('Error updating customer information', 'danger');
-    });
-}
 
 // Save Sale Info
-function saveSaleInfo(orderId) {
-    const designerSelect = document.getElementById('designer-input');
-    const designerId = designerSelect.value;
-    const designerName = designerSelect.options[designerSelect.selectedIndex].text;
-    
-    const data = {
-        sale_number: document.getElementById('sale-number-input').value,
-        customer_number: document.getElementById('customer-number-input').value,
-        designer_id: designerId,
-        order_date: document.getElementById('order-date-input').value,
-        fit_date: document.getElementById('fit-date-input').value,
-        total_value_inc_vat: document.getElementById('total-value-input').value
-    };
-    
-    fetch(`/order/${orderId}/update-sale/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(result => {
-        if (result.success) {
-            // Update display values (guard each — some IDs only exist in the full page)
-            const setEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-            setEl('sale-number-display', data.sale_number);
-            setEl('customer-number-display', data.customer_number);
-            setEl('designer-display', designerId ? designerName : 'Not assigned');
-            
-            // Format dates for display
-            const orderDateVal = data.order_date;
-            const fitDateVal = data.fit_date;
-            setEl('order-date-display', orderDateVal
-                ? new Date(orderDateVal).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'})
-                : 'Not set');
-            setEl('fit-date-display', fitDateVal
-                ? new Date(fitDateVal).toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'})
-                : 'Not set');
-            
-            // Update total value displays
-            const totalValue = parseFloat(data.total_value_inc_vat) || 0;
-            const excVat = totalValue / 1.2;
-            setEl('total-value-display', '£' + totalValue.toFixed(2));
-            setEl('total_value_inc_vat_display', '£' + totalValue.toFixed(2));
-            setEl('total_value_exc_vat_display', '£' + excVat.toFixed(2));
-            
-            // Toggle back to display mode
-            toggleSaleEdit();
-            showAlert('Sale information updated successfully!', 'success');
-        } else {
-            showAlert('Error updating sale information: ' + (result.error || 'Unknown error'), 'danger');
-        }
-    })
-    .catch(error => {
-        showAlert('Error updating sale information: ' + error.message, 'danger');
-    });
-}
 
 // Designer inline management functions
-function toggleAddDesignerInline() {
-    const row = document.getElementById('new-designer-inline');
-    if (row.style.display === 'none' || row.style.display === '') {
-        row.style.display = 'flex';
-        document.getElementById('new-designer-name-inline').focus();
-    } else {
-        row.style.display = 'none';
-        document.getElementById('new-designer-name-inline').value = '';
-    }
-}
 
-function cancelAddDesignerInline() {
-    document.getElementById('new-designer-inline').style.display = 'none';
-    document.getElementById('new-designer-name-inline').value = '';
-}
 
-function saveNewDesignerInline() {
-    const designerName = document.getElementById('new-designer-name-inline').value.trim();
-    
-    if (!designerName) {
-        showAlert('Please enter a designer name', 'warning');
-        return;
-    }
-    
-    fetch('/add-designer/', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        },
-        body: JSON.stringify({ name: designerName })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            // Add new option to designer dropdown and select it
-            const designerSelect = document.getElementById('designer-input');
-            const option = new Option(data.designer.name, data.designer.id, true, true);
-            designerSelect.add(option);
-            
-            // Hide the input row
-            document.getElementById('new-designer-inline').style.display = 'none';
-            document.getElementById('new-designer-name-inline').value = '';
-            
-            showAlert('Designer added successfully!', 'success');
-        } else {
-            showAlert('Error: ' + (data.error || 'Failed to add designer'), 'danger');
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        showAlert('Error adding designer', 'danger');
-    });
-}
 
 // Update Order Type
-function updateOrderType(selectElement, orderId) {
-    const orderType = selectElement.value;
-    fetch(`/order/${orderId}/update-order-type/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        },
-        body: JSON.stringify({order_type: orderType})
-    })
-    .then(response => response.json())
-    .then(result => {
-        if (result.success) {
-            showAlert('Order type updated successfully!', 'success');
-            // Update select styling based on type
-            selectElement.style.borderColor = orderType === 'sale' ? '#10b981' : orderType === 'remedial' ? '#f59e0b' : '#ef4444';
-            selectElement.style.color = 'white';
-            selectElement.style.background = orderType === 'sale' ? '#10b981' : orderType === 'remedial' ? '#f59e0b' : '#ef4444';
-        } else {
-            showAlert('Error updating order type', 'danger');
-        }
-    })
-    .catch(error => {
-        showAlert('Error updating order type', 'danger');
-    });
-}
 
 // ─── Boards PO search-based combo ─────────────────────────────────────────
 let _boardsPOSearchTimer = null;
 
-function searchBoardsPO(query) {
-    clearTimeout(_boardsPOSearchTimer);
-    const resultsDiv = document.getElementById('boards-po-results');
-
-    if (query.length < 2) {
-        resultsDiv.style.display = 'none';
-        return;
-    }
-
-    _boardsPOSearchTimer = setTimeout(() => {
-        fetch(`{% url 'purchase_order_search' %}?q=${encodeURIComponent(query)}`)
-            .then(r => r.json())
-            .then(data => {
-                resultsDiv.innerHTML = '';
-                if (data.results.length === 0) {
-                    resultsDiv.innerHTML = '<div class="boards-po-result-item boards-po-empty">No purchase orders found</div>';
-                    resultsDiv.style.display = 'block';
-                    return;
-                }
-                data.results.forEach(po => {
-                    const item = document.createElement('div');
-                    item.className = 'boards-po-result-item';
-                    item.innerHTML = `
-                        <span class="boards-po-result-number">${po.display_number}</span>
-                        <span class="boards-po-result-meta">${po.supplier_name}${po.project_number ? ' · ' + po.project_number : ''}</span>
-                        <span class="boards-po-result-status badge-${(po.status || 'draft').toLowerCase()}">${po.status}</span>
-                    `;
-                    item.addEventListener('click', () => selectBoardsPO({{ order.id }}, po));
-                    resultsDiv.appendChild(item);
-                });
-                resultsDiv.style.display = 'block';
-            })
-            .catch(() => {
-                resultsDiv.style.display = 'none';
-            });
-    }, 250);
-}
 
 function selectBoardsPO(orderId, po) {
     const input = document.getElementById('boards-po-search');
@@ -4409,13 +4194,6 @@ function openAddOSDoorModal(poNumber) {
 // Track active PO for Paste OS Door modal
 let _osdActivePo = '';
 
-function openPasteOSDoorModal(poNumber) {
-    _osdActivePo = poNumber || '';
-    const field = document.getElementById('id_po_number');
-    if (field && poNumber) field.value = poNumber;
-    switchOSDModalTab('paste');
-    openModal('addOSDoorModal');
-}
 
 function switchOSDModalTab(tab) {
     const newTab = document.getElementById('osd-modal-new-tab');
@@ -4441,7 +4219,6 @@ function switchOSDModalTab(tab) {
     }
 }
 
-function toggleOSDKebab(btn) { toggleKebab(btn, window.event); }
 
 let _apoPoSearchTimers = {};
 
@@ -4557,16 +4334,6 @@ function updateEdgingDiagram() {
     document.getElementById('edging-edge-left').classList.toggle('active', left);
 }
 
-function stepInput(id, dir) {
-    const el = document.getElementById(id);
-    const isCount = id.includes('count');
-    const step = isCount ? 1 : 1;
-    const min = isCount ? 1 : 0;
-    const cur = parseFloat(el.value) || 0;
-    const next = cur + step * dir;
-    if (next >= min) el.value = isCount ? Math.round(next) : parseFloat(next.toFixed(4));
-    el.dispatchEvent(new Event('input'));
-}
 
 /**
  * Get the most common material name from existing items in the given PO.
@@ -5198,33 +4965,6 @@ function openBoardPreview(lh, rh, bw, te) {
 }
 
 // Regenerate PNX and CSV files from database items
-function regenerateBoardsFiles() {
-    if (!confirm('This will regenerate the PNX and CSV files from the database records and upload them to storage. Continue?')) {
-        return;
-    }
-
-    const orderId = {{ order.id }};
-    fetch(`/order/${orderId}/regenerate-boards-files/`, {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json'
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showAlert(data.message, 'success');
-            setTimeout(() => location.reload(), 1500);
-        } else {
-            showAlert(data.error || 'Failed to regenerate files', 'danger');
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        showAlert('Error regenerating files', 'danger');
-    });
-}
 
 // Update PO - regenerate PNX/CSV files and update PO attachments
 let _pendingUpdateBoardsPOId = null;
@@ -5287,31 +5027,6 @@ function confirmUpdateBoardsPO() {
 }
 
 // Reimport PNX items from file
-function reimportPNX(boardsPoId) {
-    if (!confirm('This will delete all current PNX items and re-import them from the PNX file. Continue?')) {
-        return;
-    }
-    
-    fetch(`/stock-take/boards-po/${boardsPoId}/reimport-pnx/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        }
-    })
-    .then(response => response.json())
-    .then(result => {
-        if (result.success) {
-            showAlert(`Successfully reimported ${result.count} items from PNX file`, 'success');
-            setTimeout(() => location.reload(), 1500);
-        } else {
-            showAlert('Error reimporting PNX: ' + result.error, 'danger');
-        }
-    })
-    .catch(error => {
-        showAlert('Error reimporting PNX', 'danger');
-    });
-}
 
 // Close modals on Escape key
 document.addEventListener('keydown', function(e) {
@@ -5811,49 +5526,8 @@ if (document.readyState === 'loading') {
     initWaitingProgressBar();
 }
 
-function toggleStageTasks() {
-    const content = document.getElementById('stage-tasks-content');
-    const toggle = document.querySelector('.stage-tasks-toggle');
-    if (!content) return;
-    const isCollapsed = content.classList.contains('collapsed');
-    content.classList.toggle('collapsed', !isCollapsed);
-    content.classList.toggle('expanded', isCollapsed);
-    toggle.classList.toggle('expanded', isCollapsed);
-}
 
-function updateWorkflowStage(orderId, stageId) {
-    fetch(`/order/${orderId}/update-workflow-stage/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        },
-        body: `stage_id=${stageId}`
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showAlert(data.message, 'success');
-            setTimeout(() => location.reload(), 1000);
-        } else {
-            showAlert('Error: ' + data.error, 'danger');
-        }
-    })
-    .catch(error => {
-        console.error('Error updating stage:', error);
-        showAlert('Error updating workflow stage', 'danger');
-    });
-}
 
-function calculateExcVat() {
-    const incVatInput = document.getElementById('total-value-input');
-    if (!incVatInput) return; // Field only exists in edit mode
-    
-    const incVat = parseFloat(incVatInput.value) || 0;
-    const excVat = incVat / 1.2;
-    document.getElementById('total_value_exc_vat_display').textContent = '£' + excVat.toFixed(2);
-    calculateProfit();
-}
 
 function calculateProfit() {
     let incVat = 0;
@@ -5958,80 +5632,7 @@ function saveFinancials(orderId) {
     });
 }
 
-function recalculateFinancials(orderId) {
-    // Disable the button and show loading state
-    const btn = event.target.closest('button');
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="bi bi-hourglass"></i> Recalculating...';
-    
-    fetch(`/order/${orderId}/recalculate-financials/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            showAlert('Financial data recalculated successfully!', 'success');
-            // Update all displays with new values
-            if (data.materials_cost !== undefined) {
-                document.getElementById('materials_cost_display').textContent = '£' + parseFloat(data.materials_cost).toFixed(2);
-            }
-            if (data.installation_cost !== undefined) {
-                document.getElementById('installation_cost_display').textContent = '£' + parseFloat(data.installation_cost).toFixed(2);
-            }
-            if (data.manufacturing_cost !== undefined) {
-                document.getElementById('manufacturing_cost_display').textContent = '£' + parseFloat(data.manufacturing_cost).toFixed(2);
-            }
-            if (data.total_value_exc_vat !== undefined) {
-                document.getElementById('total_value_exc_vat_display').textContent = '£' + parseFloat(data.total_value_exc_vat).toFixed(2);
-            }
-            
-            // Recalculate profit with new values
-            calculateProfit();
-            
-            // Reload page after a short delay to show updated progress bars
-            setTimeout(() => location.reload(), 1500);
-        } else {
-            showAlert('Error: ' + data.error, 'danger');
-            btn.disabled = false;
-            btn.innerHTML = originalHtml;
-        }
-    })
-    .catch(error => {
-        console.error('Error recalculating financials:', error);
-        showAlert('Error recalculating financial information', 'danger');
-        btn.disabled = false;
-        btn.innerHTML = originalHtml;
-    });
-}
 
-function updateFinancial(orderId, field, value) {
-    fetch(`/order/${orderId}/update-financial/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        },
-        body: JSON.stringify({ field: field, value: value })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            // Reload to update percentages
-            location.reload();
-        } else {
-            showAlert('Error: ' + data.error, 'danger');
-        }
-    })
-    .catch(error => {
-        console.error('Error updating financial:', error);
-        showAlert('Error updating financial information', 'danger');
-    });
-}
 
 function updateTaskCheckbox(orderId, taskId, checked) {
     fetch(`/order/${orderId}/task/${taskId}/update/`, {
@@ -6527,76 +6128,6 @@ function updateDeleteButtonVisibility(boardsPoId) {
 }
 
 // Timesheet Functions
-function openTimesheetModal(type) {
-    const title = document.getElementById('timesheet-modal-title');
-    const typeInput = document.getElementById('timesheet_type');
-    const fitterGroup = document.getElementById('fitter-group');
-    const installationWorkerGroup = document.getElementById('installation-worker-group');
-    const workerGroup = document.getElementById('worker-group');
-    const expenseGroup = document.getElementById('add-expense-group');
-    const poGroup = document.getElementById('po-group');
-    const hoursGroup = document.getElementById('hours-group');
-    
-    // Get staging elements
-    const stagingSection = document.getElementById('manufacturing-staging-section');
-    const addToStagingBtn = document.getElementById('add-to-staging-btn');
-    const saveAllBtn = document.getElementById('save-all-timesheets-btn');
-    const saveSingleBtn = document.getElementById('save-single-timesheet-btn');
-    
-    typeInput.value = type;
-    
-    // Reset selects and enable them
-    document.getElementById('timesheet_fitter').value = '';
-    document.getElementById('timesheet_fitter').disabled = false;
-    document.getElementById('timesheet_po_search').value = '';
-    document.getElementById('timesheet_po_id').value = '';
-    if (document.getElementById('timesheet_po_results')) {
-        document.getElementById('timesheet_po_results').style.display = 'none';
-    }
-    if (document.getElementById('timesheet_installation_worker')) {
-        document.getElementById('timesheet_installation_worker').value = '';
-        document.getElementById('timesheet_installation_worker').disabled = false;
-    }
-    
-    if (type === 'installation') {
-        title.textContent = 'Add Installation Timesheet';
-        fitterGroup.style.display = 'block';
-        installationWorkerGroup.style.display = 'block';
-        workerGroup.style.display = 'none';
-        expenseGroup.style.display = 'block';
-        poGroup.style.display = 'block';
-        hoursGroup.style.display = 'block';
-        document.getElementById('hours-optional-label').style.display = 'inline';
-        document.getElementById('timesheet_hours').required = false;
-        // Show single save button, hide staging
-        stagingSection.style.display = 'none';
-        addToStagingBtn.style.display = 'none';
-        saveAllBtn.style.display = 'none';
-        saveSingleBtn.style.display = 'inline-block';
-        loadFitters();
-        loadInstallationWorkers();
-    } else {
-        title.textContent = 'Add Manufacturing Timesheet';
-        fitterGroup.style.display = 'none';
-        installationWorkerGroup.style.display = 'none';
-        workerGroup.style.display = 'block';
-        expenseGroup.style.display = 'none';
-        poGroup.style.display = 'none';
-        hoursGroup.style.display = 'block';
-        document.getElementById('hours-optional-label').style.display = 'none';
-        document.getElementById('timesheet_hours').required = true;
-        // Show staging section and buttons for manufacturing
-        stagingSection.style.display = 'block';
-        addToStagingBtn.style.display = 'inline-block';
-        saveAllBtn.style.display = 'inline-block';
-        saveSingleBtn.style.display = 'none';
-        // Clear staging table
-        clearStagingTable();
-        loadFactoryWorkers();
-    }
-    
-    openModal('addTimesheetModal');
-}
 
 function handleInstallationPersonSelect(selectedField) {
     const fitterSelect = document.getElementById('timesheet_fitter');
@@ -6810,7 +6341,6 @@ function loadFitters() {
         .catch(error => console.error('Error loading fitters:', error));
 }
 
-function loadHelpers() { /* removed — add helpers as separate fitter timesheet entries */ }
 
 function loadFactoryWorkers() {
     fetch('/api/get-factory-workers/')
@@ -7348,29 +6878,6 @@ function saveOsDoorInlineEdit(osDoorId) {
     .catch(() => showAlert('Error saving changes', 'danger'));
 }
 
-function deleteOsDoor(osDoorId) {
-    if (!confirm('Delete this OS door? This cannot be undone.')) return;
-    fetch('/stock-take/delete-os-doors-batch/', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
-        },
-        body: JSON.stringify({ ids: [osDoorId] })
-    })
-    .then(r => r.json())
-    .then(result => {
-        if (result.success) {
-            const row = document.querySelector(`tr[data-os-door-id="${osDoorId}"]`);
-            _revealOsDoorsUpdateBtn(row);
-            if (row) row.remove();
-            showAlert('Door deleted.', 'success');
-        } else {
-            showAlert('Error: ' + (result.error || ''), 'danger');
-        }
-    })
-    .catch(() => showAlert('Error deleting door', 'danger'));
-}
 
 // ─── OS Doors select / bulk delete ───────────────────────────────────────────
 function updateOSDActionButtons(tableKey) {
@@ -8068,11 +7575,6 @@ function updateEggerMaterialName() {
     }
 }
 
-function openBoardEggerLightbox(url) {
-    const lb = document.getElementById('boardEggerLightbox');
-    document.getElementById('boardEggerLightboxImg').src = url;
-    lb.style.display = 'flex';
-}
 
 function closeBoardEggerLightbox() {
     document.getElementById('boardEggerLightbox').style.display = 'none';

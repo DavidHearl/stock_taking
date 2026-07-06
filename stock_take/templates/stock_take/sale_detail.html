@@ -1412,10 +1412,7 @@
             const ORDER_ID = {% if order %}{{ order.id }}{% else %}null{% endif %};
             const INVOICE_DETAIL_URL = "{% url 'invoices_list' %}";
 
-            function _activePanel() {
-                return document.querySelector('.detail-tab-panel.active') || document;
-            }
-
+            
             // Roots that participate in page edit mode: the active tab panel plus the
             // persistent summary column (which holds the Financial Summary).
             function _editScopes() {
@@ -2749,41 +2746,6 @@ document.addEventListener('DOMContentLoaded', function () {
 // ─── Link / Unlink Order to Sale ────────────────────────────────────────
 let _saleOrderSearchTimer = null;
 
-function searchOrderForSale(query) {
-    clearTimeout(_saleOrderSearchTimer);
-    const resultsDiv = document.getElementById('sale-order-results');
-    if (!resultsDiv) return;
-
-    if (query.length < 2) {
-        resultsDiv.style.display = 'none';
-        return;
-    }
-
-    _saleOrderSearchTimer = setTimeout(() => {
-        fetch(`{% url 'order_search' %}?q=${encodeURIComponent(query)}`)
-            .then(r => r.json())
-            .then(data => {
-                resultsDiv.innerHTML = '';
-                if (data.results.length === 0) {
-                    resultsDiv.innerHTML = '<div class="boards-po-result-item boards-po-empty">No orders found</div>';
-                    resultsDiv.style.display = 'block';
-                    return;
-                }
-                data.results.forEach(order => {
-                    const item = document.createElement('div');
-                    item.className = 'boards-po-result-item';
-                    item.innerHTML = `
-                        <span class="boards-po-result-number">${order.sale_number}</span>
-                        <span class="boards-po-result-meta">${order.customer_name}</span>
-                    `;
-                    item.addEventListener('click', () => linkSaleToOrder(order));
-                    resultsDiv.appendChild(item);
-                });
-                resultsDiv.style.display = 'block';
-            })
-            .catch(() => { resultsDiv.style.display = 'none'; });
-    }, 250);
-}
 
 function linkSaleToOrder(order) {
     const resultsDiv = document.getElementById('sale-order-results');
@@ -2808,27 +2770,6 @@ function linkSaleToOrder(order) {
     .catch(err => alert('Error linking order: ' + err.message));
 }
 
-function unlinkSaleOrder() {
-    if (!confirm('Remove the order link from this sale?')) return;
-
-    fetch(`/api/sale/{{ sale.pk }}/link-order/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': '{{ csrf_token }}'
-        },
-        body: JSON.stringify({ order_id: null })
-    })
-    .then(r => r.json())
-    .then(result => {
-        if (result.success) {
-            location.reload();
-        } else {
-            alert('Error: ' + (result.error || 'Unknown'));
-        }
-    })
-    .catch(err => alert('Error unlinking order: ' + err.message));
-}
 
 // Close dropdown when clicking outside
 document.addEventListener('click', function(e) {
@@ -3054,19 +2995,6 @@ function confirmLinkBoardsPO(orderId, po) {
 }
 
 // ── Invoice detail toggle ────────────────────────────────────────
-function toggleInvoiceDetail(invoiceId) {
-    const detail = document.getElementById('invoice-detail-' + invoiceId);
-    const chevron = document.getElementById('chevron-' + invoiceId);
-    if (detail.style.display === 'none') {
-        detail.style.display = 'block';
-        chevron.classList.remove('bi-chevron-down');
-        chevron.classList.add('bi-chevron-up');
-    } else {
-        detail.style.display = 'none';
-        chevron.classList.remove('bi-chevron-up');
-        chevron.classList.add('bi-chevron-down');
-    }
-}
 
 // ── Client-side filter for the Invoices card ───────────────────────
 function filterSaleInvoices(query) {
