@@ -844,10 +844,11 @@ def load_order_indicators_ajax(request):
 
     # ---------- Per-category status (Boards / Accessories / OS Doors / Glass) ----------
     # Status values:
-    #   'ordered' (green tick)   – present and ordered / from stock
-    #   'added'   (amber tick)   – present but not yet ordered
-    #   'missing' (red cross)    – genuinely required but absent
-    #   'na'      (grey N/A)     – explicitly not required for this order
+    #   'ordered' (green pill)   – present and ordered / from stock
+    #   'added'   (blue pill)    – BOM generated / present but not yet ordered
+    #   'short'   (amber pill)   – BOM generated but items are short
+    #   'missing' (red pill)     – genuinely required but nothing generated yet
+    #   'na'      (grey pill)    – explicitly not required for this order
     #   'none'    (grey dash)    – no info yet (order not processed)
     # We must NOT show a red "missing" cross just because a section is empty –
     # the order may simply not have been processed yet. We only treat a section
@@ -898,7 +899,9 @@ def load_order_indicators_ajax(request):
         if o.accessories_not_required:
             ind['cat_accessories'] = 'na'
         elif ind.get('has_short'):
-            ind['cat_accessories'] = 'missing'
+            # BOM has been generated but one or more items are short — distinct
+            # from 'missing' (nothing generated at all).
+            ind['cat_accessories'] = 'short'
         elif non_glass_total > 0:
             ind['cat_accessories'] = 'ordered' if non_glass_ordered >= non_glass_total else 'added'
         elif processed:
