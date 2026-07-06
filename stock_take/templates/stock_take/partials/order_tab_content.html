@@ -58,8 +58,13 @@
                                 <i class="bi bi-check-lg"></i> Save Changes
                             </button>
                         {% endif %}
+                        {% if bpo_data.purchase_order and bpo_data.pnx_items %}
+                        <button type="button" class="btn btn-sm btn-update-po btn-update-boards-po{% if not bpo_data.needs_po_update %} hidden{% endif %}" data-boards-po-id="{{ bpo_data.po.id }}" title="Regenerate board files and update the Purchase Order" onclick="updateBoardsPO({{ bpo_data.po.id }})">
+                            <i class="bi bi-arrow-repeat"></i> Update Files &amp; PO
+                        </button>
+                        {% endif %}
                         <button type="button" class="btn btn-sm btn-add-icon" data-boards-po-id="{{ bpo_data.po.id }}" data-is-angled="{{ bpo_data.po.is_angled|yesno:'true,false' }}" data-po-number="{{ bpo_data.po.po_number }}" onclick="openAddBoardModal({{ bpo_data.po.id }})" title="Add Board">
-                            <i class="bi bi-plus-lg"></i>
+                            Add <i class="bi bi-plus-lg"></i>
                         </button>
                         <div class="kebab-menu" id="kebab-{{ bpo_data.po.id }}">
                             <button type="button" class="kebab-trigger" onclick="toggleKebab(this, event);" title="More actions">
@@ -116,17 +121,11 @@
                                     <i class="bi bi-stars"></i> Generate CAD
                                 </button>
                                 {% endif %}
-                                {% if bpo_data.pnx_items and bpo_data.po.po_number %}
-                                    {% if bpo_data.purchase_order %}
-                                    <button type="button" class="kebab-item" onclick="closeBoardKebab(this); updateBoardsPO({{ bpo_data.po.id }})">
-                                        <i class="bi bi-arrow-repeat"></i> Update Files & PO
-                                    </button>
-                                    {% else %}
+                                {% if bpo_data.pnx_items and bpo_data.po.po_number and not bpo_data.purchase_order %}
                                     <a href="{% url 'create_boards_purchase_order' order.id %}?boards_po_id={{ bpo_data.po.id }}" class="kebab-item"
                                        onclick="return confirm('Create a local Purchase Order for {{ bpo_data.po.po_number }} and attach the board files?');">
                                         <i class="bi bi-file-earmark-plus"></i> Create PO
                                     </a>
-                                    {% endif %}
                                 {% endif %}
                                 {% if not bpo_data.is_primary %}
                                 <button type="button" class="kebab-item kebab-item-danger" onclick="closeBoardKebab(this); removeAdditionalBoardsPO({{ order.id }}, {{ bpo_data.po.id }})">
@@ -378,7 +377,7 @@
                             <i class="bi bi-eye-slash"></i> Stock Detail
                         </button>
                         <button class="btn btn-sm btn-add-icon" type="button" onclick="openModal('addItemModal')" title="Add Item">
-                            <i class="bi bi-plus-lg"></i>
+                            Add <i class="bi bi-plus-lg"></i>
                         </button>
                         {% if order.original_csv %}
                         <button class="btn btn-sm btn-update-files-po" type="button" onclick="regenerateCSV({{ order.id }})">
@@ -530,7 +529,7 @@
                         <i class="bi bi-trash"></i> <span>0</span>
                     </button>
                     <button class="btn btn-sm btn-add-icon" type="button" onclick="openAddOSDoorModal('')" title="Add OS Door">
-                        <i class="bi bi-plus-lg"></i>
+                        Add <i class="bi bi-plus-lg"></i>
                     </button>
                     <div class="kebab-menu">
                         <button type="button" class="kebab-trigger" title="More options" onclick="toggleKebab(this, event)">
@@ -689,12 +688,12 @@
                     <button type="button" class="btn btn-sm btn-danger hidden" id="delete-osd-selected-{{ apo.workguru_id }}" title="Delete selected">
                         <i class="bi bi-trash"></i> <span>0</span>
                     </button>
-                    <button type="button" class="btn btn-sm btn-update-po" title="Sync to Purchase Order"
+                    <button type="button" class="btn btn-sm btn-update-po{% if not apo.needs_po_update %} hidden{% endif %}" title="Sync to Purchase Order"
                             onclick="syncOSDoorsPO({{ order.id }}, {{ apo.workguru_id }}, 'os-doors-table-{{ apo.workguru_id }}', this)">
                         <i class="bi bi-arrow-repeat"></i> Update PO
                     </button>
                     <button class="btn btn-sm btn-add-icon" type="button" onclick="openAddOSDoorModal('{{ apo.display_number }}')" title="Add OS Door">
-                        <i class="bi bi-plus-lg"></i>
+                        Add <i class="bi bi-plus-lg"></i>
                     </button>
                     <div class="kebab-menu">
                         <button type="button" class="kebab-trigger" title="More options" onclick="toggleKebab(this, event)">
@@ -851,7 +850,7 @@
                             <i class="bi bi-file-earmark-plus"></i>
                         </button>
                         <button class="btn btn-sm btn-add-icon" type="button" onclick="openAddOSDoorModal('')" title="Add OS Door">
-                            <i class="bi bi-plus-lg"></i>
+                            Add <i class="bi bi-plus-lg"></i>
                         </button>
                     </div>
                 </div>
@@ -872,7 +871,7 @@
                 </h3>
                 <div class="header-actions">
                     <button class="btn btn-sm btn-add-icon" type="button" onclick="openModal('addGlassModal')" title="Add Glass">
-                        <i class="bi bi-plus-lg"></i>
+                        Add <i class="bi bi-plus-lg"></i>
                     </button>
                     <button type="button" class="btn btn-sm btn-save-dims btn-save-changes d-none-init" id="save-glass-changes">
                         <i class="bi bi-save"></i> Save Changes
@@ -1009,7 +1008,7 @@
                     <h3>Glass</h3>
                     <div class="header-actions">
                         <button class="btn btn-sm btn-add-icon" type="button" onclick="openModal('addGlassModal')" title="Add Glass">
-                            <i class="bi bi-plus-lg"></i>
+                            Add <i class="bi bi-plus-lg"></i>
                         </button>
                     </div>
                 </div>
@@ -3229,6 +3228,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     });
                     pnxDimensionChangesByPO[boardsPoId] = {};
                     saveBtn.style.display = 'none';
+                    // Files were regenerated and pushed to the PO — board list now matches, hide the Update button.
+                    const boardsUpdateBtn = document.querySelector(`.btn-update-boards-po[data-boards-po-id="${boardsPoId}"]`);
+                    if (boardsUpdateBtn) boardsUpdateBtn.classList.add('hidden');
                 } else {
                     showAlert('Error updating PNX items: ' + result.error, 'danger');
                 }
@@ -7069,7 +7071,8 @@ function syncOSDoorsPO(orderId, poDisplayNumber, tableId, btnEl) {
         if (result.success) {
             showAlert(`PO ${result.po_number} updated — ${result.line_count} line(s), total £${parseFloat(result.total).toFixed(2)}`, 'success');
             osDoorsChanges = {}; // clear pending saves
-            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Update PO'; }
+            // Door list now matches the PO — hide the Update button until it drifts again.
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Update PO'; btn.classList.add('hidden'); }
             const saveBtn = document.getElementById('save-os-doors-changes');
             if (saveBtn) saveBtn.style.display = 'none';
         } else {
@@ -7194,6 +7197,18 @@ function toggleBoardRowEdit(btn) {
 }
 
 // ─── OS Doors quantity stepper ────────────────────────────────────────────
+// Reveal the "Update PO" button for the OS Doors card that contains `fromEl`.
+// Called after an inline door edit/save/delete so the user can push the change to
+// the PO. The button is hidden again (server-side or on sync success) once the
+// door list matches the PO.
+function _revealOsDoorsUpdateBtn(fromEl) {
+	if (!fromEl) return;
+	const card = fromEl.closest('.osd-card');
+	if (!card) return;
+	const btn = card.querySelector('.btn-update-po');
+	if (btn) btn.classList.remove('hidden');
+}
+
 function osDoorAdjustQty(osDoorId, delta) {
     const row = document.querySelector(`tr[data-os-door-id="${osDoorId}"]`);
     if (!row) return;
@@ -7225,7 +7240,11 @@ function _osDoorSaveQty(osDoorId, qty) {
     })
     .then(r => r.json())
     .then(result => {
-        if (!result.success) showAlert('Error saving quantity: ' + (result.error || ''), 'danger');
+        if (result.success) {
+            _revealOsDoorsUpdateBtn(document.querySelector(`tr[data-os-door-id="${osDoorId}"]`));
+        } else {
+            showAlert('Error saving quantity: ' + (result.error || ''), 'danger');
+        }
     })
     .catch(() => showAlert('Error saving quantity', 'danger'));
 }
@@ -7320,6 +7339,7 @@ function saveOsDoorInlineEdit(osDoorId) {
             if (viewActions) viewActions.style.display = 'flex';
             if (editActions) editActions.style.display = 'none';
             recalcOsDoorTotal(row);
+            _revealOsDoorsUpdateBtn(row);
             showAlert('Saved', 'success');
         } else {
             showAlert('Error: ' + (result.error || ''), 'danger');
@@ -7342,6 +7362,7 @@ function deleteOsDoor(osDoorId) {
     .then(result => {
         if (result.success) {
             const row = document.querySelector(`tr[data-os-door-id="${osDoorId}"]`);
+            _revealOsDoorsUpdateBtn(row);
             if (row) row.remove();
             showAlert('Door deleted.', 'success');
         } else {

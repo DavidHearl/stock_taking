@@ -745,18 +745,31 @@
     {% block extra_js %}{% endblock %}
 
     <script>
-    // ── Custom number spinners (site-wide ± stepper) ──────────────
-    // Wraps every <input type="number"> in a .qty-stepper-input pill with
-    // − / + buttons, so we get consistent UX and hide native browser spinners.
+    // ── Custom number spinners (± stepper) ────────────────────────
+    // The ± stepper pill belongs on QUANTITY fields only. Every other number
+    // input (dimensions, prices, rates, VAT, discount…) is left as a plain
+    // input — native browser spinners are already hidden globally in styles.css.
     document.addEventListener('DOMContentLoaded', function() {
+        // A number input is a "quantity" field if it's explicitly marked as one
+        // (.quantity-input / .qty-step-value), it's the board table's count
+        // column, or its name/id reads as qty/quantity.
+        function isQtyInput(input) {
+            if (input.classList.contains('quantity-input')) return true;
+            if (input.classList.contains('qty-step-value')) return true;
+            if (input.classList.contains('pnx-dimension-input')) return input.getAttribute('data-field') === 'cnt';
+            // Match a qty/quantity/count token in name, id or class. Word
+            // boundaries (`[^a-z]`) keep "discount"/"account" from matching "count".
+            var key = ((input.getAttribute('name') || '') + ' ' + (input.id || '') + ' ' + (input.className || '')).toLowerCase();
+            return /(^|[^a-z])(qty|quantity|count)([^a-z]|$)/.test(key);
+        }
         document.querySelectorAll('input[type="number"]').forEach(function(input) {
             // Skip if already wrapped (legacy .pnx-spinner-wrap or new .qty-stepper-input)
             if (input.closest('.pnx-spinner-wrap')) return;
             if (input.closest('.qty-stepper-input')) return;
             if (input.classList.contains('edit-val')) return;
             if (input.classList.contains('no-pnx-spinner')) return;
-            // Board table: only QTY uses the stepper; length/width are plain number inputs.
-            if (input.classList.contains('pnx-dimension-input') && input.getAttribute('data-field') !== 'cnt') return;
+            // Steppers are for quantities only — leave everything else a plain input.
+            if (!isQtyInput(input)) return;
 
             var wrap = document.createElement('div');
             wrap.className = 'qty-stepper-input';

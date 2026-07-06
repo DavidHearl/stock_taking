@@ -4799,6 +4799,11 @@ def order_search(request):
     if len(q) < 2:
         return JsonResponse({'results': []})
 
+    # Order.sale_number has no uniqueness constraint, so a sale can have
+    # duplicate Order rows (see merge_duplicate_orders). Collapse them here so a
+    # single sale never shows as two dropdown entries. Prefer the order that
+    # actually holds the purchase orders (the survivor merge_duplicate_orders
+    # would keep); fetch extra rows to absorb any dedup before the [:20] cap.
     orders = Order.objects.filter(
         Q(sale_number__icontains=q) |
         Q(first_name__icontains=q) |
@@ -4806,10 +4811,19 @@ def order_search(request):
         Q(customer__name__icontains=q) |
         Q(customer__first_name__icontains=q) |
         Q(customer__last_name__icontains=q)
-    ).select_related('customer').order_by('-order_date')[:20]
+    ).select_related('customer').annotate(
+        po_count=Count('po_projects')
+    ).order_by('-po_count', '-order_date')
 
     results = []
+    seen_sale_numbers = set()
     for o in orders:
+        # First match per non-empty sale_number wins (highest po_count via the
+        # ordering above); blank sale numbers are never collapsed together.
+        if o.sale_number:
+            if o.sale_number in seen_sale_numbers:
+                continue
+            seen_sale_numbers.add(o.sale_number)
         name = f'{o.first_name} {o.last_name}'.strip()
         if o.customer:
             name = str(o.customer) if o.customer.name else f'{o.customer.first_name} {o.customer.last_name}'.strip()
@@ -4818,6 +4832,8 @@ def order_search(request):
             'sale_number': o.sale_number,
             'customer_name': name or 'Unknown',
         })
+        if len(results) >= 20:
+            break
 
     return JsonResponse({'results': results})
 

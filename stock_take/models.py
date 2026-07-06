@@ -487,6 +487,7 @@ class BoardsPO(models.Model):
     boards_ordered = models.BooleanField(default=False)
     from_stock = models.BooleanField(default=False, help_text='Boards for this PO were taken from existing stock')
     is_angled = models.BooleanField(default=False, help_text='Whether this PO contains angled/tapered boards')
+    pnx_files_hash = models.CharField(max_length=64, blank=True, default='', db_default='', help_text='Hash of the PNX item set the last time files were generated. Used to detect when the board list has drifted from the files attached to the PO (drives the "Update Files & PO" button).')
 
     def __str__(self):
         return self.po_number

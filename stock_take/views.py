@@ -5601,6 +5601,27 @@ def _next_generated_barcode(boards_po, partdesc, taken_barcodes):
     return next_barcode
 
 
+def compute_boards_items_hash(items):
+	"""Return a deterministic hash of the editable board-item fields for a set of
+	PNXItem instances. Used to detect when the board list has drifted from the
+	PNX/CSV files last generated for a BoardsPO. Order-independent (sorted) and
+	excludes derived/order-scoped fields (customer, ordername, articlename) so the
+	hash reflects only the board data the user actually edits."""
+	import hashlib
+	rows = []
+	for it in sorted(items, key=lambda x: ((x.barcode or ''), x.id or 0)):
+		rows.append([
+			it.barcode or '', it.matname or '',
+			str(it.cleng), str(it.cwidth), str(it.cnt),
+			it.grain or '', it.partdesc or '',
+			it.prfid1 or '', it.prfid2 or '', it.prfid3 or '', it.prfid4 or '',
+			'' if it.left_height is None else str(it.left_height),
+			'' if it.right_height is None else str(it.right_height),
+			'' if it.top_edge is None else str(it.top_edge),
+		])
+	return hashlib.sha256(json.dumps(rows, separators=(',', ':')).encode('utf-8')).hexdigest()
+
+
 def regenerate_pnx_csv_files(boards_po, linked_order=None):
     """Regenerate both PNX and CSV files from current PNX items.
     Uses Django's storage backend (ContentFile + .save()) so files are
@@ -5688,7 +5709,11 @@ def regenerate_pnx_csv_files(boards_po, linked_order=None):
     # Save CSV file via Django storage backend
     csv_filename = f'Boards_Order_{boards_po.po_number}.csv'
     boards_po.csv_file.save(csv_filename, ContentFile(csv_output.getvalue().encode('utf-8')), save=False)
-    
+
+    # Record a hash of the item set these files were generated from so the UI can
+    # detect later drift between the board list and the attached PO files.
+    boards_po.pnx_files_hash = compute_boards_items_hash(list(pnx_items))
+
     boards_po.save()
 
     # Auto-sync attachments to the linked PurchaseOrder (if one exists)
@@ -5795,7 +5820,7 @@ def update_boards_po_files(request, order_id):
         if po:
             return JsonResponse({
                 'success': True,
-                'message': f'PNX/CSV files regenerated and PO {po.display_number} attachments updated',
+                'message': f'PNX/CSV files regenerated and {po.display_number} attachments updated',
             })
         else:
             return JsonResponse({
@@ -7561,12 +7586,23 @@ def _build_order_context(order, request):
     pnx_total_cost = 0
     for idx, bpo in enumerate(all_boards_pos_list):
         items, cost = process_pnx_items(bpo, order.sale_number, price_per_sqm)
+        bpo_purchase_order = _po_lookup.get(bpo.po_number)
+        # The "Update Files & PO" button only shows when the current board list has
+        # drifted from the files last generated for this PO (or has never been
+        # generated). Files are auto-regenerated on every board edit, so a matching
+        # hash means the attached PO files are already up to date. Computed over ALL
+        # of the PO's items (not just this order's) to match what the files contain.
+        needs_files_update = False
+        if bpo_purchase_order and bpo.pnx_items.exists():
+            current_hash = compute_boards_items_hash(bpo.pnx_items.all())
+            needs_files_update = (current_hash != (bpo.pnx_files_hash or ''))
         boards_po_list.append({
             'po': bpo,
             'is_primary': (idx == 0 and order.boards_po_id == bpo.id),
             'pnx_items': items,
             'total_cost': cost,
-            'purchase_order': _po_lookup.get(bpo.po_number),
+            'purchase_order': bpo_purchase_order,
+            'needs_po_update': needs_files_update,
         })
         order_pnx_items.extend(items)
         pnx_total_cost += cost
@@ -7724,8 +7760,39 @@ def _build_order_context(order, request):
     # Attach the relevant OSDoor rows to each PO so the template can iterate them.
     _all_order_os_doors = list(order.os_doors.all())
     for _apo in all_os_doors_pos_list:
-        if _apo is not None:
-            _apo.order_os_doors = [d for d in _all_order_os_doors if d.po_number == _apo.display_number]
+        if _apo is None:
+            continue
+        _apo.order_os_doors = [d for d in _all_order_os_doors if d.po_number == _apo.display_number]
+
+        # Decide whether the "Update PO" button should show for this PO: only when
+        # the door list would produce different product lines than the PO currently
+        # holds. sync_os_doors_po rebuilds the PO's lines from the same door set, so
+        # we mirror its selection here (primary PO also picks up blank po_number
+        # doors) and compare (door_style/sku, cost, qty). Matching → hide the button.
+        if _apo.display_number == order.os_doors_po:
+            _sync_doors = [
+                d for d in _all_order_os_doors
+                if (not d.po_number) or d.po_number == order.os_doors_po
+            ]
+        else:
+            _sync_doors = _apo.order_os_doors
+        _expected_lines = sorted(
+            (
+                (d.door_style or ''),
+                (d.cost_price or Decimal('0')),
+                Decimal(str(d.quantity or 0)),
+            )
+            for d in _sync_doors
+        )
+        _actual_lines = sorted(
+            (
+                (p.sku or ''),
+                (p.order_price or Decimal('0')),
+                (p.order_quantity or Decimal('0')),
+            )
+            for p in _apo.products.all()
+        )
+        _apo.needs_po_update = (_expected_lines != _actual_lines)
 
     # Build a quick lookup of OS Door style/colour images from the library.
     os_door_style_images = {}
@@ -12720,6 +12787,13 @@ def progress_to_next_stage(request, order_id):
                             break
             
             if next_stage:
+                # Completing "Place Order or Allocate from Stock" stamps the order
+                # date as today so the manufacture/waiting count measures from the
+                # day the order was actually placed.
+                if current_stage.name == 'Place Order or Allocate from Stock':
+                    order.order_date = timezone.localdate()
+                    order.save(update_fields=['order_date'])
+
                 workflow_progress.current_stage = next_stage
                 workflow_progress.stage_started_at = timezone.now()
                 workflow_progress.save()
