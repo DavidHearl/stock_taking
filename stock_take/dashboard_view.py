@@ -29,60 +29,142 @@ def _contract_prefix_for_location(location: str) -> str:
 
 
 # ── Sales targets ──────────────────────────────────────────────────────────
-# Fixed company sales objectives, measured against fits scheduled in the period
-# (AnthillSale.sale_value bucketed by fit_date, same source as the sales cards).
-WEEKLY_SALES_TARGET = Decimal('25000')
-MONTHLY_SALES_TARGET = Decimal('100000')
-YEARLY_SALES_TARGET = Decimal('1250000')
+# Fixed company objectives. Actuals are measured off the fit calendar
+# (FitAppointment → one job per Order) with money from _orders_financials —
+# the SAME source of truth the calendar and weekly operations report use, so the
+# targets can never disagree with them. Raw AnthillSale.sale_value is NOT used:
+# it is None for open/unbilled jobs, which silently dropped them from the totals.
+WEEKLY_SALES_TARGET = Decimal('35000')
+MONTHLY_SALES_TARGET = Decimal('150000')
+YEARLY_SALES_TARGET = Decimal('2000000')
+# Fit-days objective: distinct calendar days with at least one fit, per period.
+WEEKLY_FIT_DAYS_TARGET = 10
+MONTHLY_FIT_DAYS_TARGET = 40
+YEARLY_FIT_DAYS_TARGET = 520
 
 
-def _get_target_breakdown(start_date, end_date, target, contract_prefix=''):
-	"""Break sales fitting in [start_date, end_date] into paid / outstanding vs a target.
+def _compute_sales_targets(today, contract_prefix=''):
+	"""Build the dashboard sales-target breakdowns for the periods around ``today``.
 
-	``actual`` is gross ``sale_value`` (matches the "This Week's Sales" / "Monthly
-	Sales" cards). ``paid`` is confirmed payments capped at each sale's value, and
-	``outstanding`` is the remainder, so paid + outstanding == actual. ``remaining``
-	is the shortfall against the target (0 once the target is met or beaten).
+	Returns a list of period dicts (last/this/next week, this month, this year),
+	each with target / actual / paid / outstanding / remaining / count / pct. The
+	monthly entry also carries a fit-days breakdown (distinct fit days vs target).
+
+	Fits come from the calendar (one job per order, collapsing multi-fitter and
+	multi-day appointments) and money from ``_orders_financials`` so the figures
+	match the calendar and the weekly operations report exactly.
 	"""
-	payments_subquery = Subquery(
-		AnthillPayment.objects.filter(sale=OuterRef('pk'), ignored=False)
-		.values('sale')
-		.annotate(total=Sum('amount'))
-		.values('total'),
-		output_field=DecimalField(max_digits=14, decimal_places=2),
-	)
-	qs = (
-		AnthillSale.objects
-		.filter(fit_date__gte=start_date, fit_date__lte=end_date, sale_value__gt=0)
-		.exclude(status__in=['cancelled', 'dead'])
-		.annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
-		.values('sale_value', 'total_paid')
-	)
-	if contract_prefix:
-		qs = qs.filter(contract_number__istartswith=contract_prefix)
+	from calendar import monthrange
+	from .models import FitAppointment
+	from .customer_views import _orders_financials
 
-	actual = Decimal('0')
-	paid = Decimal('0')
-	count = 0
-	for row in qs:
-		value = row['sale_value'] or Decimal('0')
-		row_paid = min(row['total_paid'] or Decimal('0'), value)
-		actual += value
-		paid += row_paid
-		count += 1
-	outstanding = actual - paid
-	target = Decimal(str(target))
-	remaining = max(target - actual, Decimal('0'))
-	pct = float(actual / target * 100) if target else 0.0
-	return {
-		'target': float(target),
-		'actual': float(actual),
-		'paid': float(paid),
-		'outstanding': float(outstanding),
-		'remaining': float(remaining),
-		'count': count,
-		'pct': round(pct, 1),
-	}
+	this_week_start = today - timedelta(days=today.weekday())
+	this_week_end = this_week_start + timedelta(days=6)
+	last_week_start = this_week_start - timedelta(days=7)
+	last_week_end = last_week_start + timedelta(days=6)
+	next_week_start = this_week_start + timedelta(days=7)
+	next_week_end = next_week_start + timedelta(days=6)
+	month_start = today.replace(day=1)
+	month_end = today.replace(day=monthrange(today.year, today.month)[1])
+	year_start = today.replace(month=1, day=1)
+	year_end = today.replace(month=12, day=31)
+
+	span_start = min(last_week_start, month_start, year_start)
+	span_end = max(next_week_end, month_end, year_end)
+
+	# One job per order, sourced from the calendar (FitAppointment), like the
+	# weekly operations report. Multi-fitter / multi-day appointments collapse to
+	# a single job so nothing is double-counted.
+	window_appts = (
+		FitAppointment.objects
+		.filter(fit_date__gte=span_start, fit_date__lte=span_end, order__isnull=False)
+		.select_related('order')
+	)
+	jobs_by_order = {}
+	for appt in window_appts:
+		order = appt.order
+		if not order:
+			continue
+		rec = jobs_by_order.get(order.id)
+		if rec is None:
+			jobs_by_order[order.id] = {'order': order, 'fit_date': appt.fit_date}
+		elif appt.fit_date < rec['fit_date']:
+			rec['fit_date'] = appt.fit_date
+
+	# Location scoping via the Anthill contract-number prefix (authoritative).
+	sale_numbers = [r['order'].sale_number for r in jobs_by_order.values() if r['order'].sale_number]
+	contract_by_sale = {}
+	if sale_numbers:
+		for row in (AnthillSale.objects
+					.filter(anthill_activity_id__in=sale_numbers)
+					.values('anthill_activity_id', 'contract_number')):
+			cn = row['contract_number'] or ''
+			if row['anthill_activity_id'] not in contract_by_sale or cn:
+				contract_by_sale[row['anthill_activity_id']] = cn
+	if contract_prefix:
+		pref = contract_prefix.upper()
+		jobs_by_order = {
+			oid: rec for oid, rec in jobs_by_order.items()
+			if (contract_by_sale.get(rec['order'].sale_number, '') or '').upper().startswith(pref)
+		}
+
+	# Per-job financials — identical to the calendar / weekly report.
+	fin_by_sale = _orders_financials([r['order'] for r in jobs_by_order.values()])
+	jobs = []
+	for rec in jobs_by_order.values():
+		order = rec['order']
+		fin = fin_by_sale.get(order.sale_number) if order.sale_number else None
+		if fin:
+			value = float(fin['sale_value'] or 0)
+			paid = min(max(float(fin['payments_total'] or 0), 0.0), value)
+		else:
+			value = float(order.total_value_inc_vat or 0)
+			paid = 0.0
+		jobs.append({'date': rec['fit_date'], 'value': value, 'paid': paid})
+
+	def _breakdown(start, end, sales_target, fit_days_target):
+		actual = paid = 0.0
+		count = 0
+		fit_dates = set()
+		for j in jobs:
+			if start <= j['date'] <= end:
+				actual += j['value']
+				paid += j['paid']
+				count += 1
+				fit_dates.add(j['date'])
+		paid = min(paid, actual)
+		sales_target = float(sales_target)
+		fit_days = len(fit_dates)
+		return {
+			'target': sales_target,
+			'actual': actual,
+			'paid': paid,
+			'outstanding': max(actual - paid, 0.0),
+			'remaining': max(sales_target - actual, 0.0),
+			'count': count,
+			'pct': round(actual / sales_target * 100, 1) if sales_target else 0.0,
+			'fit_days': fit_days,
+			'fit_days_target': fit_days_target,
+			'fit_days_pct': round(fit_days / fit_days_target * 100, 1) if fit_days_target else 0.0,
+		}
+
+	def _wk_range(s, e):
+		return f"{s.strftime('%d %b')} – {e.strftime('%d %b')}"
+
+	periods = [
+		{'key': 'last_week', 'label': 'Last Week', 'sublabel': _wk_range(last_week_start, last_week_end),
+		 **_breakdown(last_week_start, last_week_end, WEEKLY_SALES_TARGET, WEEKLY_FIT_DAYS_TARGET)},
+		{'key': 'this_week', 'label': 'This Week', 'sublabel': _wk_range(this_week_start, this_week_end),
+		 **_breakdown(this_week_start, this_week_end, WEEKLY_SALES_TARGET, WEEKLY_FIT_DAYS_TARGET)},
+		{'key': 'next_week', 'label': 'Next Week', 'sublabel': _wk_range(next_week_start, next_week_end),
+		 **_breakdown(next_week_start, next_week_end, WEEKLY_SALES_TARGET, WEEKLY_FIT_DAYS_TARGET)},
+		{'key': 'this_month', 'label': 'This Month', 'sublabel': today.strftime('%B %Y'),
+		 **_breakdown(month_start, month_end, MONTHLY_SALES_TARGET, MONTHLY_FIT_DAYS_TARGET)},
+		{'key': 'this_year', 'label': 'This Year', 'sublabel': str(today.year),
+		 **_breakdown(year_start, year_end, YEARLY_SALES_TARGET, YEARLY_FIT_DAYS_TARGET)},
+	]
+
+	return periods
 
 
 def _get_monthly_sales_data(year, month, contract_prefix=''):
@@ -811,33 +893,10 @@ def dashboard(request):
     )
 
     # ── Sales targets (paid/outstanding vs fixed objectives) ──
-    # Weekly pies for last / this / next week, plus this month and this year.
-    from calendar import monthrange as _monthrange
-    next_week_start = this_week_start + timedelta(days=7)
-    next_week_end = next_week_start + timedelta(days=6)
-    month_start = today.replace(day=1)
-    month_end = today.replace(day=_monthrange(today.year, today.month)[1])
-    year_start = today.replace(month=1, day=1)
-    year_end = today.replace(month=12, day=31)
-
-    def _target_period(key, label, sublabel, start, end, target):
-        data = _get_target_breakdown(start, end, target, contract_prefix)
-        data.update({'key': key, 'label': label, 'sublabel': sublabel})
-        return data
-
-    _wk_range = lambda s, e: f"{s.strftime('%d %b')} – {e.strftime('%d %b')}"
-    targets_data = [
-        _target_period('last_week', 'Last Week', _wk_range(last_week_start, last_week_end),
-                       last_week_start, last_week_end, WEEKLY_SALES_TARGET),
-        _target_period('this_week', 'This Week', _wk_range(this_week_start, this_week_end),
-                       this_week_start, this_week_end, WEEKLY_SALES_TARGET),
-        _target_period('next_week', 'Next Week', _wk_range(next_week_start, next_week_end),
-                       next_week_start, next_week_end, WEEKLY_SALES_TARGET),
-        _target_period('this_month', 'This Month', today.strftime('%B %Y'),
-                       month_start, month_end, MONTHLY_SALES_TARGET),
-        _target_period('this_year', 'This Year', str(today.year),
-                       year_start, year_end, YEARLY_SALES_TARGET),
-    ]
+    # Weekly pies for last / this / next week, plus this month (with fit-days) and
+    # this year. Sourced from the fit calendar via _compute_sales_targets so the
+    # figures match the calendar and weekly operations report exactly.
+    targets_data = _compute_sales_targets(today, contract_prefix)
 
     context = {
         'targets_json': json.dumps(targets_data),
