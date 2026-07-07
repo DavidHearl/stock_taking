@@ -114,7 +114,7 @@ class Command(BaseCommand):
 
             self.stdout.write(
                 f'{sn}: KEEP Order {survivor.id} (pos={survivor.po_projects.count()}, '
-                f'fit_date {survivor.fit_date} → {canonical_date}) | '
+                f'fit_date {survivor.fit_date} -> {canonical_date}) | '
                 f'DELETE Order {loser.id} (pos={loser.po_projects.count()}, fit_date {loser.fit_date})'
             )
 
@@ -125,7 +125,7 @@ class Command(BaseCommand):
             with transaction.atomic():
                 self._merge(sale, survivor, loser, canonical_date)
             merged += 1
-            self.stdout.write(self.style.SUCCESS(f'  ✓ merged {sn}'))
+            self.stdout.write(self.style.SUCCESS(f'  merged {sn}'))
 
         self.stdout.write('')
         if fix:
