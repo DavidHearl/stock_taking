@@ -64,13 +64,15 @@ def _compute_sales_targets(today, contract_prefix=''):
 	last_week_end = last_week_start + timedelta(days=6)
 	next_week_start = this_week_start + timedelta(days=7)
 	next_week_end = next_week_start + timedelta(days=6)
+	week_after_start = this_week_start + timedelta(days=14)
+	week_after_end = week_after_start + timedelta(days=6)
 	month_start = today.replace(day=1)
 	month_end = today.replace(day=monthrange(today.year, today.month)[1])
 	year_start = today.replace(month=1, day=1)
 	year_end = today.replace(month=12, day=31)
 
 	span_start = min(last_week_start, month_start, year_start)
-	span_end = max(next_week_end, month_end, year_end)
+	span_end = max(week_after_end, month_end, year_end)
 
 	# One job per order, sourced from the calendar (FitAppointment), like the
 	# weekly operations report. Multi-fitter / multi-day appointments collapse to
@@ -158,6 +160,8 @@ def _compute_sales_targets(today, contract_prefix=''):
 		 **_breakdown(this_week_start, this_week_end, WEEKLY_SALES_TARGET, WEEKLY_FIT_DAYS_TARGET)},
 		{'key': 'next_week', 'label': 'Next Week', 'sublabel': _wk_range(next_week_start, next_week_end),
 		 **_breakdown(next_week_start, next_week_end, WEEKLY_SALES_TARGET, WEEKLY_FIT_DAYS_TARGET)},
+		{'key': 'week_after', 'label': 'In 2 Weeks', 'sublabel': _wk_range(week_after_start, week_after_end),
+		 **_breakdown(week_after_start, week_after_end, WEEKLY_SALES_TARGET, WEEKLY_FIT_DAYS_TARGET)},
 		{'key': 'this_month', 'label': 'This Month', 'sublabel': today.strftime('%B %Y'),
 		 **_breakdown(month_start, month_end, MONTHLY_SALES_TARGET, MONTHLY_FIT_DAYS_TARGET)},
 		{'key': 'this_year', 'label': 'This Year', 'sublabel': str(today.year),

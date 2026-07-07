@@ -229,6 +229,13 @@ def laptop_devices(request):
 
 
 @login_required
+@page_permission_required('website_guide')
+def website_guide(request):
+    """IT – Setup guide for cloning and running the Sliderobes website locally."""
+    return render(request, 'stock_take/it_website.html', {})
+
+
+@login_required
 @page_permission_required('desktop_devices')
 def desktop_devices(request):
     """IT – Desktop machine spec builder (database-backed)."""

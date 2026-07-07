@@ -140,6 +140,7 @@ URL_TO_PAGE = {
     'mobile_device_delete': 'mobile_devices',
     'laptop_devices': 'laptop_devices',
     'desktop_devices': 'desktop_devices',
+    'website_guide': 'website_guide',
 }
 
 

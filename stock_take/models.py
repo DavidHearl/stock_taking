@@ -2747,6 +2747,7 @@ PAGE_SECTIONS = [
         ('mobile_devices', 'Mobile Devices'),
         ('laptop_devices', 'Laptops'),
         ('desktop_devices', 'Desktops'),
+        ('website_guide', 'Sliderobes Website'),
     ]),
     ('Other', [
         ('tickets', 'Tickets'),
