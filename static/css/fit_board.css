@@ -3,39 +3,7 @@
     max-width: 1800px;
 }
 
-/* ── Calendar page-level tabs (Fit Board / Employee Calendar) ── */
-.cal-page-tabs {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 12px;
-    border-bottom: 2px solid var(--border-color);
-    padding-bottom: 0;
-}
-
-.cal-page-tab {
-    padding: 6px 18px;
-    font-size: 0.85rem;
-    font-weight: 500;
-    cursor: pointer;
-    border: none;
-    background: none;
-    color: var(--text-secondary);
-    border-bottom: 3px solid transparent;
-    margin-bottom: -2px;
-    transition: color 0.15s, border-color 0.15s;
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-}
-
-.cal-page-tab:hover {
-    color: var(--text-primary);
-    background: var(--bg-hover);
-}
-
-.cal-page-tab.active {
-    color: var(--primary-color);
-    border-bottom-color: var(--primary-color);
-}
-
+/* ── Calendar page-level tab panes (nav bar uses the standard .tab-nav/.tab-button) ── */
 .cal-tab-pane {
     display: none;
 }
@@ -584,42 +552,78 @@
 /* .cal-toolbar-right moved to calendar_shell.css */
 
 /* ── Toolbar summary bar ─────────────────────────────────────── */
+/* Own row beneath the toolbar */
 .cal-summary-bar {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
 }
 
 .cal-summary-scope {
-    font-size: 0.65rem;
+    font-size: 0.6rem;
     font-weight: 700;
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.4px;
-    padding-right: 14px;
-    border-right: 1px solid var(--border-color);
+    padding-right: 2px;
 }
 
+/* Each metric is a small accent card: tinted icon badge + label/value,
+   with a coloured edge bar and a lift on hover. Colour is driven by the
+   per-card --accent / --accent-rgb set by the modifier classes below. */
 .cal-summary-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
+}
+
+.cal-summary-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--accent);
+}
+
+.cal-summary-item:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+    border-color: rgba(var(--accent-rgb), 0.45);
+}
+
+.cal-summary-text {
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: flex-start;
     gap: 1px;
 }
 
 .cal-summary-label {
-    font-size: 0.55rem;
+    font-size: 0.625rem;
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.3px;
-    font-weight: 600;
+    font-weight: 700;
 }
 
 .cal-summary-val {
-    font-size: 0.8rem;
-    font-weight: 700;
+    font-size: 0.9rem;
+    font-weight: 800;
     color: var(--text-primary);
     font-variant-numeric: tabular-nums;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
 }
 
 .month-week-block.week-focused {
@@ -656,36 +660,47 @@
     to   { opacity: 1; transform: translateX(0); }
 }
 
-.schedule-panel-header {
+/* Sticky top row of the panel: the standard search box + a close button
+   (the old "Job List" header has been folded into this row). */
+.schedule-panel-searchrow {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 14px 14px 10px;
-    border-bottom: 1px solid var(--border-color);
+    gap: 8px;
+    padding: 12px;
     position: sticky;
     top: 0;
     background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
     z-index: 1;
 }
-.schedule-panel-title {
-    font-size: 0.9rem;
-    font-weight: 700;
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 6px;
+
+/* Standard .search-input-wrapper convention (see styles.css), sized to fill
+   the row against the panel's bg-secondary. */
+.schedule-panel-searchrow .search-input-wrapper {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0 10px;
+    transition: border-color var(--transition);
 }
+.schedule-panel-searchrow .search-input-wrapper:focus-within {
+    border-color: var(--primary-color);
+}
+
 .schedule-panel-close {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     font-size: 1rem;
     cursor: pointer;
-    padding: 3px 8px;
+    padding: 6px 10px;
     line-height: 1;
     transition: background 0.15s, color 0.15s;
 }
@@ -693,33 +708,6 @@
     background: var(--danger-subtle);
     border-color: var(--danger-color);
     color: var(--danger-color);
-}
-.schedule-panel-search {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 10px 10px 0;
-    padding: 6px 10px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    background: var(--bg-primary);
-    color: var(--text-secondary);
-    transition: border-color var(--transition);
-}
-.schedule-panel-search:focus-within {
-    border-color: var(--primary-color);
-}
-.schedule-panel-search-input {
-    flex: 1;
-    min-width: 0;
-    border: none;
-    background: transparent;
-    color: var(--text-primary);
-    font-size: 0.82rem;
-    outline: none;
-}
-.schedule-panel-search-input::placeholder {
-    color: var(--text-secondary);
 }
 .schedule-panel-search-clear {
     display: inline-flex;
@@ -1330,8 +1318,7 @@
     padding: 4px;
     background: rgba(var(--fitter-rgb), 0.3);
     border: 1px solid rgba(var(--fitter-rgb), 0.50);
-    border-radius: var(--radius-sm);
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     cursor: pointer;
     transition: var(--transition);
 }
@@ -1868,12 +1855,14 @@
 }
 
 /* Header row: label gutter + 7 day columns */
+
 .mw-header-row {
     display: grid;
     grid-template-columns: 132px repeat(7, 1fr);
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
 }
+
 .mw-corner {
     border-right: 1px solid var(--border-color);
     display: flex;
@@ -1883,13 +1872,16 @@
     user-select: none;
     transition: background 0.15s, color 0.15s;
 }
+
 .mw-corner:hover {
     background: rgba(var(--primary-rgb), 0.1);
 }
+
 .mw-corner.corner-active {
     background: rgba(var(--primary-rgb), 0.15);
     border-right-color: var(--primary-color);
 }
+
 .mw-corner-label {
     font-size: 0.58rem;
     font-weight: 700;
@@ -1897,27 +1889,33 @@
     text-transform: uppercase;
     letter-spacing: 0.3px;
 }
+
 .mw-corner:hover .mw-corner-label,
 .mw-corner.corner-active .mw-corner-label {
     color: var(--primary-color);
 }
+
 .mw-col-header {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 1px;
-    padding: 5px 4px;
+    padding: 4px;
     border-right: 1px solid var(--border-color);
 }
+
 .mw-col-header:last-child {
     border-right: none;
 }
+
 .mw-col-header.other-month {
     opacity: 0.4;
 }
+
 .mw-col-header.today {
     background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.18) 0%, rgba(var(--primary-rgb), 0.04) 100%);
 }
+
 .mw-col-dayname {
     font-size: 0.62rem;
     font-weight: 700;
@@ -1925,6 +1923,7 @@
     letter-spacing: 0.4px;
     color: var(--text-secondary);
 }
+
 .mw-col-date {
     font-size: 0.6rem;
     color: var(--text-secondary);
@@ -1951,6 +1950,9 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    /* Match the header corner's right edge so the gutter/day divider is a
+       single continuous line down the whole week block. */
+    border-right: 1px solid var(--border-color);
 }
 
 /* Grid holding drop-zones (behind) + appointment cards (auto rows) */
@@ -1961,9 +1963,11 @@
     grid-auto-flow: dense;
     grid-auto-rows: auto;
     align-content: start;
-    background-image: linear-gradient(to right, var(--border-color) 1px, transparent 1px);
-    background-size: calc(100% / 7) 100%;
     min-height: 28px;
+    /* Day dividers are drawn by the real drop-zone cells below (border-right)
+       rather than a tiled background gradient — a percentage-tiled background
+       rounds differently from 1fr grid tracks, so its lines drift out of
+       alignment with the header borders and read as doubled/2px. */
 }
 
 /* Full-height droppable day columns sit behind the cards */
@@ -1978,6 +1982,11 @@
 .mw-drop-zone {
     cursor: pointer;
     transition: background 0.12s;
+    border-right: 1px solid var(--border-color);
+}
+
+.mw-drop-zone:last-child {
+    border-right: none;
 }
 
 .mw-drop-zone.other-month {
@@ -2034,11 +2043,9 @@ body.fb-dragging .mw-lane-grid > .job-card {
     border-right-style: dashed;
 }
 
-/* Deliveries lane */
-.mw-deliveries-lane {
-    border-top: 1px solid var(--border-color);
-}
-
+/* Deliveries lane — no border-top: the preceding fitter lane's border-bottom
+   already draws the divider above it, and a border-top here would stack into
+   a 2px line. */
 .mw-deliveries-label {
     color: var(--info-color);
     background: rgba(var(--info-rgb), 0.06);

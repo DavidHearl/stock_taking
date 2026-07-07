@@ -239,22 +239,19 @@
         const meta = document.getElementById(cfg.metaId);
 
         [reportBody, changesBody, historyBody].forEach(b => b.style.display = 'none');
-        Object.values(tabs).forEach(b => { b.style.color = 'var(--text-secondary)'; b.style.borderBottomColor = 'transparent'; });
+        Object.values(tabs).forEach(b => b.classList.remove('active'));
         if (pdfBtn) pdfBtn.style.display = 'none';
 
         if (tab === 'report') {
             reportBody.style.display = '';
-            tabs.report.style.color = 'var(--text-primary)';
-            tabs.report.style.borderBottomColor = 'var(--primary-color)';
+            tabs.report.classList.add('active');
             if (pdfBtn) pdfBtn.style.display = '';
         } else if (tab === 'changes') {
             changesBody.style.display = '';
-            tabs.changes.style.color = 'var(--text-primary)';
-            tabs.changes.style.borderBottomColor = 'var(--primary-color)';
+            tabs.changes.classList.add('active');
         } else {
             historyBody.style.display = '';
-            tabs.history.style.color = 'var(--text-primary)';
-            tabs.history.style.borderBottomColor = 'var(--primary-color)';
+            tabs.history.classList.add('active');
             if (!_stockHistoryLoaded) loadStockHistory(cfg);
         }
     }

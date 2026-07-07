@@ -180,11 +180,16 @@
         <a href="?year={{ prev_month.year }}&month={{ prev_month.month }}" class="btn btn-secondary">&larr;</a>
         <h2 class="calendar-date">{{ month_name }} {{ current_year }}</h2>
         <a href="?year={{ next_month.year }}&month={{ next_month.month }}" class="btn btn-secondary">&rarr;</a>
-        <a href="?year={{ today.year }}&month={{ today.month }}" class="btn btn-primary">Today</a>
-        <button class="btn btn-success" onclick="bulkImportFitDates()" title="Import All Fit Dates">
+    </div>
+    <div class="cal-toolbar-right">
+        <button class="btn btn-secondary" id="panelToggleBtn" onclick="toggleSchedulePanel()" title="Show job list">
+            <i class="bi bi-list-task"></i> Jobs
+        </button>
+        {# Anthill sync temporarily disabled — kept in place so it can be re-enabled later. #}
+        <button class="btn btn-success" onclick="bulkImportFitDates()" title="Anthill sync is currently disabled" disabled>
             <i class="bi bi-arrow-repeat"></i> Sync
         </button>
-        <button class="btn btn-secondary" id="checkPaymentsBtn" onclick="checkCalendarPayments()" title="Check Xero payments for every sale this month">
+        <button class="btn btn-info" id="checkPaymentsBtn" onclick="checkCalendarPayments()" title="Check Xero payments for every sale this month">
             <i class="bi bi-cash-coin"></i> Check Payments
         </button>
         <div class="kebab-menu">
@@ -201,32 +206,39 @@
             </div>
         </div>
     </div>
-    <div class="cal-toolbar-right">
-        <button class="btn btn-secondary" id="panelToggleBtn" onclick="toggleSchedulePanel()" title="Show job list">
-            <i class="bi bi-list-task"></i> Jobs
-        </button>
-        <div class="cal-summary-bar">
-            <span class="cal-summary-scope" id="calSummaryScope">{{ month_name }}</span>
-            <div class="cal-summary-item">
-                <span class="cal-summary-label">Fits</span>
-                <span class="cal-summary-val" id="summFits">{{ total_fits }}</span>
-            </div>
-            <div class="cal-summary-item">
-                <span class="cal-summary-label">Value</span>
-                <span class="cal-summary-val" id="summValue">&pound;{{ total_sale_value|floatformat:0|intcomma }}</span>
-            </div>
-            <div class="cal-summary-item">
-                <span class="cal-summary-label">Paid</span>
-                <span class="cal-summary-val text-success" id="summPaid">&pound;{{ total_paid|floatformat:0|intcomma }}</span>
-            </div>
-            <div class="cal-summary-item">
-                <span class="cal-summary-label">Outstanding</span>
-                <span class="cal-summary-val {% if total_outstanding > 0 %}text-danger{% else %}text-success{% endif %}" id="summOutstanding">&pound;{{ total_outstanding|floatformat:0|intcomma }}</span>
-            </div>
-            <div class="cal-summary-item" id="summArrearsItem"{% if fits_with_balance == 0 %} style="display:none"{% endif %}>
-                <span class="cal-summary-label">Arrears</span>
-                <span class="cal-summary-val text-danger" id="summArrears">{{ fits_with_balance }}</span>
-            </div>
+</div>
+
+<!-- Month summary — its own row for clarity -->
+<div class="cal-summary-bar">
+    <span class="cal-summary-scope" id="calSummaryScope">{{ month_name }}</span>
+    <div class="cal-summary-item">
+        <div class="cal-summary-text">
+            <span class="cal-summary-label">Fits</span>
+            <span class="cal-summary-val" id="summFits">{{ total_fits }}</span>
+        </div>
+    </div>
+    <div class="cal-summary-item">
+        <div class="cal-summary-text">
+            <span class="cal-summary-label">Value</span>
+            <span class="cal-summary-val" id="summValue">&pound;{{ total_sale_value|floatformat:0|intcomma }}</span>
+        </div>
+    </div>
+    <div class="cal-summary-item">
+        <div class="cal-summary-text">
+            <span class="cal-summary-label">Paid</span>
+            <span class="cal-summary-val text-success" id="summPaid">&pound;{{ total_paid|floatformat:0|intcomma }}</span>
+        </div>
+    </div>
+    <div class="cal-summary-item">
+        <div class="cal-summary-text">
+            <span class="cal-summary-label">Outstanding</span>
+            <span class="cal-summary-val {% if total_outstanding > 0 %}text-danger{% else %}text-success{% endif %}" id="summOutstanding">&pound;{{ total_outstanding|floatformat:0|intcomma }}</span>
+        </div>
+    </div>
+    <div class="cal-summary-item" id="summArrearsItem"{% if fits_with_balance == 0 %} style="display:none"{% endif %}>
+        <div class="cal-summary-text">
+            <span class="cal-summary-label">Arrears</span>
+            <span class="cal-summary-val text-danger" id="summArrears">{{ fits_with_balance }}</span>
         </div>
     </div>
 </div>
@@ -234,11 +246,11 @@
 <div class="cal-with-panel">
 
 <!-- ── Page-level tab switcher ── -->
-<div class="cal-page-tabs" id="calPageTabs">
-    <button class="cal-page-tab active" data-target="fitBoardTab" onclick="switchCalTab('fitBoardTab', this)">
+<div class="tab-nav" id="calPageTabs">
+    <button class="tab-button active" data-target="fitBoardTab" onclick="switchCalTab('fitBoardTab', this)">
         <i class="bi bi-calendar3"></i> Fit Board
     </button>
-    <button class="cal-page-tab" data-target="empCalTab" onclick="switchCalTab('empCalTab', this)">
+    <button class="tab-button" data-target="empCalTab" onclick="switchCalTab('empCalTab', this)">
         <i class="bi bi-people"></i> Employee Calendar
     </button>
 </div>
@@ -398,18 +410,16 @@
 
 <div id="schedulePanel" class="schedule-panel">
 <div class="schedule-panel-inner">
-    <div class="schedule-panel-header">
-        <span class="schedule-panel-title">Job List</span>
+    <div class="schedule-panel-searchrow">
+        <div class="search-input-wrapper">
+            <i class="bi bi-search"></i>
+            <input type="text" id="jobSearchInput"
+                   placeholder="Search jobs by name or number…" oninput="filterJobList()"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllSales();}" autocomplete="off">
+            <button type="button" class="schedule-panel-search-clear" id="jobSearchClear"
+                    onclick="clearJobSearch()" title="Clear search" style="display:none;">&times;</button>
+        </div>
         <button class="schedule-panel-close" onclick="toggleSchedulePanel()" title="Close">&times;</button>
-    </div>
-
-    <div class="schedule-panel-search">
-        <i class="bi bi-search"></i>
-        <input type="text" id="jobSearchInput" class="schedule-panel-search-input"
-               placeholder="Search jobs by name or number…" oninput="filterJobList()"
-               onkeydown="if(event.key==='Enter'){event.preventDefault();searchAllSales();}" autocomplete="off">
-        <button type="button" class="schedule-panel-search-clear" id="jobSearchClear"
-                onclick="clearJobSearch()" title="Clear search" style="display:none;">&times;</button>
     </div>
     <button type="button" class="schedule-panel-allsales-btn" id="searchAllSalesBtn"
             onclick="searchAllSales()" style="display:none;">
@@ -494,6 +504,7 @@
              ondragend="handlePanelDragEnd(event)">
             <span class="panel-job-name">{{ rem.first_name }} {{ rem.last_name }}</span>
             <span class="panel-job-meta">{{ rem.remedial_number }}</span>
+            {% if rem.sale_pk %}<a href="{% url 'sale_detail' rem.sale_pk %}" class="panel-job-link" title="Open sale" target="_blank" rel="noopener" draggable="false" onclick="event.stopPropagation();" onmousedown="event.stopPropagation();"><i class="bi bi-box-arrow-up-right"></i></a>{% endif %}
         </div>
         {% endfor %}
         {% else %}
@@ -1850,7 +1861,7 @@ function deleteFitterCrud(id, btn) {
 /* ── Tab switching ─────────────────────────────────────────── */
 function switchCalTab(targetId, btn) {
     document.querySelectorAll('.cal-tab-pane').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('.cal-page-tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
     document.getElementById(targetId).classList.add('active');
     btn.classList.add('active');
     try { localStorage.setItem('calActiveTab', targetId); } catch(e) {}

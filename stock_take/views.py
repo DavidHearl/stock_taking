@@ -11958,9 +11958,31 @@ def calendar_view(request):
         Remedial.objects.filter(
             is_completed=False,
         ).exclude(id__in=scheduled_remedial_ids)
+        .select_related('original_order')
         .distinct()
         .order_by('-created_date')[:80]
     )
+    # Resolve each remedial's AnthillSale pk (via the original order's sale
+    # number) so the job-list card can link straight to the sale, matching the
+    # PFP/awaiting order cards above.
+    _rem_nums = [
+        r.original_order.sale_number
+        for r in panel_remedials
+        if r.original_order_id and r.original_order.sale_number
+    ]
+    _rem_sale_pk_map = {}
+    if _rem_nums:
+        for _s in (
+            AnthillSale.objects
+            .filter(anthill_activity_id__in=_rem_nums)
+            .values('pk', 'anthill_activity_id')
+        ):
+            _rem_sale_pk_map.setdefault(_s['anthill_activity_id'], _s['pk'])
+    for _r in panel_remedials:
+        _r.sale_pk = (
+            _rem_sale_pk_map.get(_r.original_order.sale_number)
+            if _r.original_order_id else None
+        )
 
     # Calendar blocks for the current month
     import json as _json
