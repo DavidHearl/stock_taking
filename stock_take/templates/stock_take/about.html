@@ -292,6 +292,24 @@
         </div>
     </div>
 
+    <div class="card about-section">
+        <h2><i class="bi bi-graph-up"></i> Total Lines of Code Over Time</h2>
+        <p class="about-stats-subtitle">Cumulative net lines of code across commit history.</p>
+        <div class="card about-system-panel about-commit-panel">
+            {% if commit_stats %}
+            <div class="about-commit-chart-meta">
+                <span class="about-commit-pill about-commit-pill-added">Net total</span>
+                <span class="about-commit-cap-note">Excludes setup/vendor commits over 100,000 lines.</span>
+            </div>
+            <div class="about-commit-chart-wrap">
+                <canvas id="commitTotalChart"></canvas>
+            </div>
+            {% else %}
+            <p class="about-stats-subtitle">No git commit stats available.</p>
+            {% endif %}
+        </div>
+    </div>
+
 </div>
 {% endblock %}
 
@@ -460,6 +478,65 @@
                     const url = chartUrls[index];
                     if (url) {
                         window.open(url, '_blank', 'noopener');
+                    }
+                }
+            }
+        });
+    }
+
+    const totalCanvas = document.getElementById('commitTotalChart');
+    if (totalCanvas) {
+        const totalLabelsRaw = [{% for commit in commit_stats %}'{{ commit.period|default:"Unknown Period"|escapejs }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
+        const cumulativeRaw = [{% for commit in commit_stats %}{{ commit.cumulative|default:0 }}{% if not forloop.last %}, {% endif %}{% endfor %}];
+
+        // commit_stats is newest-first; reverse to chronological order.
+        const totalLabels = totalLabelsRaw.slice().reverse();
+        const cumulativeData = cumulativeRaw.slice().reverse();
+
+        new Chart(totalCanvas.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: totalLabels,
+                datasets: [{
+                    label: 'Net total',
+                    data: cumulativeData,
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.20)',
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    borderWidth: 3,
+                    fill: 'origin',
+                    tension: 0.22
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            title: function(items) {
+                                return items[0] ? items[0].label : '';
+                            },
+                            label: function(context) {
+                                return 'Total: ' + context.parsed.y.toLocaleString() + ' lines';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: labelCol, maxTicksLimit: 10, autoSkip: true }
+                    },
+                    y: {
+                        grid: { color: gridCol },
+                        ticks: {
+                            color: labelCol,
+                            callback: function(v) { return v >= 1000 ? (v / 1000) + 'k' : v; }
+                        }
                     }
                 }
             }

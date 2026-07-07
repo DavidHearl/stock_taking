@@ -168,8 +168,19 @@ def _get_media_stats():
         return {"total_files": 0, "total_size": "0 B", "folders": []}
 
 
+# Commits changing more than this many lines (added + removed) are treated as
+# setup/vendor noise (initial imports, virtual_environment, bundled assets) and
+# excluded from the commit history charts.
+_MAX_COMMIT_LINES = 100000
+
+
 def _get_commit_line_stats():
-    """Return commit index with per-commit additions/removals from git history."""
+    """Return commit index with per-commit additions/removals from git history.
+
+    Commits touching more than ``_MAX_COMMIT_LINES`` lines are excluded so bulk
+    setup/vendor commits don't distort the charts. Each returned commit also
+    carries a running ``cumulative`` net line total in chronological order.
+    """
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     def _get_commit_web_base():
@@ -274,6 +285,21 @@ def _get_commit_line_stats():
             "removed": current_removed,
             "net": current_added - current_removed,
         })
+
+    # Drop bulk setup/vendor commits that would otherwise dominate the charts.
+    commits = [
+        c for c in commits
+        if (c["added"] + c["removed"]) <= _MAX_COMMIT_LINES
+    ]
+
+    # Renumber and attach a running net line total. git log is newest-first, so
+    # accumulate in chronological (reversed) order.
+    running_total = 0
+    for c in reversed(commits):
+        running_total += c["net"]
+        c["cumulative"] = running_total
+    for idx, c in enumerate(commits, start=1):
+        c["number"] = idx
 
     return commits
 
