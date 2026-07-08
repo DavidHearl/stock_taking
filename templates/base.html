@@ -820,6 +820,57 @@
     </script>
 
     <script>
+    // ── Sliding indicator for pill tabs (.tab-nav-pills[data-pill-slider]) ──
+    // A single cobalt "thumb" slides beneath the active pill rather than each
+    // button toggling its own fill. Decoupled from any page's tab-switch code:
+    // a MutationObserver watches the buttons' class list, so the thumb follows
+    // the .active pill wherever it lands (works with switchCalTab,
+    // switchDetailTab, or any other switcher without touching them).
+    document.addEventListener('DOMContentLoaded', function() {
+        function moveThumb(nav) {
+            var thumb = nav._pillThumb;
+            if (!thumb) return;
+            var active = nav.querySelector('.tab-button.active');
+            if (!active) { thumb.style.opacity = '0'; return; }
+            thumb.style.opacity = '1';
+            thumb.style.width = active.offsetWidth + 'px';
+            // Vertical is handled in CSS (top/bottom inset); JS only drives the
+            // horizontal. offsetLeft is border-box relative while the thumb's
+            // abs origin is the padding box, so subtract the tray border.
+            var x = active.offsetLeft - nav.clientLeft;
+            thumb.style.transform = 'translateX(' + x + 'px)';
+        }
+        document.querySelectorAll('.tab-nav-pills[data-pill-slider]').forEach(function(nav) {
+            if (nav._pillThumb) return;
+            var thumb = document.createElement('span');
+            thumb.className = 'tab-pill-thumb';
+            // Absolutely positioned, so it's removed from the flex flow and
+            // won't offset the buttons even as the first child.
+            nav.insertBefore(thumb, nav.firstChild);
+            nav._pillThumb = thumb;
+
+            var move = function() { moveThumb(nav); };
+            var obs = new MutationObserver(move);
+            nav.querySelectorAll('.tab-button').forEach(function(btn) {
+                obs.observe(btn, { attributes: true, attributeFilter: ['class'] });
+            });
+            window.addEventListener('resize', move);
+
+            // Place it once with animation suppressed so it doesn't fly in from
+            // the corner on load, then re-enable transitions for real moves.
+            thumb.style.transition = 'none';
+            move();
+            requestAnimationFrame(function() {
+                thumb.style.transition = '';
+                move();
+            });
+            // Web-font swap changes button widths after first paint — realign.
+            if (document.fonts && document.fonts.ready) { document.fonts.ready.then(move); }
+        });
+    });
+    </script>
+
+    <script>
     // ── Toast auto-dismiss ──────────────────────────────────
     const toastDismissTimers = new WeakMap();
     const toastCopyResetTimers = new WeakMap();

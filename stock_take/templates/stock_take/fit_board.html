@@ -131,13 +131,11 @@
                     <label for="detailFitDuration">Duration</label>
                     <div class="detail-edit-control">
                         <span class="detail-edit-value" id="detailFitDurationValue">-</span>
-                        <select id="detailFitDuration" class="modal-select detail-edit-input" onchange="syncDetailEditValue('FitDuration')">
-                            <option value="1">1 day</option>
-                            <option value="2">2 days</option>
-                            <option value="3">3 days</option>
-                            <option value="4">4 days</option>
-                            <option value="5">5 days</option>
-                        </select>
+                        <div class="detail-edit-input cs-fit-days-wrap cal-dur-slider">
+                            <input type="range" id="detailFitDuration" min="0.5" max="5" step="0.5" value="1" oninput="syncDetailEditValue('FitDuration')">
+                            <div class="cs-fit-days-scale"><span>0.5</span><span>1</span><span>1.5</span><span>2</span><span>2.5</span><span>3</span><span>3.5</span><span>4</span><span>4.5</span><span>5</span></div>
+                            <div class="cs-fit-days-value">Selected: <strong id="detailFitDurationSel">1</strong> day(s)</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -208,9 +206,19 @@
     </div>
 </div>
 
-<!-- Month summary — its own row for clarity -->
+<div class="cal-with-panel">
+
+<!-- ── Tab switcher (left) + month summary cards (right) on one row ── -->
+<div class="cal-tabs-row">
+<div class="tab-nav-pills" id="calPageTabs" data-pill-slider>
+    <button class="tab-button active" data-target="fitBoardTab" onclick="switchCalTab('fitBoardTab', this)">
+        <i class="bi bi-calendar3"></i> Fit Board
+    </button>
+    <button class="tab-button" data-target="empCalTab" onclick="switchCalTab('empCalTab', this)">
+        <i class="bi bi-people"></i> Employee Calendar
+    </button>
+</div>
 <div class="cal-summary-bar">
-    <span class="cal-summary-scope" id="calSummaryScope">{{ month_name }}</span>
     <div class="cal-summary-item">
         <div class="cal-summary-text">
             <span class="cal-summary-label">Fits</span>
@@ -242,18 +250,7 @@
         </div>
     </div>
 </div>
-
-<div class="cal-with-panel">
-
-<!-- ── Page-level tab switcher ── -->
-<div class="tab-nav" id="calPageTabs">
-    <button class="tab-button active" data-target="fitBoardTab" onclick="switchCalTab('fitBoardTab', this)">
-        <i class="bi bi-calendar3"></i> Fit Board
-    </button>
-    <button class="tab-button" data-target="empCalTab" onclick="switchCalTab('empCalTab', this)">
-        <i class="bi bi-people"></i> Employee Calendar
-    </button>
-</div>
+</div><!-- /.cal-tabs-row -->
 
 <!-- ══════════════════════════════ FIT BOARD TAB ════════════════════════════════ -->
 <div id="fitBoardTab" class="cal-tab-pane active">
@@ -314,7 +311,7 @@
                          data-fitter-code="{{ appt.fitter }}"
                          data-order-date="{{ appt.order.order_date|date:'d/m/Y' }}"
                          data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
-                         data-fit-duration="{{ appt.fit_duration }}"
+                         data-fit-duration="{{ appt.effective_fit_days }}"
                          data-address="{{ appt.order.address|default:'-' }}"
                          data-postcode="{{ appt.order.postcode|default:'-' }}"
                          data-designer="{{ appt.order.designer.name|default:'-' }}"
@@ -352,7 +349,7 @@
                          data-fitter="{{ appt.get_fitter_display }}"
                          data-fitter-code="{{ appt.fitter }}"
                          data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
-                         data-fit-duration="{{ appt.fit_duration }}"
+                         data-fit-duration="{{ appt.effective_fit_days }}"
                          data-address="{{ appt.remedial.address|default:'-' }}"
                          data-postcode="{{ appt.remedial.postcode|default:'-' }}"
                          data-pos="[]"
@@ -1040,7 +1037,8 @@ function unfocusWeek() {
 }
 
 function updateSummary(data, scope) {
-    document.getElementById('calSummaryScope').textContent = scope;
+    const _scopeEl = document.getElementById('calSummaryScope');
+    if (_scopeEl) _scopeEl.textContent = scope;
     document.getElementById('summFits').textContent = data.fits.toLocaleString();
     document.getElementById('summValue').textContent = '\u00a3' + Math.round(data.value).toLocaleString();
     document.getElementById('summPaid').textContent = '\u00a3' + Math.round(data.paid).toLocaleString();
@@ -1519,6 +1517,12 @@ function syncDetailEditValue(name) {
     if (!inputEl || !displayEl) return;
     if (name === 'FitDate') {
         if (inputEl.value) { const p = inputEl.value.split('-'); displayEl.textContent = `${p[2]}/${p[1]}/${p[0]}`; }
+    } else if (name === 'FitDuration') {
+        const n = parseFloat(inputEl.value) || 1;
+        const shown = (n % 1 === 0) ? String(n) : n.toFixed(1);
+        displayEl.textContent = shown + ' day' + (n === 1 ? '' : 's');
+        const sel = document.getElementById('detailFitDurationSel');
+        if (sel) sel.textContent = shown;
     } else {
         displayEl.textContent = inputEl.options[inputEl.selectedIndex] ? inputEl.options[inputEl.selectedIndex].text : '-';
     }
@@ -1558,7 +1562,7 @@ function saveDetailMove() {
     const newDate = document.getElementById('detailFitDate').value;
     const newDuration = document.getElementById('detailFitDuration').value;
     if (newFitter !== _origFitterCode || newDate !== _origFitDate || newDuration !== _origDuration) {
-        const payload = { fitter: newFitter, fit_duration: parseInt(newDuration) };
+        const payload = { fitter: newFitter, fit_duration: parseFloat(newDuration) };
         if (newDate) payload.fit_date = newDate;
         fetch(`/fit-board/move-appointment/${selectedAppointmentId}/`, {
             method: 'POST',

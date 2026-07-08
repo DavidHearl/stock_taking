@@ -11372,22 +11372,31 @@ def create_remedial(request, order_pk):
     os_doors_po = request.POST.get('os_doors_po', '').strip()
     next_url = request.POST.get('next', '').strip() or None
 
+    # Warranties are stored as Remedial records with record_type='warranty' —
+    # same fields and workflow, just a different label and number prefix.
+    record_type = request.POST.get('record_type', 'remedial')
+    if record_type not in ('remedial', 'warranty'):
+        record_type = 'remedial'
+
     if not reason:
         from django.contrib import messages
         messages.error(request, 'Reason is required.')
         return redirect(next_url) if next_url else redirect('order_details', pk=order.pk)
 
-    # Generate a unique remedial number: {sale_number}-R{n}
-    existing_count = Remedial.objects.filter(original_order=order).count()
+    # Generate a unique number, counted per type: {sale_number}-R{n} for
+    # remedials, {sale_number}-W{n} for warranties.
+    letter = 'W' if record_type == 'warranty' else 'R'
+    existing_count = Remedial.objects.filter(original_order=order, record_type=record_type).count()
     base = order.sale_number or str(order.pk)
-    candidate = f"{base}-R{existing_count + 1}"
+    candidate = f"{base}-{letter}{existing_count + 1}"
     while Remedial.objects.filter(remedial_number=candidate).exists():
         existing_count += 1
-        candidate = f"{base}-R{existing_count + 1}"
+        candidate = f"{base}-{letter}{existing_count + 1}"
 
     remedial = Remedial.objects.create(
         original_order=order,
         remedial_number=candidate,
+        record_type=record_type,
         reason=reason,
         notes=notes,
         scheduled_date=scheduled_date,
@@ -11679,8 +11688,11 @@ def calendar_view(request):
     from calendar import monthrange as _mr
     _, num_month_days = _mr(current_year, current_month)
     appointments_flat = {}  # day -> list of {appointment, is_continuation, span_pos}
+    import math as _math
     for appointment in appointments:
-        duration = appointment.fit_duration or 1
+        # Whole-day cells for this legacy per-day list — round a half-day
+        # duration up so the appointment still fills each day it touches.
+        duration = max(1, int(_math.ceil(float(appointment.fit_duration or 1))))
         start_day = appointment.fit_date.day
         for offset in range(duration):
             d = start_day + offset
@@ -11814,6 +11826,30 @@ def calendar_view(request):
             lane_name_map[c] = _choice_names.get(c, c)
     fitter_color_map = {c: NEUTRAL_FITTER_COLOR for c in lane_codes}
 
+    # Effective fit duration (in days) per appointment. For order appointments
+    # this mirrors the sale coversheet fit_days — the same value shown/edited on
+    # the sale detail page — so the calendar and sale detail never diverge. For
+    # remedials/warranties (no coversheet) it's the appointment's own duration.
+    # Precomputed as a map to avoid an N+1 over coversheets.
+    from .models import SaleCoverSheet as _SaleCoverSheet
+    _appt_order_ids = [a.order_id for a in appointments if a.order_id]
+    _order_fitdays = {}
+    if _appt_order_ids:
+        for _cs in (
+            _SaleCoverSheet.objects
+            .filter(sale__order__in=_appt_order_ids, fit_days__isnull=False)
+            .values('sale__order', 'fit_days')
+        ):
+            _order_fitdays.setdefault(_cs['sale__order'], _cs['fit_days'])
+    for _appt in appointments:
+        if _appt.order_id and _order_fitdays.get(_appt.order_id) is not None:
+            _appt.effective_fit_days = float(_order_fitdays[_appt.order_id])
+        else:
+            try:
+                _appt.effective_fit_days = float(_appt.fit_duration or 1)
+            except (TypeError, ValueError):
+                _appt.effective_fit_days = 1.0
+
     month_weeks = []
     for _w in range(6):
         wk_start = grid_start + timedelta(days=7 * _w)
@@ -11832,26 +11868,30 @@ def calendar_view(request):
                 'date_str': d.strftime('%Y-%m-%d'),
                 'pos': pos_by_day.get(d.day, []) if in_m else [],
             })
-        day_index = {wk_start + timedelta(days=i): i for i in range(7)}
         lanes = []
         for code in lane_codes:
             entries = []
             for appt in appointments:
                 if (appt.fitter or 'R') != code:
                     continue
-                duration = appt.fit_duration or 1
-                start_date = appt.fit_date
-                end_date = start_date + timedelta(days=duration - 1)
-                if end_date < wk_start or start_date > wk_end:
+                # Half-day resolution: the lane grid has 14 half-columns per week
+                # (2 per day), so a 1.5-day fit spans 3 half-columns. Positions
+                # are absolute half-columns relative to the week start, clipped
+                # to [0, 14); continuation flags flatten the bar at week edges.
+                fit_days = getattr(appt, 'effective_fit_days', None) or float(appt.fit_duration or 1)
+                half_total = max(1, int(round(fit_days * 2)))
+                start_half = (appt.fit_date - wk_start).days * 2
+                end_half = start_half + half_total  # exclusive
+                if end_half <= 0 or start_half >= 14:
                     continue
-                cs = max(start_date, wk_start)
-                ce = min(end_date, wk_end)
+                cs_half = max(0, start_half)
+                ce_half = min(14, end_half)
                 entries.append({
                     'appt': appt,
-                    'grid_col_start': day_index[cs] + 1,
-                    'grid_col_end': day_index[ce] + 2,
-                    'cont_left': start_date < wk_start,
-                    'cont_right': end_date > wk_end,
+                    'grid_col_start': cs_half + 1,
+                    'grid_col_end': ce_half + 1,
+                    'cont_left': start_half < 0,
+                    'cont_right': end_half > 14,
                 })
             _col = fitter_color_map.get(code, ('#888888', '136, 136, 136'))
             lanes.append({
@@ -13006,12 +13046,32 @@ def move_fit_appointment(request, appointment_id):
                         _anthill_sale.fit_date = new_date
                         _anthill_sale.save(update_fields=['fit_date'])
             
-            # Update fit duration if provided
+            # Update fit duration if provided. For orders the duration lives on
+            # the sale coversheet (fit_days) — the same value the sale detail page
+            # shows/edits — so write it there. For remedials/warranties (no
+            # coversheet) it lives on the appointment. Half-day steps supported.
             if 'fit_duration' in data:
-                dur = int(data['fit_duration'])
-                if 1 <= dur <= 10:
-                    appointment.fit_duration = dur
-            
+                from decimal import Decimal as _Dec
+                try:
+                    dur = round(float(data['fit_duration']) * 2) / 2
+                except (TypeError, ValueError):
+                    dur = None
+                if dur is not None and 0.5 <= dur <= 5:
+                    dur_dec = _Dec(str(dur)).quantize(_Dec('0.1'))
+                    if appointment.order:
+                        _sale = appointment.order.anthill_sale.first()
+                        if _sale:
+                            from .customer_views import _get_or_create_sale_coversheet
+                            _user = request.user if request.user.is_authenticated else None
+                            _cover = _get_or_create_sale_coversheet(_sale, _user)
+                            if _cover.fit_days != dur_dec:
+                                _cover.fit_days = dur_dec
+                                _cover.updated_by = _user
+                                _cover.save(update_fields=['fit_days', 'updated_by', 'updated_at'])
+                    # Keep the appointment's own field in sync (source of truth
+                    # for remedials; a fallback for orders without a coversheet).
+                    appointment.fit_duration = dur_dec
+
             appointment.save()
             
             return JsonResponse({

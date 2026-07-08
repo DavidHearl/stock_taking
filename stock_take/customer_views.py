@@ -1753,9 +1753,16 @@ def _build_sale_context(sale, request_user):
     if sale.order:
         from .models import GalleryImage, Remedial
         gallery_images = GalleryImage.objects.filter(order=sale.order).order_by('-uploaded_at')
-        remedials = list(Remedial.objects.filter(original_order=sale.order).prefetch_related('accessories').order_by('-created_date'))
+        # Remedials and warranties share the Remedial model, split by record_type.
+        _all_remedials = list(
+            Remedial.objects.filter(original_order=sale.order)
+            .prefetch_related('accessories').order_by('-created_date')
+        )
+        remedials = [r for r in _all_remedials if r.record_type != 'warranty']
+        warranties = [r for r in _all_remedials if r.record_type == 'warranty']
     else:
         remedials = []
+        warranties = []
     related_sales = []
     if sale.customer:
         related_sales = sale.customer.anthill_sales.exclude(pk=sale.pk).order_by('-activity_date')
@@ -1882,6 +1889,7 @@ def _build_sale_context(sale, request_user):
         'adjusted_profit': adjusted_profit,
         'gallery_images': gallery_images,
         'remedials': remedials,
+        'warranties': warranties,
         'is_cancelled': is_cancelled,
         'is_completed': is_completed,
         'sale_invoices': sale_invoices,

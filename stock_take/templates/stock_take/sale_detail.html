@@ -32,12 +32,15 @@
     {% endif %}
 
     <!-- ===== TAB BAR ===== -->
-    <div class="tab-nav">
+    <div class="tab-nav-pills" data-pill-slider>
         <button class="tab-button {% if active_tab == 'enquiry' %}active{% endif %}" onclick="switchDetailTab('enquiry')" data-tab="enquiry">Enquiry</button>
-        <button class="tab-button {% if active_tab != 'order' and active_tab != 'enquiry' and active_tab != 'remedials' and active_tab != 'purchase_orders' %}active{% endif %}" onclick="switchDetailTab('sale')" data-tab="sale">Sale</button>
+        <button class="tab-button {% if active_tab != 'order' and active_tab != 'enquiry' and active_tab != 'remedials' and active_tab != 'warranties' and active_tab != 'purchase_orders' %}active{% endif %}" onclick="switchDetailTab('sale')" data-tab="sale">Sale</button>
         <button class="tab-button {% if active_tab == 'order' %}active{% endif %}" onclick="switchDetailTab('order')" data-tab="order">Order</button>
         <button class="tab-button {% if active_tab == 'remedials' %}active{% endif %}" onclick="switchDetailTab('remedials')" data-tab="remedials">
             Remedials{% if remedials %} <span class="tab-count">{{ remedials|length }}</span>{% endif %}
+        </button>
+        <button class="tab-button {% if active_tab == 'warranties' %}active{% endif %}" onclick="switchDetailTab('warranties')" data-tab="warranties">
+            Warranties{% if warranties %} <span class="tab-count">{{ warranties|length }}</span>{% endif %}
         </button>
         <button class="tab-button {% if active_tab == 'purchase_orders' %}active{% endif %}" onclick="switchDetailTab('purchase_orders')" data-tab="purchase_orders">
             Purchase Orders{% if sale_purchase_orders %} <span class="tab-count">{{ sale_purchase_orders|length }}</span>{% endif %}
@@ -48,7 +51,7 @@
     </div>
 
     <!-- ===== SALE TAB PANEL ===== -->
-    <div id="tab-panel-sale" class="detail-tab-panel {% if active_tab != 'order' and active_tab != 'enquiry' and active_tab != 'remedials' %}active{% endif %}">
+    <div id="tab-panel-sale" class="detail-tab-panel {% if active_tab != 'order' and active_tab != 'enquiry' and active_tab != 'remedials' and active_tab != 'warranties' and active_tab != 'purchase_orders' and active_tab != 'notes' %}active{% endif %}">
 
     <div class="order-details-grid">
 
@@ -1883,6 +1886,115 @@
         </div>
     </div><!-- /.tab-panel-remedials -->
 
+    <!-- ===== WARRANTIES TAB PANEL ===== -->
+    <div id="tab-panel-warranties" class="detail-tab-panel {% if active_tab == 'warranties' %}active{% endif %}">
+        <div class="sd-tab-content-wrap">
+        {% if warranties %}
+            <div class="sd-tab-header-actions">
+                <button type="button" class="btn btn-primary btn-sm" onclick="openModal('createWarrantyModal')">
+                    <i class="bi bi-plus-circle"></i> Open Warranty
+                </button>
+            </div>
+            {% for rem in warranties %}
+            <div class="card order-info-card">
+                <div class="card-header card-header-sale">
+                    <h3>{{ rem.remedial_number }}</h3>
+                    <div class="header-actions">
+                        <span class="customer-active-badge {% if rem.is_completed %}active{% elif rem.is_overdue %}danger{% else %}inactive{% endif %}">
+                            {% if rem.is_completed %}Completed{% elif rem.is_overdue %}Overdue{% else %}Open{% endif %}
+                        </span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                title="Edit warranty"
+                                onclick="openEditRemedial(this)"
+                                data-pk="{{ rem.pk }}"
+                                data-record-type="warranty"
+                                data-reason="{{ rem.reason|escape }}"
+                                data-notes="{{ rem.notes|escape }}"
+                                data-scheduled="{{ rem.scheduled_date|date:'Y-m-d' }}"
+                                data-completed="{{ rem.is_completed|yesno:'1,0' }}"
+                                data-boards="{{ rem.order_boards_required|yesno:'1,0' }}"
+                                data-accessories="{{ rem.order_accessories_required|yesno:'1,0' }}"
+                                data-glass="{{ rem.order_glass_required|yesno:'1,0' }}"
+                                data-osdoors="{{ rem.os_doors_required|yesno:'1,0' }}"
+                                data-boards-items="{{ rem.order_boards_items|escape }}"
+                                data-boards-po="{{ rem.order_boards_po_ref|escape }}"
+                                data-accessories-items="{{ rem.order_accessories_items|escape }}"
+                                data-accessories-po="{{ rem.order_accessories_po_ref|escape }}"
+                                data-glass-items="{{ rem.order_glass_items|escape }}"
+                                data-glass-po="{{ rem.order_glass_po_ref|escape }}"
+                                data-osdoors-items="{{ rem.os_doors_items|escape }}"
+                                data-osdoors-po="{{ rem.os_doors_po|escape }}"
+                                data-number="{{ rem.remedial_number }}">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger"
+                                title="Delete warranty"
+                                onclick="openDeleteRemedial('{{ rem.pk }}', '{{ rem.remedial_number|escapejs }}', 'warranty')">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body padded">
+                    <div class="info-display">
+                        <div class="field-row-sb">
+                            <span class="field-label">Reason</span>
+                            <span class="field-value">{{ rem.reason }}</span>
+                        </div>
+                        {% if rem.notes %}
+                        <div class="field-row-sb">
+                            <span class="field-label">Notes</span>
+                            <span class="field-value">{{ rem.notes }}</span>
+                        </div>
+                        {% endif %}
+                        <div class="field-row-sb">
+                            <span class="field-label">Created</span>
+                            <span class="field-value">{{ rem.created_date|date:"d M Y" }}</span>
+                        </div>
+                        {% if rem.scheduled_date %}
+                        <div class="field-row-sb">
+                            <span class="field-label">Scheduled</span>
+                            <span class="field-value">{{ rem.scheduled_date|date:"d M Y" }}</span>
+                        </div>
+                        {% endif %}
+                        {% if rem.completed_date %}
+                        <div class="field-row-sb">
+                            <span class="field-label">Completed</span>
+                            <span class="field-value">{{ rem.completed_date|date:"d M Y" }}</span>
+                        </div>
+                        {% endif %}
+                        <div class="field-row-sb">
+                            <span class="field-label">OS Doors Required</span>
+                            <span class="field-value">{{ rem.os_doors_required|yesno:"Yes,No" }}</span>
+                        </div>
+                        {% if rem.accessories.all %}
+                        <div class="field-row-sb field-row-top">
+                            <span class="field-label">Accessories</span>
+                            <span class="field-value">{{ rem.accessories.count }} item{{ rem.accessories.count|pluralize }}</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="sd-empty-state">
+                {% if order %}
+                    <div class="sd-empty-icon"><i class="bi bi-shield-check"></i></div>
+                    <h3 class="sd-empty-title">No warranties yet</h3>
+                    <p class="sd-empty-text">There are no warranties on record for this job.</p>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openModal('createWarrantyModal')">
+                        <i class="bi bi-plus-circle"></i> Open Warranty
+                    </button>
+                {% else %}
+                    <div class="sd-empty-icon"><i class="bi bi-link-45deg"></i></div>
+                    <h3 class="sd-empty-title">No order linked</h3>
+                    <p class="sd-empty-text">Warranties are tracked against orders.</p>
+                {% endif %}
+            </div>
+        {% endif %}
+        </div>
+    </div><!-- /.tab-panel-warranties -->
+
     <!-- ===== PURCHASE ORDERS TAB PANEL ===== -->
     <div id="tab-panel-purchase_orders" class="detail-tab-panel {% if active_tab == 'purchase_orders' %}active{% endif %}">
         <div class="sd-tab-content-wrap">
@@ -3103,13 +3215,52 @@ function filterSaleInvoices(query) {
     </div>
 </div>
 
+<!-- Modal: Open Warranty (posts to create_remedial with record_type=warranty) -->
+<div class="modal" id="createWarrantyModal">
+    <div class="modal-overlay" onclick="closeModal('createWarrantyModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Open Warranty</h3>
+                <button type="button" class="modal-close" onclick="closeModal('createWarrantyModal')">&#x2715;</button>
+            </div>
+            <form method="post" action="{% url 'create_remedial' order.pk %}">
+                {% csrf_token %}
+                <input type="hidden" name="record_type" value="warranty">
+                <input type="hidden" name="next" value="{% url 'sale_detail' sale.pk %}?tab=warranties">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label class="form-label" for="war-reason">Reason <span class="required-star">*</span></label>
+                        <textarea id="war-reason" name="reason" class="form-control" rows="4"
+                                  placeholder="Describe the warranty issue" required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="war-notes">Notes</label>
+                        <textarea id="war-notes" name="notes" class="form-control" rows="3"
+                                  placeholder="Any additional notes (optional)"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="war-scheduled">Scheduled Date</label>
+                        <input type="date" id="war-scheduled" name="scheduled_date" class="form-control sd-date-input">
+                    </div>
+                    {% include 'stock_take/partials/remedial_actions_section.html' with prefix='war' %}
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('createWarrantyModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-plus-circle"></i> Create Warranty</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Modal: Edit Remedial -->
 <div class="modal" id="editRemedialModal">
     <div class="modal-overlay" onclick="closeModal('editRemedialModal')"></div>
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Edit Remedial <span id="edit-rem-number"></span></h3>
+                <h3>Edit <span id="edit-rem-kind">Remedial</span> <span id="edit-rem-number"></span></h3>
                 <button type="button" class="modal-close" onclick="closeModal('editRemedialModal')">&#x2715;</button>
             </div>
             <form method="post" id="editRemedialForm">
@@ -3149,14 +3300,14 @@ function filterSaleInvoices(query) {
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Delete Remedial</h3>
+                <h3>Delete <span id="delete-rem-kind">Remedial</span></h3>
                 <button type="button" class="modal-close" onclick="closeModal('deleteRemedialModal')">&#x2715;</button>
             </div>
             <form method="post" id="deleteRemedialForm">
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{% url 'sale_detail' sale.pk %}?tab=remedials">
                 <div class="modal-body">
-                    <p class="mb-0">Are you sure you want to delete remedial <strong id="delete-rem-number"></strong>? This cannot be undone.</p>
+                    <p class="mb-0">Are you sure you want to delete <strong id="delete-rem-number"></strong>? This cannot be undone.</p>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeModal('deleteRemedialModal')">Cancel</button>
@@ -3293,8 +3444,14 @@ function loadRemItems(base, raw) {
 
 function openEditRemedial(btn) {
     const d = btn.dataset;
+    const isWarranty = d.recordType === 'warranty';
     const form = document.getElementById('editRemedialForm');
     form.action = `/remedial/${d.pk}/update/`;
+    // Return to the tab the record belongs to after saving.
+    const nextInput = form.querySelector('input[name="next"]');
+    if (nextInput) nextInput.value = nextInput.value.replace(/\?tab=.*$/, isWarranty ? '?tab=warranties' : '?tab=remedials');
+    const kindEl = document.getElementById('edit-rem-kind');
+    if (kindEl) kindEl.textContent = isWarranty ? 'Warranty' : 'Remedial';
     document.getElementById('edit-rem-number').textContent = d.number || '';
     document.getElementById('edit-rem-reason').value = d.reason || '';
     document.getElementById('edit-rem-notes').value = d.notes || '';
@@ -3316,8 +3473,14 @@ function openEditRemedial(btn) {
     openModal('editRemedialModal');
 }
 
-function openDeleteRemedial(pk, number) {
-    document.getElementById('deleteRemedialForm').action = `/remedial/${pk}/delete/`;
+function openDeleteRemedial(pk, number, recordType) {
+    const isWarranty = recordType === 'warranty';
+    const form = document.getElementById('deleteRemedialForm');
+    form.action = `/remedial/${pk}/delete/`;
+    const nextInput = form.querySelector('input[name="next"]');
+    if (nextInput) nextInput.value = nextInput.value.replace(/\?tab=.*$/, isWarranty ? '?tab=warranties' : '?tab=remedials');
+    const kindEl = document.getElementById('delete-rem-kind');
+    if (kindEl) kindEl.textContent = isWarranty ? 'Warranty' : 'Remedial';
     document.getElementById('delete-rem-number').textContent = number;
     openModal('deleteRemedialModal');
 }

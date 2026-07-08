@@ -1498,6 +1498,18 @@ class Remedial(models.Model):
     """Remedial work orders linked to original orders"""
     original_order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='remedials')
     remedial_number = models.CharField(max_length=20, unique=True, help_text='Unique remedial reference number')
+
+    RECORD_TYPE_CHOICES = [
+        ('remedial', 'Remedial'),
+        ('warranty', 'Warranty'),
+    ]
+    record_type = models.CharField(
+        max_length=20,
+        choices=RECORD_TYPE_CHOICES,
+        default='remedial',
+        help_text='Whether this record is a remedial or a warranty claim; both share the same fields and workflow.',
+    )
+
     reason = models.TextField(help_text='Reason for remedial work')
     notes = models.TextField(blank=True, help_text='Additional notes')
     
@@ -1713,7 +1725,7 @@ class FitAppointment(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='fit_appointments', null=True, blank=True)
     remedial = models.ForeignKey(Remedial, on_delete=models.CASCADE, related_name='fit_appointments', null=True, blank=True)
     fit_date = models.DateField(help_text='Scheduled fit date')
-    fit_duration = models.PositiveSmallIntegerField(default=1, help_text='Number of days for the fit (1 = single day)')
+    fit_duration = models.DecimalField(max_digits=3, decimal_places=1, default=1, help_text='Number of days for the fit, in half-day steps (1 = single day). For orders this mirrors the sale coversheet fit_days; for remedials/warranties it is the record own duration.')
     fitter = models.CharField(max_length=1, choices=FITTER_CHOICES, default='R', help_text='Assigned fitter')
     interior_completed = models.BooleanField(default=False, help_text='Interior fit completed')
     door_completed = models.BooleanField(default=False, help_text='Door fit completed')

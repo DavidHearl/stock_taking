@@ -3,7 +3,26 @@
     max-width: 1800px;
 }
 
-/* ── Calendar page-level tab panes (nav bar uses the standard .tab-nav/.tab-button) ── */
+/* ── Calendar page-level tab switcher ──────────────────────────
+   Rendered with the site's pill-tab component + sliding indicator
+   (.tab-nav-pills[data-pill-slider], styled in styles.css). Only the
+   contextual gap below it is page-specific; sizing/tray live in the shared
+   component so the site-wide rollout stays consistent. */
+#calPageTabs {
+	margin-bottom: 0;
+}
+
+/* Tab switcher (left) and the month summary cards (right) share one row. */
+.cal-tabs-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	flex-wrap: wrap;
+	margin-bottom: var(--sp-6);
+}
+
+/* ── Calendar page-level tab panes ── */
 .cal-tab-pane {
     display: none;
 }
@@ -556,9 +575,10 @@
 .cal-summary-bar {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 6px;
     flex-wrap: wrap;
-    margin-bottom: 16px;
+    margin-bottom: 0;
 }
 
 .cal-summary-scope {
@@ -579,7 +599,7 @@
     align-items: center;
     gap: 8px;
     padding: 8px 16px;
-    background: var(--bg-primary);
+    background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     overflow: hidden;
@@ -1072,6 +1092,63 @@
 
 .detail-edit-row.editing .detail-edit-input {
     display: block;
+}
+
+/* ── Fit-duration slider (copied from the sale coversheet fit_days control) ──
+   Same 0.5–5 half-day slider so the calendar modal and the sale detail page use
+   an identical control and value. */
+.cal-dur-slider {
+    min-width: 220px;
+}
+
+.cs-fit-days-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.cs-fit-days-wrap input[type="range"] {
+    width: 100%;
+}
+
+.cs-fit-days-scale {
+    position: relative;
+    height: 1.2em;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    margin-top: -2px;
+}
+
+.cs-fit-days-scale span {
+    position: absolute;
+    top: 0;
+    left: calc((100% / 9) * var(--i));
+    transform: translateX(-50%);
+    white-space: nowrap;
+}
+
+.cs-fit-days-scale span:first-child {
+    transform: translateX(0);
+}
+
+.cs-fit-days-scale span:last-child {
+    transform: translateX(-100%);
+}
+
+.cs-fit-days-scale span:nth-child(1) { --i: 0; }
+.cs-fit-days-scale span:nth-child(2) { --i: 1; }
+.cs-fit-days-scale span:nth-child(3) { --i: 2; }
+.cs-fit-days-scale span:nth-child(4) { --i: 3; }
+.cs-fit-days-scale span:nth-child(5) { --i: 4; }
+.cs-fit-days-scale span:nth-child(6) { --i: 5; }
+.cs-fit-days-scale span:nth-child(7) { --i: 6; }
+.cs-fit-days-scale span:nth-child(8) { --i: 7; }
+.cs-fit-days-scale span:nth-child(9) { --i: 8; }
+.cs-fit-days-scale span:nth-child(10) { --i: 9; }
+
+.cs-fit-days-value {
+    font-size: 0.8rem;
+    color: var(--text-primary);
 }
 
 /* ── Purchase Orders list ───────────────────────────────────── */
@@ -1959,7 +2036,10 @@
 .mw-lane-grid {
     position: relative;
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    /* 14 half-day tracks (2 per day) so an appointment can span half-days, e.g.
+       a 1.5-day fit covers 3 half-columns. The drop-zone / header / deliveries
+       grids stay at 7 day-columns and align with these at every 2nd track. */
+    grid-template-columns: repeat(14, 1fr);
     grid-auto-flow: dense;
     grid-auto-rows: auto;
     align-content: start;

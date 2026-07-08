@@ -101,6 +101,13 @@
             <button class="btn btn-sm btn-purple" id="send-btn" onclick="openSendModal()">
                 <i class="bi bi-envelope"></i> Send
             </button>
+            {% if purchase_order.xero_purchase_order_id %}
+            <a href="https://go.xero.com/app/purchase-orders/view/{{ purchase_order.xero_purchase_order_id }}"
+               target="_blank" rel="noopener" class="btn btn-sm btn-secondary" id="xero-view-btn"
+               title="View this purchase order in Xero (ID: {{ purchase_order.xero_purchase_order_id }})">
+                <i class="bi bi-box-arrow-up-right"></i> View in Xero
+            </a>
+            {% endif %}
             <div class="kebab-menu">
                 <button class="btn btn-sm btn-secondary kebab-trigger" onclick="toggleKebab(this, event)" title="More actions">
                     <i class="bi bi-three-dots-vertical"></i>
@@ -2849,7 +2856,10 @@ function updatePOStatus(newStatus, skipConfirm) {
 
 // ---- Push to Xero ----
 function pushToXero() {
-    if (!confirm('Push this purchase order to Xero? It will be created as an approved purchase order.')) return;
+    // Prompt for the GL account code, defaulting to the stock code. Lines without
+    // their own account_code post to this code. Cancel aborts the push.
+    const glCode = prompt('Push this purchase order to Xero as approved.\n\nGL account code for lines (defaults to stock):', 'B1001');
+    if (glCode === null) return;
 
     const btn = document.getElementById('xero-push-btn');
     btn.disabled = true;
@@ -2861,6 +2871,7 @@ function pushToXero() {
             'Content-Type': 'application/json',
             'X-CSRFToken': '{{ csrf_token }}',
         },
+        body: JSON.stringify({ gl_code: glCode.trim() }),
     })
     .then(res => {
         if (!res.ok && res.headers.get('content-type')?.indexOf('application/json') === -1) {

@@ -109,8 +109,11 @@ def fitter_schedule(request):
 
     by_date = {}
     unique_ids = set()
+    import math as _math
     for appt in appointments:
-        duration = max(1, appt.fit_duration or 1)
+        # Day-cell schedule: round a half-day fit_duration up to whole days so
+        # the job shows on every day it touches (fit_duration is now Decimal).
+        duration = max(1, int(_math.ceil(float(appt.fit_duration or 1))))
         start_date = appt.fit_date
         end_date = start_date + timedelta(days=duration - 1)
         if end_date < week_start or start_date > week_end:

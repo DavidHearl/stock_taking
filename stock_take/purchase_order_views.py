@@ -5804,8 +5804,20 @@ def purchase_order_push_to_xero(request, po_id):
     from django.utils import timezone
     import traceback
 
+    # Default Xero GL account code for stock purchase orders. Applied to any line
+    # that doesn't carry its own account_code. Overridable per-push via the request
+    # body ('gl_code'), which the PO detail page prompts for.
+    DEFAULT_STOCK_GL_CODE = 'B1001'
+
     try:
         po = get_object_or_404(PurchaseOrder, workguru_id=po_id)
+
+        # Resolve the GL code to fall back to: request body > stock default.
+        try:
+            body = json.loads(request.body or '{}')
+        except (ValueError, TypeError):
+            body = {}
+        gl_code = (body.get('gl_code') or '').strip() or DEFAULT_STOCK_GL_CODE
 
         # Prevent duplicate pushes
         if po.xero_purchase_order_id:
@@ -5836,8 +5848,9 @@ def purchase_order_push_to_xero(request, po_id):
                 'quantity': float(product.order_quantity or product.quantity or 1),
                 'unit_amount': float(product.order_price or 0),
             }
-            if product.account_code:
-                line['account_code'] = product.account_code
+            # Use the product's own GL code if it has one, otherwise fall back to
+            # the resolved stock/default GL code so every line posts to a ledger.
+            line['account_code'] = product.account_code or gl_code
             if supplier_tax_type:
                 line['tax_type'] = supplier_tax_type
             if product.supplier_code:
@@ -5886,7 +5899,7 @@ def purchase_order_push_to_xero(request, po_id):
             delivery_date=delivery_date,
             reference=reference,
             currency=po.currency or 'GBP',
-            status='SUBMITTED',
+            status='AUTHORISED',
             delivery_address=delivery_address,
         )
 
