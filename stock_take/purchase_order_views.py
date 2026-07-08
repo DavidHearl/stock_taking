@@ -5817,9 +5817,12 @@ def purchase_order_push_to_xero(request, po_id):
         if not po.supplier_name:
             return JsonResponse({'success': False, 'error': 'Purchase order has no supplier name'}, status=400)
 
-        # Look up the supplier to get their tax rate for Xero
+        # Look up the supplier to get their tax rate for Xero. The stored value
+        # may be a VAT percentage (e.g. "20") — Xero line items need a tax *code*
+        # (e.g. "INPUT2"), so resolve it before sending.
         supplier_obj = Supplier.objects.filter(workguru_id=po.supplier_id).first() if po.supplier_id else None
-        supplier_tax_type = supplier_obj.supplier_tax_rate if supplier_obj and supplier_obj.supplier_tax_rate else None
+        raw_tax_rate = supplier_obj.supplier_tax_rate if supplier_obj else None
+        supplier_tax_type = xero_api.resolve_purchase_tax_type(raw_tax_rate)
 
         # Build line items from PO products
         products = po.products.all().order_by('sort_order', 'id')

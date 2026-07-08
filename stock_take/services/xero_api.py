@@ -1121,3 +1121,44 @@ def find_or_create_tax_rate(rate_percent: int) -> str | None:
     xero_err = _last_api_error or 'unknown error'
     logger.error(f"Failed to find or create Xero tax rate for {rate_percent}%: {xero_err}")
     return None
+
+
+# Known UK Xero purchase (INPUT) tax codes by whole-number VAT rate.
+_UK_VAT_INPUT_CODE_MAP = {
+	0: 'ZERORATEDINPUT',
+	5: 'RRINPUT',
+	20: 'INPUT2',
+}
+
+
+def resolve_purchase_tax_type(value):
+	"""Resolve a supplier/PO tax-rate value to a Xero purchase TaxType code.
+
+	Xero line items need a tax *code* (e.g. 'INPUT2'), not a VAT percentage.
+	`value` may be:
+	  * a Xero code already (e.g. 'INPUT2', 'NONE') — returned unchanged,
+	  * a VAT percentage ('20', '20%', '5.0') — mapped to a UK input code or
+	    looked up / created via the TaxRates API,
+	  * blank / None — returns None (send no tax code, let Xero default it).
+
+	Returns the TaxType string, or None if it can't be resolved.
+	"""
+	if value is None:
+		return None
+	text = str(value).strip()
+	if not text:
+		return None
+
+	# Interpret a numeric value (optionally with a trailing %) as a VAT rate.
+	numeric = text.rstrip('%').strip()
+	try:
+		rate = float(numeric)
+	except ValueError:
+		# Not a number — assume it's already a Xero tax code and pass it through.
+		return text
+
+	rate_int = int(round(rate))
+	code = _UK_VAT_INPUT_CODE_MAP.get(rate_int)
+	if code:
+		return code
+	return find_or_create_tax_rate(rate_int)

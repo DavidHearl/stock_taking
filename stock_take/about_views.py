@@ -11,6 +11,39 @@ from django.contrib.auth.models import User
 
 _SCRIPT_RE = re.compile(r'<script(?:\s[^>]*)?>(.+?)</script>', re.DOTALL | re.IGNORECASE)
 
+# First-party code fileset — shared by the breakdown counter and the commit-history
+# charts so both measure the same thing.
+_CODE_EXTENSIONS = {".py", ".html", ".css", ".js"}
+_CODE_APP_DIRS = ("stock_take", "stock_taking", "material_generator", "templates", "order_generator_files", "static")
+_CODE_EXCLUDE_DIRS = {"__pycache__", "migrations", "fonts"}
+_CODE_EXCLUDE_FILES = {"bootstrap-icons.min.css"}
+
+
+def _is_code_path(path):
+    """True if a repo-relative git path is one of the first-party code files the
+    breakdown counter (`_count_lines_of_code`) would include."""
+    # Normalise git rename syntax: "old => new" and "dir/{old => new}/file".
+    if "=>" in path:
+        if "{" in path and "}" in path:
+            pre, rest = path.split("{", 1)
+            inner, post = rest.split("}", 1)
+            path = pre + inner.split("=>")[-1].strip() + post
+        else:
+            path = path.split("=>")[-1].strip()
+    path = path.strip().strip('"')
+    parts = path.split("/")
+    fname = parts[-1]
+    if fname in _CODE_EXCLUDE_FILES:
+        return False
+    if any(seg in _CODE_EXCLUDE_DIRS for seg in parts):
+        return False
+    if os.path.splitext(fname)[1] not in _CODE_EXTENSIONS:
+        return False
+    # Must live under a tracked app dir, or be a root-level .py script.
+    if len(parts) == 1:
+        return fname.endswith(".py")
+    return parts[0] in _CODE_APP_DIRS
+
 
 def _count_lines_of_code():
     """Count lines of code in first-party application directories.
@@ -18,9 +51,9 @@ def _count_lines_of_code():
     JavaScript inside <script> tags in .html files is counted as JS, not HTML.
     """
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    app_dirs = ["stock_take", "stock_taking", "material_generator", "templates", "order_generator_files", "static"]
-    extensions = {".py", ".html", ".css", ".js"}
-    exclude = {"__pycache__", "migrations", "bootstrap-icons.min.css", "fonts"}
+    app_dirs = list(_CODE_APP_DIRS)
+    extensions = _CODE_EXTENSIONS
+    exclude = _CODE_EXCLUDE_DIRS | _CODE_EXCLUDE_FILES
 
     by_type = {}
     total_files = 0
@@ -174,12 +207,19 @@ def _get_media_stats():
 _MAX_COMMIT_LINES = 100000
 
 
-def _get_commit_line_stats():
+def _get_commit_line_stats(anchor_total=None):
     """Return commit index with per-commit additions/removals from git history.
 
-    Commits touching more than ``_MAX_COMMIT_LINES`` lines are excluded so bulk
-    setup/vendor commits don't distort the charts. Each returned commit also
-    carries a running ``cumulative`` net line total in chronological order.
+    Only first-party code files (see ``_is_code_path``) are counted, so the charts
+    measure the same lines as the breakdown table. Commits touching more than
+    ``_MAX_COMMIT_LINES`` code lines are excluded so bulk setup/vendor commits don't
+    distort the charts. Each returned commit carries a running ``cumulative`` net
+    line total in chronological order.
+
+    When ``anchor_total`` is given, the cumulative series is shifted so its most
+    recent point equals that value — net deltas miss the pre-history baseline and
+    accrue per-file rounding, so this keeps the chart's endpoint in agreement with
+    the measured current line count.
     """
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -268,7 +308,9 @@ def _get_commit_line_stats():
         parts = line.split("\t")
         if len(parts) < 3:
             continue
-        add_str, rem_str = parts[0], parts[1]
+        add_str, rem_str, path = parts[0], parts[1], parts[2]
+        if not _is_code_path(path):
+            continue
         if add_str.isdigit():
             current_added += int(add_str)
         if rem_str.isdigit():
@@ -301,6 +343,13 @@ def _get_commit_line_stats():
     for idx, c in enumerate(commits, start=1):
         c["number"] = idx
 
+    # Shift the whole series so the newest commit (commits[0], the running total)
+    # lands on the measured current line count.
+    if anchor_total is not None and commits:
+        offset = anchor_total - commits[0]["cumulative"]
+        for c in commits:
+            c["cumulative"] += offset
+
     return commits
 
 
@@ -317,7 +366,7 @@ def about_page(request):
 
     db_stats = _get_db_stats()
     media_stats = _get_media_stats()
-    commit_stats = _get_commit_line_stats()
+    commit_stats = _get_commit_line_stats(anchor_total=total_lines)
 
     context = {
         "total_lines": total_lines,
