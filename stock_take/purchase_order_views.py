@@ -315,19 +315,11 @@ def purchase_orders_list(request):
     )
     
     total_filtered = queryset.count()
-    
-    # Filter by status tab
-    STATUS_TAB_MAP = {
-        'draft': 'Draft',
-        'approved': 'Approved',
-        'received': 'Received',
-        'partially received': 'Partially Received',
-        'cancelled': 'Cancelled',
-    }
-    if status_filter != 'all':
-        db_status = STATUS_TAB_MAP.get(status_filter.lower(), status_filter.capitalize())
-        queryset = queryset.filter(status=db_status)
-    
+
+    # NOTE: status-tab filtering is done client-side (seamless, no page reload) —
+    # every status is rendered into the table with a data-status attribute and the
+    # status pills show/hide rows in JS. `status_filter` is passed through only to
+    # set which pill is active on initial load (e.g. arriving at ?status=draft).
     total_count = PurchaseOrder.objects.count()
     
     # Count of zero-total POs (before status filter but after supplier/search filters)
@@ -518,8 +510,15 @@ def purchase_orders_list(request):
         'approved_report_pos': approved_report_pos,
         'approved_report_total': approved_report_total,
         'approved_report_currency_totals': approved_report_currency_totals,
+        # Which top-level tab is active ('orders' or 'overheads')
+        'active_po_tab': 'overheads' if request.GET.get('tab') == 'overheads' else 'orders',
     }
-    
+
+    # Overheads are shown as a second tab on this same page — merge in their
+    # (namespaced) context so both panels can be rendered server-side.
+    from .overhead_po_views import build_overhead_list_context
+    context.update(build_overhead_list_context(request))
+
     return render(request, 'stock_take/purchase_orders_list.html', context)
 
 

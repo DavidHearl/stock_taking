@@ -12,20 +12,62 @@
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/purchase_orders.css' %}">
 <link rel="stylesheet" href="{% static 'css/purchase_orders_list.css' %}">
+<link rel="stylesheet" href="{% static 'css/purchase_invoices.css' %}">
+<link rel="stylesheet" href="{% static 'css/overhead_po_list.css' %}">
 {% endblock %}
 
 {% block content %}
 <div class="po-page">
-<div class="po-toolbar">
-    <div class="view-mode-switcher pol-vm-switcher">
-        <a href="{% url 'purchase_orders_list' %}" class="view-mode-btn active">
-            <i class="bi bi-cart3"></i>&nbsp; Purchase Orders
-        </a>
-        <a href="{% url 'overhead_po_list' %}" class="view-mode-btn">
-            <i class="bi bi-receipt"></i>&nbsp; Overheads
-        </a>
+
+<!-- ===== PAGE TAB BAR (Purchase Orders / Overheads) + PO status tabs ===== -->
+<div class="po-top-row">
+    <div class="tab-nav-pills po-page-tabs" data-pill-slider>
+        <button type="button" class="tab-button {% if active_po_tab != 'overheads' %}active{% endif %}" data-potab="orders" onclick="switchPOPageTab('orders')">
+            Purchase Orders
+        </button>
+        <button type="button" class="tab-button {% if active_po_tab == 'overheads' %}active{% endif %}" data-potab="overheads" onclick="switchPOPageTab('overheads')">
+            Overheads{% if opo_total_count %} <span class="tab-count">{{ opo_total_count }}</span>{% endif %}
+        </button>
     </div>
 
+    <!-- Status tabs (Purchase Orders only) — animated pills, filtered client-side.
+         Hidden while the Overheads tab is active. -->
+    <div class="po-status-wrap" id="po-status-tabs"{% if active_po_tab == 'overheads' %} style="display:none"{% endif %}>
+        {% if excluded_suppliers %}
+        <button class="po-clear-filter-btn" onclick="window.location.href=buildUrl({exclude_supplier:[], status:'{{ status_filter }}'})" title="Clear supplier filter">
+            <i class="bi bi-x-circle"></i> {{ excluded_suppliers|length }} supplier{{ excluded_suppliers|length|pluralize }} hidden
+        </button>
+        {% endif %}
+        <div class="tab-nav-pills po-status-pills" data-pill-slider>
+            <button type="button" class="tab-button {% if status_filter == 'all' %}active{% endif %}" data-status="all" onclick="switchTab('all')">All <span class="tab-count">{{ total_filtered }}</span></button>
+            <button type="button" class="tab-button {% if status_filter == 'draft' %}active{% endif %}" data-status="draft" onclick="switchTab('draft')">Draft <span class="tab-count">{{ draft_count }}</span></button>
+            <button type="button" class="tab-button {% if status_filter == 'approved' %}active{% endif %}" data-status="approved" onclick="switchTab('approved')">Ordered <span class="tab-count">{{ approved_count }}</span></button>
+            <button type="button" class="tab-button {% if status_filter == 'partially received' %}active{% endif %}" data-status="partially received" onclick="switchTab('partially received')">Partial <span class="tab-count">{{ partial_count }}</span></button>
+            <button type="button" class="tab-button {% if status_filter == 'received' %}active{% endif %}" data-status="received" onclick="switchTab('received')">Received <span class="tab-count">{{ received_count }}</span></button>
+            <button type="button" class="tab-button {% if status_filter == 'cancelled' %}active{% endif %}" data-status="cancelled" onclick="switchTab('cancelled')">Cancelled <span class="tab-count">{{ cancelled_count }}</span></button>
+        </div>
+    </div>
+
+    <!-- Status pills (Overheads only) — mirror the Purchase Orders status pills,
+         filtered client-side. Hidden while the Purchase Orders tab is active. -->
+    <div class="po-status-wrap" id="opo-status-tabs"{% if active_po_tab != 'overheads' %} style="display:none"{% endif %}>
+        <div class="tab-nav-pills po-status-pills" data-pill-slider>
+            <button type="button" class="tab-button {% if opo_status_filter == 'all' %}active{% endif %}" data-ostatus="all" onclick="switchOPOTab('all')">All <span class="tab-count">{{ opo_total_filtered }}</span></button>
+            <button type="button" class="tab-button {% if opo_status_filter == 'draft' %}active{% endif %}" data-ostatus="draft" onclick="switchOPOTab('draft')">Draft <span class="tab-count">{{ opo_status_counts.draft|default:0 }}</span></button>
+            <button type="button" class="tab-button {% if opo_status_filter == 'approved' %}active{% endif %}" data-ostatus="approved" onclick="switchOPOTab('approved')">Approved <span class="tab-count">{{ opo_status_counts.approved|default:0 }}</span></button>
+            <button type="button" class="tab-button {% if opo_status_filter == 'invoiced' %}active{% endif %}" data-ostatus="invoiced" onclick="switchOPOTab('invoiced')">Invoiced <span class="tab-count">{{ opo_status_counts.invoiced|default:0 }}</span></button>
+            <button type="button" class="tab-button {% if opo_status_filter == 'paid' %}active{% endif %}" data-ostatus="paid" onclick="switchOPOTab('paid')">Paid <span class="tab-count">{{ opo_status_counts.paid|default:0 }}</span></button>
+            <button type="button" class="tab-button {% if opo_status_filter == 'cancelled' %}active{% endif %}" data-ostatus="cancelled" onclick="switchOPOTab('cancelled')">Cancelled <span class="tab-count">{{ opo_status_counts.cancelled|default:0 }}</span></button>
+        </div>
+    </div>
+</div>
+
+<!-- Panels wrapper — clips the horizontal glide so it never spills a page scrollbar -->
+<div class="po-panels">
+
+<!-- ===== PURCHASE ORDERS PANEL ===== -->
+<div id="po-panel-orders" class="po-page-panel {% if active_po_tab != 'overheads' %}active{% endif %}">
+<div class="po-toolbar">
     <div class="po-search-box">
         <i class="bi bi-search"></i>
         <input type="text" id="po-search" placeholder="Search PO number, supplier, project, description..." value="{{ search_query }}" autocomplete="off">
@@ -65,9 +107,13 @@
         </div>
     </div>
 
+    <button class="btn btn-success" title="Create new Purchase Order" onclick="document.getElementById('createPOModal').style.display='flex'">
+        <i class="bi bi-plus-lg"></i> New PO
+    </button>
+
     <div class="kebab-menu">
-        <button class="po-filter-btn kebab-trigger" onclick="toggleKebab(this, event)" title="More actions">
-            <i class="bi bi-three-dots"></i>
+        <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="More actions">
+            <i class="bi bi-three-dots-vertical"></i>
         </button>
         <div class="kebab-dropdown">
             <a class="kebab-item {% if show_zero %}active{% endif %}" onclick="toggleZeroFilter()">
@@ -84,10 +130,6 @@
             </a>
         </div>
     </div>
-
-    <button class="btn btn-success" title="Create new Purchase Order" onclick="document.getElementById('createPOModal').style.display='flex'">
-        <i class="bi bi-plus-lg"></i> New PO
-    </button>
 </div>
 
 <div class="content-card">
@@ -100,35 +142,8 @@
         <div class="sync-progress-text" id="sync-status">Starting sync...</div>
     </div>
 
-    <!-- Status Tabs -->
-    <div class="po-tabs">
-        <a href="javascript:void(0)" onclick="switchTab('all')" class="po-tab {% if status_filter == 'all' %}active{% endif %}">
-            All <span class="po-tab-count">{{ total_filtered }}</span>
-        </a>
-        <a href="javascript:void(0)" onclick="switchTab('draft')" class="po-tab {% if status_filter == 'draft' %}active{% endif %}">
-            Draft <span class="po-tab-count">{{ draft_count }}</span>
-        </a>
-        <a href="javascript:void(0)" onclick="switchTab('approved')" class="po-tab {% if status_filter == 'approved' %}active{% endif %}">
-            Ordered <span class="po-tab-count">{{ approved_count }}</span>
-        </a>
-        <a href="javascript:void(0)" onclick="switchTab('partially received')" class="po-tab {% if status_filter == 'partially received' %}active{% endif %}">
-            Partially Received <span class="po-tab-count">{{ partial_count }}</span>
-        </a>
-        <a href="javascript:void(0)" onclick="switchTab('received')" class="po-tab {% if status_filter == 'received' %}active{% endif %}">
-            Received <span class="po-tab-count">{{ received_count }}</span>
-        </a>
-        <a href="javascript:void(0)" onclick="switchTab('cancelled')" class="po-tab {% if status_filter == 'cancelled' %}active{% endif %}">
-            Cancelled <span class="po-tab-count">{{ cancelled_count }}</span>
-        </a>
-        {% if excluded_suppliers %}
-        <button class="po-clear-filter-btn" onclick="window.location.href=buildUrl({exclude_supplier:[], status:'{{ status_filter }}'})" title="Clear supplier filter">
-            <i class="bi bi-x-circle"></i> {{ excluded_suppliers|length }} supplier{{ excluded_suppliers|length|pluralize }} hidden
-        </button>
-        {% endif %}
-    </div>
-
     {% if purchase_orders %}
-    <div class="po-table-container">
+    <div class="po-table-container" id="po-table-container">
         <table class="table po-table">
             <thead>
                 <tr>
@@ -139,12 +154,12 @@
                     <th>Status</th>
                     <th class="text-center">Emailed</th>
                     <th class="text-center">Invoice</th>
-                    <th class="text-center">Actions</th>
+                    <th class="po-actions-col"></th>
                 </tr>
             </thead>
             <tbody>
                 {% for po in purchase_orders %}
-                <tr>
+                <tr data-status="{{ po.status|lower }}">
                     <td>
                         <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="po-number">
                             {{ po.display_number|default:"-" }}
@@ -197,19 +212,37 @@
                         </span>
                         {% endif %}
                     </td>
-                    <td class="text-center">
-                        {% if po.total == 0 %}
-                        <button class="btn btn-icon btn-ghost btn-po-action" title="Recalculate total from line items" onclick="recalculatePOTotal({{ po.workguru_id }}, this)">
-                            <i class="bi bi-arrow-clockwise"></i>
-                        </button>
-                        {% endif %}
+                    <td class="text-center po-actions-cell">
+                        <div class="kebab-menu">
+                            <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Actions" aria-label="Actions">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="kebab-dropdown">
+                                <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="kebab-item">
+                                    <i class="bi bi-box-arrow-up-right"></i> Open
+                                </a>
+                                <a href="{% url 'purchase_order_download_pdf' po.workguru_id %}" class="kebab-item" target="_blank" rel="noopener">
+                                    <i class="bi bi-file-earmark-pdf"></i> Download PDF
+                                </a>
+                                {% if po.total == 0 %}
+                                <button class="kebab-item" data-keep-open onclick="recalculatePOTotal({{ po.workguru_id }}, this)">
+                                    <i class="bi bi-arrow-clockwise"></i> Recalculate total
+                                </button>
+                                {% endif %}
+                            </div>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
-    <div class="po-results-count">
+    <!-- Shown by JS when the selected status pill has no matching rows -->
+    <div class="po-empty-state" id="po-status-empty" style="display:none;">
+        <i class="bi bi-clipboard-x"></i>
+        <p id="po-status-empty-msg">No purchase orders with this status.</p>
+    </div>
+    <div class="po-results-count" id="po-results-count">
         Showing {{ filtered_count }} of {{ total_count }} purchase orders
     </div>
     {% else %}
@@ -222,6 +255,134 @@
     </div>
     {% endif %}
 </div>
+</div><!-- #po-panel-orders -->
+
+<!-- ===== OVERHEADS PANEL ===== -->
+<div id="po-panel-overheads" class="po-page-panel {% if active_po_tab == 'overheads' %}active{% endif %}">
+<div class="po-toolbar">
+	<div class="po-search-box">
+		<i class="bi bi-search"></i>
+		<input type="text" id="opo-search" placeholder="Search reference, supplier, description..." value="{{ opo_search_query }}" autocomplete="off">
+		{% if opo_search_query %}
+		<button class="po-search-clear" onclick="clearOPOSearch()" title="Clear search">&times;</button>
+		{% endif %}
+	</div>
+
+	<div class="po-supplier-filter" id="opo-supplier-filter">
+		<button class="po-filter-btn" onclick="toggleOPOSupplierDropdown()" id="opo-supplier-filter-btn">
+			<i class="bi bi-funnel"></i>
+			Suppliers
+			{% if opo_excluded_suppliers %}<span class="po-filter-badge">{{ opo_excluded_suppliers|length }}</span>{% endif %}
+		</button>
+		<div class="po-supplier-dropdown" id="opo-supplier-dropdown">
+			<div class="po-supplier-dropdown-header">
+				<span>Filter Suppliers</span>
+				<div class="po-supplier-dropdown-actions">
+					<button onclick="setAllOPOSuppliers(true)">All</button>
+					<button onclick="setAllOPOSuppliers(false)">None</button>
+				</div>
+			</div>
+			<div class="po-supplier-search">
+				<input type="text" id="opo-supplier-search-input" placeholder="Search suppliers..." oninput="filterOPOSupplierList()" autocomplete="off">
+			</div>
+			<div class="po-supplier-list" id="opo-supplier-list">
+				{% for supplier in opo_all_suppliers %}
+				<label class="po-supplier-item" data-name="{{ supplier|lower }}">
+					<input type="checkbox" value="{{ supplier }}" {% if supplier not in opo_excluded_suppliers %}checked{% endif %}>
+					<span>{{ supplier }}</span>
+				</label>
+				{% endfor %}
+			</div>
+			<div class="po-supplier-dropdown-footer">
+				<button class="po-filter-apply" onclick="applyOPOSupplierFilter()">Apply Filter</button>
+			</div>
+		</div>
+	</div>
+
+	<button class="btn btn-success" title="Create new Overhead PO" onclick="openCreateOPOModal()">
+		<i class="bi bi-plus-lg"></i> New Overhead PO
+	</button>
+
+	<div class="kebab-menu">
+		<button class="kebab-trigger" onclick="toggleKebab(this, event)" title="Filter by category">
+			<i class="bi bi-three-dots-vertical"></i>
+		</button>
+		<div class="kebab-dropdown">
+			<a class="kebab-item {% if not opo_category_filter %}active{% endif %}" onclick="applyOPOFilter('ocategory', '')">All Categories</a>
+			<div class="kebab-divider"></div>
+			{% for val, label in opo_category_choices %}
+			<a class="kebab-item {% if opo_category_filter == val %}active{% endif %}" onclick="applyOPOFilter('ocategory', '{{ val }}')">{{ label }}</a>
+			{% endfor %}
+		</div>
+	</div>
+</div>
+
+<div class="content-card">
+	{% if overhead_pos %}
+	<div class="po-table-container" id="opo-table-container">
+		<table class="table po-table" id="opo-table">
+			<thead>
+				<tr>
+					<th>Reference</th>
+					<th>Supplier</th>
+					<th>Category</th>
+					<th>Date</th>
+					<th>Status</th>
+					<th class="text-right">Net</th>
+					<th class="text-right">Gross</th>
+					<th class="text-center" title="Linked Invoices"><i class="bi bi-receipt"></i></th>
+				</tr>
+			</thead>
+			<tbody>
+				{% for po in overhead_pos %}
+				<tr data-status="{{ po.status }}" onclick="window.location='{% url 'overhead_po_detail' po.id %}'" class="cursor-pointer">
+					<td>
+						<a href="{% url 'overhead_po_detail' po.id %}" class="po-number" onclick="event.stopPropagation()">{{ po.reference }}</a>
+					</td>
+					<td>{{ po.supplier_name|default:"—" }}</td>
+					<td><span class="opo-cat">{{ po.get_category_display }}</span></td>
+					<td>{{ po.date|date:"d M Y"|default:"—" }}</td>
+					<td>
+						<span class="po-status {% if po.status == 'draft' %}draft{% elif po.status == 'approved' %}approved{% elif po.status == 'invoiced' %}partially-received{% elif po.status == 'paid' %}received{% elif po.status == 'cancelled' %}cancelled{% endif %}">{{ po.get_status_display }}</span>
+					</td>
+					<td class="text-right">£{{ po.amount_net|floatformat:2|intcomma }}</td>
+					<td class="text-right">£{{ po.amount_gross|floatformat:2|intcomma }}</td>
+					<td class="text-center">
+						{% with cnt=po.purchase_invoices.count %}
+						{% if cnt > 0 %}
+						<span class="opo-count">{{ cnt }}</span>
+						{% else %}
+						<span class="text-muted">—</span>
+						{% endif %}
+						{% endwith %}
+					</td>
+				</tr>
+				{% endfor %}
+			</tbody>
+		</table>
+	</div>
+	<!-- Shown by JS when the selected status pill has no matching rows -->
+	<div class="po-empty-state" id="opo-status-empty" style="display:none;">
+		<i class="bi bi-clipboard-x"></i>
+		<p id="opo-status-empty-msg">No overhead purchase orders with this status.</p>
+	</div>
+	<div class="po-results-count" id="opo-results-count">
+		Showing {{ opo_total_filtered }} of {{ opo_total_count }} overhead purchase orders
+	</div>
+	{% else %}
+	<div class="po-empty-state">
+		<i class="bi bi-clipboard-x"></i>
+		<p>No overhead purchase orders found{% if opo_search_query %} matching "{{ opo_search_query }}"{% endif %}{% if opo_category_filter %} in this category{% endif %}.</p>
+		{% if opo_total_count == 0 %}
+		<p>Click <strong>New Overhead PO</strong> to create one.</p>
+		{% endif %}
+	</div>
+	{% endif %}
+</div>
+
+</div><!-- #po-panel-overheads -->
+
+</div><!-- .po-panels -->
 </div><!-- .po-page -->
 
 <script>
@@ -231,9 +392,9 @@ function buildUrl(overrides) {
     
     // Apply overrides
     for (const [key, val] of Object.entries(overrides)) {
-        if (key === 'exclude_supplier') {
-            params.delete('exclude_supplier');
-            if (Array.isArray(val)) val.forEach(v => params.append('exclude_supplier', v));
+        if (key === 'exclude_supplier' || key === 'oexclude_supplier') {
+            params.delete(key);
+            if (Array.isArray(val)) val.forEach(v => params.append(key, v));
         } else if (val === null || val === '') {
             params.delete(key);
         } else {
@@ -244,10 +405,168 @@ function buildUrl(overrides) {
     return '?' + params.toString();
 }
 
-/* ── Tab switching (preserves search & supplier filters) ── */
+/* ── Status tab switching — client-side, no page reload ──
+   Every status is rendered into the table; the pills just show/hide rows and
+   the active pill's indicator slides across (global pill-slider observer). */
 function switchTab(status) {
-    window.location.href = buildUrl({ status: status });
+    document.querySelectorAll('#po-status-tabs .tab-button').forEach(b =>
+        b.classList.toggle('active', b.dataset.status === status));
+
+    const tc = document.getElementById('po-table-container');
+    let visible = 0;
+    if (tc) {
+        tc.querySelectorAll('tbody tr').forEach(tr => {
+            const show = (status === 'all') || (tr.dataset.status === status);
+            tr.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        const hasRows = tc.querySelector('tbody tr') != null;
+        const empty = document.getElementById('po-status-empty');
+        const showEmpty = hasRows && visible === 0;
+        if (empty) {
+            empty.style.display = showEmpty ? '' : 'none';
+            const label = document.querySelector('#po-status-tabs .tab-button[data-status="' + status + '"]');
+            const msg = document.getElementById('po-status-empty-msg');
+            if (msg && label) msg.textContent = 'No purchase orders with status "' + label.textContent.replace(/\s*\d+\s*$/, '').trim() + '".';
+        }
+        tc.style.display = showEmpty ? 'none' : '';
+    }
+    const count = document.getElementById('po-results-count');
+    if (count) count.textContent = 'Showing ' + visible + ' of {{ total_count }} purchase orders';
+
+    // Reflect the selection in the URL without reloading
+    const params = new URLSearchParams(window.location.search);
+    if (status === 'all') params.delete('status'); else params.set('status', status);
+    const qs = params.toString();
+    history.replaceState(null, '', qs ? '?' + qs : window.location.pathname);
 }
+
+// Apply the initial status filter (e.g. arriving at ?status=draft) once loaded.
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.getElementById('po-status-tabs')) switchTab('{{ status_filter|default:"all" }}');
+});
+
+/* ── Page tab switching (Purchase Orders / Overheads) — client-side ── */
+function switchPOPageTab(tab) {
+    document.querySelectorAll('.po-page-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('[data-potab]').forEach(t => t.classList.remove('active'));
+    const panel = document.getElementById('po-panel-' + tab);
+    const btn = document.querySelector('[data-potab="' + tab + '"]');
+    if (panel) panel.classList.add('active');
+    if (btn) btn.classList.add('active');
+    // Status pills are per-tab: Purchase Orders has its own set, Overheads another.
+    const statusTabs = document.getElementById('po-status-tabs');
+    if (statusTabs) statusTabs.style.display = (tab === 'overheads') ? 'none' : '';
+    const opoStatusTabs = document.getElementById('opo-status-tabs');
+    if (opoStatusTabs) opoStatusTabs.style.display = (tab === 'overheads') ? '' : 'none';
+    // The status pills' sliding indicator can't measure itself while hidden —
+    // nudge the global pill-slider to re-align whichever bar is now visible.
+    window.dispatchEvent(new Event('resize'));
+    // Persist the active tab in the URL (keep all other filters) without reloading
+    const params = new URLSearchParams(window.location.search);
+    if (tab === 'overheads') params.set('tab', 'overheads'); else params.delete('tab');
+    const qs = params.toString();
+    history.replaceState(null, '', qs ? '?' + qs : window.location.pathname);
+}
+
+/* ── Overheads status pills — client-side, mirrors switchTab on the PO tab.
+   Every status is rendered into #opo-table-container; the pills just show/hide
+   rows and the active pill's indicator slides across (global pill-slider). ── */
+function switchOPOTab(status) {
+    document.querySelectorAll('#opo-status-tabs .tab-button').forEach(b =>
+        b.classList.toggle('active', b.dataset.ostatus === status));
+
+    const tc = document.getElementById('opo-table-container');
+    let visible = 0;
+    if (tc) {
+        tc.querySelectorAll('tbody tr').forEach(tr => {
+            const show = (status === 'all') || (tr.dataset.status === status);
+            tr.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        const hasRows = tc.querySelector('tbody tr') != null;
+        const empty = document.getElementById('opo-status-empty');
+        const showEmpty = hasRows && visible === 0;
+        if (empty) {
+            empty.style.display = showEmpty ? '' : 'none';
+            const label = document.querySelector('#opo-status-tabs .tab-button[data-ostatus="' + status + '"]');
+            const msg = document.getElementById('opo-status-empty-msg');
+            if (msg && label) msg.textContent = 'No overhead purchase orders with status "' + label.textContent.replace(/\s*\d+\s*$/, '').trim() + '".';
+        }
+        tc.style.display = showEmpty ? 'none' : '';
+    }
+    const count = document.getElementById('opo-results-count');
+    if (count) count.textContent = 'Showing ' + visible + ' of {{ opo_total_count }} overhead purchase orders';
+
+    // Reflect the selection in the URL without reloading (keep other filters)
+    const params = new URLSearchParams(window.location.search);
+    if (status === 'all') params.delete('ostatus'); else params.set('ostatus', status);
+    const qs = params.toString();
+    history.replaceState(null, '', qs ? '?' + qs : window.location.pathname);
+}
+
+// Apply the initial overheads status filter (e.g. arriving at ?ostatus=paid).
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.getElementById('opo-status-tabs')) switchOPOTab('{{ opo_status_filter|default:"all" }}');
+});
+
+/* ── Overheads category filter (server-side reload, keep the tab active) ── */
+function applyOPOFilter(key, value) {
+    const overrides = { tab: 'overheads' };
+    overrides[key] = value;
+    window.location.href = buildUrl(overrides);
+}
+function clearOPOSearch() {
+    window.location.href = buildUrl({ tab: 'overheads', oq: '' });
+}
+
+/* ── Overheads supplier filter dropdown (mirrors the PO tab's) ── */
+function toggleOPOSupplierDropdown() {
+    document.getElementById('opo-supplier-dropdown').classList.toggle('open');
+}
+document.addEventListener('click', function(e) {
+    const filter = document.getElementById('opo-supplier-filter');
+    if (filter && !filter.contains(e.target)) {
+        const dd = document.getElementById('opo-supplier-dropdown');
+        if (dd) dd.classList.remove('open');
+    }
+});
+function filterOPOSupplierList() {
+    const query = document.getElementById('opo-supplier-search-input').value.toLowerCase();
+    document.querySelectorAll('#opo-supplier-list .po-supplier-item').forEach(item => {
+        item.style.display = item.dataset.name.includes(query) ? '' : 'none';
+    });
+}
+function setAllOPOSuppliers(checked) {
+    document.querySelectorAll('#opo-supplier-list input[type="checkbox"]').forEach(cb => {
+        cb.checked = checked;
+    });
+}
+function applyOPOSupplierFilter() {
+    const excluded = [];
+    document.querySelectorAll('#opo-supplier-list input[type="checkbox"]').forEach(cb => {
+        if (!cb.checked) excluded.push(cb.value);
+    });
+    window.location.href = buildUrl({ oexclude_supplier: excluded, tab: 'overheads' });
+}
+(function() {
+    const opoSearch = document.getElementById('opo-search');
+    if (!opoSearch) return;
+    let timer;
+    opoSearch.addEventListener('input', function() {
+        clearTimeout(timer);
+        const q = this.value.trim();
+        timer = setTimeout(() => {
+            window.location.href = buildUrl({ oq: q, tab: 'overheads' });
+        }, 500);
+    });
+    opoSearch.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            clearTimeout(timer);
+            window.location.href = buildUrl({ oq: this.value.trim(), tab: 'overheads' });
+        }
+    });
+})();
 
 /* ── Search ── */
 let searchTimer;
@@ -335,9 +654,13 @@ function recalculatePOTotal(poId, btn) {
             const newTotal = parseFloat(data.total);
             totalCell.textContent = '\xa3' + newTotal.toFixed(2);
             if (newTotal !== 0) {
-                btn.closest('td').innerHTML = '';
+                // No longer £0 — drop the recalc item; keep the rest of the kebab.
+                const item = btn.closest('.kebab-item');
+                if (item) item.remove(); else btn.closest('td').innerHTML = '';
+                if (typeof closeAllKebabs === 'function') closeAllKebabs();
             } else {
                 btn.disabled = false;
+                btn.querySelector('i').classList.remove('spinning');
                 btn.innerHTML = originalHtml;
             }
         } else {
@@ -688,9 +1011,223 @@ function openCarnehillSummary() {
     document.getElementById('carnehillModal').style.display = 'none';
 }
 
-// Auto-open the create modal when arriving from the AP page (?new=1)
-if (new URLSearchParams(window.location.search).get('new') === '1') {
-    document.getElementById('createPOModal').style.display = 'flex';
+// Auto-open the create modal when arriving from the AP page (?new=1).
+// Deferred so it runs after every script block (incl. the overhead modal) loads.
+document.addEventListener('DOMContentLoaded', function() {
+    if (new URLSearchParams(window.location.search).get('new') !== '1') return;
+    if ('{{ active_po_tab }}' === 'overheads') {
+        openCreateOPOModal();
+    } else {
+        document.getElementById('createPOModal').style.display = 'flex';
+    }
+});
+</script>
+
+<!-- ── Create Overhead PO Modal ─────────────────────────────── -->
+<div class="pinv-modal-overlay" id="create-opo-modal" onclick="closeCreateOPOModal(event)">
+    <div class="pinv-modal-box opo-w-560" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3 class="opo-modal-title"><i class="bi bi-bag-plus"></i> New Overhead Purchase Order</h3>
+            <button type="button" class="opo-modal-close" onclick="closeCreateOPOModal()">&times;</button>
+        </div>
+        <div class="pinv-modal-body">
+            <div class="pinv-form-rows">
+                <!-- Supplier -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Supplier <span class="text-danger">*</span></label>
+                    <div class="opo-input-row">
+                        <div class="order-search-wrap opo-flex-min">
+                            <input type="text" id="opo-supplier-name" class="pinv-input w-full"
+                                   placeholder="Type to search…" autocomplete="off"
+                                   oninput="filterSupplierDd(this.value)"
+                                   onfocus="filterSupplierDd(this.value)"
+                                   onblur="setTimeout(closeSupplierDd,150)">
+                            <div class="order-search-dropdown modal-order-dd" id="opo-supplier-dd"></div>
+                        </div>
+                        <a href="{% url 'suppliers_list' %}" target="_blank"
+                           class="btn btn-sm btn-outline-secondary opo-nowrap-shrink"
+                           title="Go to Suppliers page (opens in new tab)">
+                            <i class="bi bi-plus-lg"></i>
+                        </a>
+                    </div>
+                </div>
+                <!-- Category -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Category</label>
+                    <select id="opo-category" class="pinv-input">
+                        {% for val, label in opo_category_choices %}
+                        <option value="{{ val }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <!-- Status -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Status</label>
+                    <select id="opo-status" class="pinv-input">
+                        {% for val, label in opo_status_choices %}
+                        <option value="{{ val }}" {% if val == 'draft' %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <!-- PO Date -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">PO Date</label>
+                    <div class="opo-input-row">
+                        <input type="date" id="opo-date" class="pinv-input flex-1">
+                        <button type="button" class="btn btn-sm btn-outline-secondary nowrap" onclick="document.getElementById('opo-date').value=todayISO()">Today</button>
+                    </div>
+                </div>
+                <!-- Expected Date -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Expected Date</label>
+                    <input type="date" id="opo-expected-date" class="pinv-input">
+                </div>
+                <!-- Net -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Net (£)</label>
+                    <input type="number" id="opo-amount-net" class="pinv-input" step="0.01" min="0" placeholder="0.00" oninput="calcOPOGross()" onchange="roundTo2(this)">
+                </div>
+                <!-- VAT -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">VAT (£)</label>
+                    <div class="opo-input-row">
+                        <input type="number" id="opo-amount-vat" class="pinv-input flex-1" step="0.01" min="0" placeholder="0.00" oninput="calcOPOGross()" onchange="roundTo2(this)">
+                        <button type="button" class="btn btn-sm btn-outline-secondary nowrap" onclick="calcOPOVAT()">20%</button>
+                    </div>
+                </div>
+                <!-- Gross -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">Gross (£)</label>
+                    <input type="number" id="opo-amount-gross" class="pinv-input" step="0.01" min="0" placeholder="0.00" onchange="roundTo2(this)">
+                </div>
+                <!-- GL Code -->
+                <div class="pinv-form-row">
+                    <label class="pinv-label">GL Code</label>
+                    <select id="opo-gl-code" class="pinv-input">
+                        <option value="">— Select GL code —</option>
+                        {% for gl in gl_codes %}
+                        <option value="{{ gl.code }}">{{ gl.code }} – {{ gl.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <!-- Description -->
+                <div class="pinv-form-row opo-row-top">
+                    <label class="pinv-label opo-label-top">Description</label>
+                    <textarea id="opo-description" class="pinv-input" rows="2" placeholder="Brief description of the purchase…"></textarea>
+                </div>
+                <!-- Notes -->
+                <div class="pinv-form-row opo-row-top">
+                    <label class="pinv-label opo-label-top">Notes</label>
+                    <textarea id="opo-notes" class="pinv-input" rows="2" placeholder="Internal notes…"></textarea>
+                </div>
+            </div>
+        </div>
+        <div class="pinv-modal-footer opo-footer-end">
+            <button type="button" class="btn btn-outline-secondary" onclick="closeCreateOPOModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="submitCreateOPO()">
+                <i class="bi bi-check-lg"></i> Create
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+/* ── Overhead PO create modal ── */
+function openCreateOPOModal() {
+    document.getElementById('opo-supplier-name').value = '';
+    document.getElementById('opo-category').value = 'other';
+    document.getElementById('opo-status').value = 'draft';
+    document.getElementById('opo-date').value = '';
+    document.getElementById('opo-expected-date').value = '';
+    document.getElementById('opo-amount-net').value = '';
+    document.getElementById('opo-amount-vat').value = '';
+    document.getElementById('opo-amount-gross').value = '';
+    document.getElementById('opo-gl-code').value = '';
+    document.getElementById('opo-description').value = '';
+    document.getElementById('opo-notes').value = '';
+    document.getElementById('create-opo-modal').classList.add('open');
+}
+function closeCreateOPOModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('create-opo-modal').classList.remove('open');
+}
+function calcOPOGross() {
+    const net = parseFloat(document.getElementById('opo-amount-net').value) || 0;
+    const vat = parseFloat(document.getElementById('opo-amount-vat').value) || 0;
+    document.getElementById('opo-amount-gross').value = (net + vat).toFixed(2);
+}
+function calcOPOVAT() {
+    const net = parseFloat(document.getElementById('opo-amount-net').value) || 0;
+    document.getElementById('opo-amount-vat').value = (net * 0.20).toFixed(2);
+    calcOPOGross();
+}
+function roundTo2(el) {
+    const v = parseFloat(el.value);
+    if (!isNaN(v)) el.value = v.toFixed(2);
+}
+function todayISO() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+// ── Supplier autocomplete ─────────────────────────────────────
+const OPO_SUPPLIERS = [{% for s in opo_suppliers %}"{{ s.name|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}];
+
+function filterSupplierDd(q) {
+    const dd = document.getElementById('opo-supplier-dd');
+    const matches = q.trim() === ''
+        ? OPO_SUPPLIERS.slice(0, 20)
+        : OPO_SUPPLIERS.filter(s => s.toLowerCase().includes(q.toLowerCase())).slice(0, 20);
+    if (!matches.length) { dd.style.display = 'none'; return; }
+    dd.innerHTML = matches.map(s =>
+        `<div class="order-search-item" onmousedown="pickSupplier('${s.replace(/'/g, "\\'")}')">` +
+        s.replace(/</g,'&lt;') + '</div>'
+    ).join('');
+    dd.style.display = 'block';
+}
+function pickSupplier(name) {
+    document.getElementById('opo-supplier-name').value = name;
+    closeSupplierDd();
+}
+function closeSupplierDd() {
+    const dd = document.getElementById('opo-supplier-dd');
+    if (dd) dd.style.display = 'none';
+}
+
+function submitCreateOPO() {
+    const supplier = document.getElementById('opo-supplier-name').value.trim();
+    if (!supplier) { alert('Supplier name is required'); return; }
+
+    const payload = {
+        supplier_name:  supplier,
+        category:       document.getElementById('opo-category').value,
+        status:         document.getElementById('opo-status').value,
+        date:           document.getElementById('opo-date').value || null,
+        expected_date:  document.getElementById('opo-expected-date').value || null,
+        amount_net:     document.getElementById('opo-amount-net').value || '0',
+        amount_vat:     document.getElementById('opo-amount-vat').value || '0',
+        amount_gross:   document.getElementById('opo-amount-gross').value || '0',
+        gl_code:        document.getElementById('opo-gl-code').value || '',
+        description:    document.getElementById('opo-description').value.trim(),
+        notes:          document.getElementById('opo-notes').value.trim(),
+    };
+
+    fetch('{% url "overhead_po_create" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}',
+        },
+        body: JSON.stringify(payload),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            window.location = '/overhead-purchase-orders/' + data.po.id + '/';
+        } else {
+            alert(data.error || 'Failed to create PO');
+        }
+    })
+    .catch(() => alert('Network error — please try again'));
 }
 </script>
 {% endblock %}

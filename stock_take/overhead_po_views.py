@@ -5,9 +5,11 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Q, Sum
+from django.db.models import Count, Q
 from django.http import JsonResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils.http import urlencode
 from django.views.decorators.http import require_POST
 
 from .models import OverheadPurchaseOrder, PurchaseInvoice, Supplier, EnabledGLCode
@@ -55,11 +57,24 @@ def _invoice_to_dict(inv):
 
 # ── List ──────────────────────────────────────────────────────────
 
-@login_required
-def overhead_po_list(request):
+def build_overhead_list_context(request):
+    """Build the context for the Overhead PO list so it can be embedded as a
+    tab on the combined Purchase Orders page.
+
+    Filter params are read with an ``o`` prefix (``oq``, ``ostatus``,
+    ``ocategory``) so they don't collide with the main PO tab's own filters,
+    and the returned context keys are namespaced with ``opo_`` for the same
+    reason. The queryset itself is exposed as ``overhead_pos``.
+
+    The layout mirrors the Purchase Orders tab: search and category filter
+    server-side (page reload), but status filtering is done client-side via
+    status pills — so every status is rendered here and the pills show/hide
+    rows in JS. ``ostatus`` is passed through only to set the active pill on
+    initial load.
+    """
     qs = OverheadPurchaseOrder.objects.all()
 
-    search = request.GET.get('q', '').strip()
+    search = request.GET.get('oq', '').strip()
     if search:
         qs = qs.filter(
             Q(reference__icontains=search) |
@@ -67,42 +82,64 @@ def overhead_po_list(request):
             Q(description__icontains=search)
         )
 
-    status_filter = request.GET.get('status', '')
-    if status_filter:
-        qs = qs.filter(status=status_filter)
+    # Supplier exclusion filter (mirrors the PO tab's Suppliers dropdown)
+    excluded_suppliers = request.GET.getlist('oexclude_supplier')
+    if excluded_suppliers:
+        qs = qs.exclude(supplier_name__in=excluded_suppliers)
 
-    category_filter = request.GET.get('category', '')
+    category_filter = request.GET.get('ocategory', '')
     if category_filter:
         qs = qs.filter(category=category_filter)
 
-    totals = OverheadPurchaseOrder.objects.aggregate(
-        total_net=Sum('amount_net'),
-        total_gross=Sum('amount_gross'),
+    # Status filtering is client-side (pills) — pass ostatus through for the
+    # initially-active pill only; do NOT filter the queryset by it here.
+    status_filter = request.GET.get('ostatus', 'all')
+
+    # Per-status counts on the search/supplier/category-filtered set (pill badges)
+    status_counts = dict(
+        qs.values_list('status').annotate(c=Count('id')).values_list('status', 'c')
     )
 
-    # Stats per status
-    status_counts = {}
-    for status_val, _ in OverheadPurchaseOrder.STATUS_CHOICES:
-        status_counts[status_val] = OverheadPurchaseOrder.objects.filter(status=status_val).count()
+    # Distinct overhead supplier names for the Suppliers filter dropdown
+    all_suppliers = list(
+        OverheadPurchaseOrder.objects
+        .exclude(supplier_name__isnull=True).exclude(supplier_name='')
+        .values_list('supplier_name', flat=True)
+        .distinct().order_by('supplier_name')
+    )
 
     suppliers = (
         Supplier.objects.filter(is_active=True).order_by('name')
     )
 
-    context = {
+    return {
         'overhead_pos': qs.prefetch_related('purchase_invoices'),
-        'total_net': totals['total_net'] or 0,
-        'total_gross': totals['total_gross'] or 0,
-        'total_count': OverheadPurchaseOrder.objects.count(),
-        'status_counts': status_counts,
-        'status_filter': status_filter,
-        'category_filter': category_filter,
-        'search_query': search,
-        'category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
-        'status_choices': OverheadPurchaseOrder.STATUS_CHOICES,
-        'suppliers': suppliers,
+        'opo_total_count': OverheadPurchaseOrder.objects.count(),
+        'opo_total_filtered': qs.count(),
+        'opo_status_counts': status_counts,
+        'opo_status_filter': status_filter,
+        'opo_category_filter': category_filter,
+        'opo_excluded_suppliers': excluded_suppliers,
+        'opo_all_suppliers': all_suppliers,
+        'opo_search_query': search,
+        'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
+        'opo_status_choices': OverheadPurchaseOrder.STATUS_CHOICES,
+        'opo_suppliers': suppliers,
     }
-    return render(request, 'stock_take/overhead_po_list.html', context)
+
+
+@login_required
+def overhead_po_list(request):
+    """Overheads are now a tab on the combined Purchase Orders page.
+
+    This URL is kept so existing links/bookmarks (and the overhead detail
+    back-link / post-delete redirect) still resolve — it simply forwards to
+    the Overheads tab, preserving any inbound query params.
+    """
+    params = {'tab': 'overheads'}
+    if request.GET.get('new') == '1':
+        params['new'] = '1'
+    return redirect(f"{reverse('purchase_orders_list')}?{urlencode(params)}")
 
 
 # ── Create ────────────────────────────────────────────────────────
