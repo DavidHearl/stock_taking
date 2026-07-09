@@ -18,15 +18,15 @@
 {% block content %}
 <!-- Toolbar: tabs + search in one row -->
 <div class="tabs">
-    <div class="tab-nav tab-nav-pills">
-        <a href="?status=open{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'open' %}active{% endif %}">
-            Open ({{ count_open }})
+    <div class="tab-nav-pills sales-status-pills" data-pill-slider>
+        <a href="?status=open{% if search_query %}&q={{ search_query }}{% endif %}" data-status="open" class="tab-button {% if status_filter == 'open' %}active{% endif %}" onclick="return switchSaleTab(event, 'open')">
+            Open <span class="tab-count">{{ count_open }}</span>
         </a>
-        <a href="?status=remedial{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'remedial' %}active{% endif %}">
-            Remedial ({{ count_remedial }})
+        <a href="?status=remedial{% if search_query %}&q={{ search_query }}{% endif %}" data-status="remedial" class="tab-button {% if status_filter == 'remedial' %}active{% endif %}" onclick="return switchSaleTab(event, 'remedial')">
+            Remedial <span class="tab-count">{{ count_remedial }}</span>
         </a>
-        <a href="?status=complete{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'complete' %}active{% endif %}">
-            Complete ({{ count_complete }})
+        <a href="?status=complete{% if search_query %}&q={{ search_query }}{% endif %}" data-status="complete" class="tab-button {% if status_filter == 'complete' %}active{% endif %}" onclick="return switchSaleTab(event, 'complete')">
+            Complete <span class="tab-count">{{ count_complete }}</span>
         </a>
     </div>
     <div class="search-input-wrapper">
@@ -72,86 +72,13 @@
     {% endif %}
 </div>
 
-    {% if sales or pfp_sales %}
-    <div class="orders-table-card">
-        <table class="table orders-table">
-            <thead>
-                <tr>
-                    <th>Sale Number</th>
-                    <th>Customer</th>
-                    <th>Assigned To</th>
-                    <th>Value</th>
-                    <th>Fit Date</th>
-                    <th>Location</th>
-                    <th>Status</th>
-                    <th class="th-paid">Paid</th>
-                    {% if status_filter == 'remedial' %}<th class="th-outstanding">Outstanding</th>{% endif %}
-                    <th class="th-actions"></th>
-                </tr>
-            </thead>
-            <tbody id="sales-tbody">
-                {% if pfp_sales %}
-                <tr class="pfp-toggle-row" onclick="togglePfpSales()">
-                    <td colspan="{% if status_filter == 'remedial' %}10{% else %}9{% endif %}" class="pfp-toggle-cell">
-                        <i class="bi bi-chevron-right pfp-toggle-chevron" id="pfp-chevron"></i>
-                        <span class="badge-pfp">PFP</span>
-                        <span class="pfp-toggle-label">Pending Fit Planning &middot; {{ pfp_sales|length }} sale{{ pfp_sales|length|pluralize }} with no fit date</span>
-                        <span class="pfp-toggle-hint">click to expand</span>
-                    </td>
-                </tr>
-                {% for sale in pfp_sales %}
-                <tr class="pfp-sale-row" style="display:none;">
-                    {% include 'stock_take/partials/_sale_row.html' %}
-                </tr>
-                {% endfor %}
-                {% endif %}
-
-                {% for sale in dated_sales %}
-                <tr class="sale-data-row" data-fit-date="{{ sale.fit_date|date:'Y-m-d'|default:'' }}">
-                    {% include 'stock_take/partials/_sale_row.html' %}
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="customers-empty-state">
-        <i class="bi bi-bag"></i>
-        <p>No sales found.</p>
-    </div>
-    {% endif %}
-
-    <!-- Pagination -->
-    {% if page_obj.paginator.num_pages > 1 %}
-    <div class="customers-pagination">
-        <div class="pagination-info">
-            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} sales
-        </div>
-        <div class="pagination-controls">
-            {% if page_obj.has_previous %}
-            <a href="?page=1&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
-            <a href="?page={{ page_obj.previous_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
-            {% endif %}
-
-            {% for num in page_obj.paginator.page_range %}
-                {% if page_obj.number == num %}
-                    <span class="page-btn active">{{ num }}</span>
-                {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}
-                    <a href="?page={{ num }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
-                {% elif num == 1 or num == page_obj.paginator.num_pages %}
-                    <a href="?page={{ num }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
-                {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}
-                    <span class="page-ellipsis">&hellip;</span>
-                {% endif %}
-            {% endfor %}
-
-            {% if page_obj.has_next %}
-            <a href="?page={{ page_obj.next_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
-            <a href="?page={{ page_obj.paginator.num_pages }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
-            {% endif %}
+    <!-- Sale-type panels load client-side: switching Open/Remedial/Complete
+         fetches just this fragment and glides it in (see switchSaleTab). -->
+    <div class="sales-content-wrap">
+        <div id="sales-content" class="sales-content">
+            {% include 'stock_take/partials/_sales_table.html' %}
         </div>
     </div>
-    {% endif %}
 
 {% if is_david_hearl %}
 <!-- Designer Totals Modal -->
@@ -225,6 +152,128 @@ function insertSalesTodayDivider() {
     }
 }
 document.addEventListener('DOMContentLoaded', insertSalesTodayDivider);
+
+// ── Sale-type switching (Open / Remedial / Complete) — client-side ──
+// Mirrors the Purchase Orders status pills: the clicked pill goes active (the
+// global pill-slider thumb glides to it), we fetch just the table fragment for
+// that bracket, then glide the new rows in. Falls back to the anchor's href
+// (full reload) if JS is disabled or the fetch fails.
+// One or more table rows shaped like the real table, used for the initial
+// placeholder and the "loading more" rows shown at the tail while later chunks
+// are still arriving.
+function salesSkeletonRows(n) {
+	var cells =
+		'<td><span class="sk-bar"></span></td>' +          // Sale Number
+		'<td><span class="sk-bar"></span></td>' +          // Customer
+		'<td><span class="sk-bar"></span></td>' +          // Assigned To
+		'<td><span class="sk-bar"></span></td>' +          // Value
+		'<td><span class="sk-bar"></span></td>' +          // Fit Date
+		'<td><span class="sk-bar"></span></td>' +          // Location
+		'<td><span class="sk-bar sk-pill"></span></td>' +  // Status
+		'<td class="paid-status-cell"><span class="sk-dot"></span></td>' +
+		'<td class="row-actions-cell"><span class="sk-dot"></span></td>';
+	var rows = '';
+	for (var i = 0; i < n; i++) rows += '<tr class="sk-loading-row">' + cells + '</tr>';
+	return rows;
+}
+
+// Full-table skeleton — a real .orders-table so it inherits the exact width and
+// fixed column layout of the loaded table (no width shift when rows swap in).
+function salesSkeletonHtml() {
+	return '<div class="orders-table-card sales-skeleton">' +
+		'<table class="table orders-table">' +
+			'<thead><tr>' +
+				'<th>Sale Number</th><th>Customer</th><th>Assigned To</th>' +
+				'<th>Value</th><th>Fit Date</th><th>Location</th><th>Status</th>' +
+				'<th class="th-paid">Paid</th><th class="th-actions"></th>' +
+			'</tr></thead>' +
+			'<tbody>' + salesSkeletonRows(8) + '</tbody>' +
+		'</table></div>';
+}
+
+function clearSaleLoadingRows(content) {
+	content.querySelectorAll('.sk-loading-row').forEach(function(r) { r.remove(); });
+}
+
+let _saleTabReq = 0;
+
+// Fetch one chunk of rows and render/append it. Chunks load in sequence — each
+// response's X-Has-More / X-Next-Offset headers drive the next request — so the
+// table fills in as rows become ready rather than in one bulk swap.
+function loadSaleChunk(qs, offset, myReq, isFirst) {
+	var hasMore = false, nextOffset = 0;
+	fetch('?' + qs + '&offset=' + offset, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+		.then(function(r) {
+			hasMore = r.headers.get('X-Has-More') === '1';
+			nextOffset = parseInt(r.headers.get('X-Next-Offset') || '0', 10);
+			return r.text();
+		})
+		.then(function(html) {
+			if (myReq !== _saleTabReq) return;  // superseded by a newer tab click
+			var content = document.getElementById('sales-content');
+			if (!content) return;
+			if (isFirst) {
+				content.innerHTML = html;
+				content.classList.remove('glide-in');
+				void content.offsetWidth;
+				content.classList.add('glide-in');
+			} else {
+				clearSaleLoadingRows(content);
+				var tbody = content.querySelector('#sales-tbody');
+				if (tbody) tbody.insertAdjacentHTML('beforeend', html);
+			}
+			if (hasMore) {
+				var tb = content.querySelector('#sales-tbody');
+				if (tb) tb.insertAdjacentHTML('beforeend', salesSkeletonRows(3));
+				loadSaleChunk(qs, nextOffset, myReq, false);
+			} else {
+				clearSaleLoadingRows(content);
+				insertSalesTodayDivider();
+			}
+		})
+		.catch(function() {
+			if (myReq !== _saleTabReq) return;
+			if (isFirst) {
+				// Couldn't load the first chunk — fall back to a full navigation.
+				window.location.href = '?' + qs;
+			} else {
+				// A later chunk failed — stop cleanly, keep what already loaded.
+				var content = document.getElementById('sales-content');
+				if (content) { clearSaleLoadingRows(content); insertSalesTodayDivider(); }
+			}
+		});
+}
+
+function switchSaleTab(ev, status) {
+	if (ev) ev.preventDefault();
+
+	// Activate the clicked pill so the sliding thumb animates across.
+	document.querySelectorAll('.sales-status-pills .tab-button').forEach(function(b) {
+		b.classList.toggle('active', b.dataset.status === status);
+	});
+
+	const content = document.getElementById('sales-content');
+
+	// Keep the current search; reset to page 1 of the newly selected bracket.
+	const params = new URLSearchParams(window.location.search);
+	params.set('status', status);
+	params.delete('page');
+	params.delete('offset');
+	const qs = params.toString();
+	history.replaceState(null, '', qs ? '?' + qs : window.location.pathname);
+
+	// Clear the previous bracket's rows immediately and show the skeleton, so
+	// stale data is never visible under the new tab. The request token guards
+	// against an earlier slow chunk landing after a later click.
+	const myReq = ++_saleTabReq;
+	if (content) {
+		content.classList.remove('glide-in');
+		content.innerHTML = salesSkeletonHtml();
+	}
+
+	loadSaleChunk(qs, 0, myReq, true);
+	return false;
+}
 
 if (searchInput) {
     searchInput.addEventListener('keydown', function(e) {

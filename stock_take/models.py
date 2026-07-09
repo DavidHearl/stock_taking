@@ -1725,6 +1725,7 @@ class FitAppointment(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='fit_appointments', null=True, blank=True)
     remedial = models.ForeignKey(Remedial, on_delete=models.CASCADE, related_name='fit_appointments', null=True, blank=True)
     fit_date = models.DateField(help_text='Scheduled fit date')
+    starts_pm = models.BooleanField(default=False, help_text='Job starts in the afternoon (second half of the fit_date) rather than the morning. Shifts the calendar bar right by one half-day.')
     fit_duration = models.DecimalField(max_digits=3, decimal_places=1, default=1, help_text='Number of days for the fit, in half-day steps (1 = single day). For orders this mirrors the sale coversheet fit_days; for remedials/warranties it is the record own duration.')
     fitter = models.CharField(max_length=1, choices=FITTER_CHOICES, default='R', help_text='Assigned fitter')
     interior_completed = models.BooleanField(default=False, help_text='Interior fit completed')

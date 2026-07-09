@@ -1,3 +1,116 @@
+/* ── Sale-type panels (Open / Remedial / Complete) ──
+   Switching brackets fetches just the table fragment and glides it in, mirroring
+   the Purchase Orders status panels. */
+/* Keep the viewport-locked flex chain intact so the table card constrains its
+   height and scrolls internally (the card is flex:1; min-height:0). Without
+   these, the card grows unbounded and .main-content{overflow:hidden} clips the
+   rows with no scrollbar. */
+.sales-content-wrap {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+.sales-content {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+/* Flat, subtle sale-type tabs: no pill-shaped tray behind them, a soft active
+   tint (rather than a bold solid pill), and a hover state. Kept at 32px so the
+   bar lines up with the toolbar's other 32px controls. Scoped to the sales bar
+   so the PO/fit-board pill bars are untouched. The compound selectors match the
+   global [data-pill-slider] specificity so these overrides win. */
+.tab-nav-pills[data-pill-slider].sales-status-pills {
+	height: 32px;
+	padding: 0;
+	box-sizing: border-box;
+	align-items: stretch;
+	background: transparent;
+	border: none;
+	gap: var(--sp-1);
+}
+.tab-nav-pills[data-pill-slider].sales-status-pills .tab-button {
+	padding: 0 var(--sp-4);
+	border-radius: var(--radius-md);
+	color: var(--text-secondary);
+}
+.tab-nav-pills[data-pill-slider].sales-status-pills .tab-button:hover {
+	background-color: var(--bg-hover);
+	color: var(--text-primary);
+}
+.tab-nav-pills[data-pill-slider].sales-status-pills .tab-button.active {
+	color: var(--text-on-color);
+}
+/* Soft tint fills the full height (no inset) — subtle, not a bold blue pill. */
+.tab-nav-pills[data-pill-slider].sales-status-pills .tab-pill-thumb {
+	top: 0;
+	bottom: 0;
+	border-radius: var(--radius-md);
+	background-color: var(--primary-color);
+	opacity: 0.14;
+	box-shadow: none;
+}
+
+/* A sticky <thead> isn't clipped by the card's border-radius, so its lighter
+   background squared off past the rounded top corners ("fuzz"). Rounding the
+   corner header cells makes the header follow the card's curve. Scoped to the
+   sales table (covers both the real rows and the skeleton). */
+.sales-content .orders-table thead th:first-child {
+	border-top-left-radius: var(--radius-md);
+}
+.sales-content .orders-table thead th:last-child {
+	border-top-right-radius: var(--radius-md);
+}
+
+/* Skeleton wireframe shown while a bracket loads. We know the result is a table,
+   so the placeholder is a real .orders-table — same width, min-width and fixed
+   column layout as the loaded table, so the table/page width never shifts. Old
+   rows are cleared first so no stale data is visible under the new tab. */
+.sk-bar,
+.sk-dot {
+	display: block;
+	background-color: var(--bg-tertiary);
+	background-image: linear-gradient(90deg, transparent 0%, var(--bg-hover) 50%, transparent 100%);
+	background-size: 200% 100%;
+	background-repeat: no-repeat;
+	animation: skShimmer 1.3s ease-in-out infinite;
+}
+.sk-bar {
+	width: 100%;
+	height: 12px;
+	border-radius: var(--radius-sm);
+}
+.sk-pill {
+	width: 68px;
+	height: 20px;
+	border-radius: var(--radius-pill);
+}
+.sk-dot {
+	width: 16px;
+	height: 16px;
+	margin: 0 auto;
+	border-radius: var(--radius-pill);
+}
+@keyframes skShimmer {
+	0%   { background-position: 150% 0; }
+	100% { background-position: -50% 0; }
+}
+.sales-content.glide-in {
+	animation: salesGlideIn 0.24s ease;
+}
+@keyframes salesGlideIn {
+	from { opacity: 0; transform: translateY(6px); }
+	to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.sk-bar, .sk-dot { animation: none; }
+	.sales-content.glide-in { animation: none; }
+	.tab-pill-thumb { transition: none; }
+}
 
 /* Paid status column */
 .th-paid,

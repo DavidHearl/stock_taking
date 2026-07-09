@@ -276,14 +276,19 @@
             <div class="mw-lane">
                 <div class="mw-lane-label">{{ lane.name }}</div>
                 <div class="mw-lane-grid">
-                    {# Background drop zones — full-height clickable day columns #}
+                    {# Background drop zones — clickable AM/PM half-day columns (2 per day, aligned to the 14-track lane grid). #}
                     <div class="mw-dropzones">
                         {% for day in week.days %}
-                        <div class="mw-drop-zone {% if not day.in_month %}other-month{% endif %} {% if day.is_today %}today{% endif %}"
-                             style="grid-column: {{ forloop.counter }};"
-                             data-date="{{ day.date_str }}" data-fitter-code="{{ lane.code }}"
+                        <div class="mw-drop-zone mw-drop-half--am {% if not day.in_month %}other-month{% endif %} {% if day.is_today %}today{% endif %}"
+                             style="grid-column: {{ forloop.counter|add:forloop.counter0 }};"
+                             data-date="{{ day.date_str }}" data-fitter-code="{{ lane.code }}" data-half="am"
                              ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)"
-                             onclick="openAddAppointmentCell('{{ day.date_str }}', '{{ lane.code }}')"></div>
+                             onclick="openAddAppointmentCell('{{ day.date_str }}', '{{ lane.code }}', 'am')"></div>
+                        <div class="mw-drop-zone mw-drop-half--pm {% if not day.in_month %}other-month{% endif %} {% if day.is_today %}today{% endif %}"
+                             style="grid-column: {{ forloop.counter|add:forloop.counter }};"
+                             data-date="{{ day.date_str }}" data-fitter-code="{{ lane.code }}" data-half="pm"
+                             ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)"
+                             onclick="openAddAppointmentCell('{{ day.date_str }}', '{{ lane.code }}', 'pm')"></div>
                         {% endfor %}
                     </div>
 
@@ -1279,6 +1284,9 @@ function handleDrop(event) {
 
     const newDate = zone.dataset.date;
     const fitter = zone.dataset.fitterCode;
+    // Which half of the day the drop landed on — 'pm' starts the job in the
+    // afternoon (second half). Blocks stay whole-day, so they ignore this.
+    const startsPm = zone.dataset.half === 'pm';
 
     // Panel drag: create provisional appointment or block
     if (panelDragData) {
@@ -1298,8 +1306,7 @@ function handleDrop(event) {
                 .then(r => r.json())
                 .then(data => {
                     if (data.success) {
-                        zone.classList.add('blocked');
-                        zone.dataset.blockId = data.block_id;
+                        markDayBlocked(newDate, fitter, data.block_id);
                     } else { alert('Error: ' + (data.error || 'Unknown')); }
                 })
                 .catch(() => alert('Error creating block'));
@@ -1312,7 +1319,7 @@ function handleDrop(event) {
         fetch('{% url "create_provisional_appointment" %}', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
-            body: JSON.stringify({ type: pd.type, id: pd.id, fit_date: newDate, fitter: fitter || 'R' })
+            body: JSON.stringify({ type: pd.type, id: pd.id, fit_date: newDate, fitter: fitter || 'R', starts_pm: startsPm })
         })
         .then(r => r.json())
         .then(data => {
@@ -1326,11 +1333,11 @@ function handleDrop(event) {
     if (!draggedAppointmentId || !newDate) return false;
     if (zone.classList.contains('blocked')) return false;
 
-    // Move to the target fitter lane + day
+    // Move to the target fitter lane + day + AM/PM half
     fetch(`/fit-board/move-appointment/${draggedAppointmentId}/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
-        body: JSON.stringify({ fitter: fitter, fit_date: newDate })
+        body: JSON.stringify({ fitter: fitter, fit_date: newDate, starts_pm: startsPm })
     })
     .then(response => response.json())
     .then(data => {
@@ -1346,7 +1353,7 @@ function handleDrop(event) {
 let _pendingBlockId = null;
 let _pendingBlockZone = null;
 
-function openAddAppointmentCell(dateStr, fitterCode) {
+function openAddAppointmentCell(dateStr, fitterCode, half) {
     const zone = document.querySelector(`.mw-drop-zone[data-date="${dateStr}"][data-fitter-code="${fitterCode}"]`);
     if (zone && zone.classList.contains('blocked')) {
         _pendingBlockId = zone.dataset.blockId;
@@ -1356,7 +1363,7 @@ function openAddAppointmentCell(dateStr, fitterCode) {
     }
     const parts = (dateStr || '').split('-').map(Number);
     if (parts.length !== 3) return;
-    openAddAppointment(parts[0], parts[1], parts[2], fitterCode);
+    openAddAppointment(parts[0], parts[1], parts[2], fitterCode, half === 'pm');
 }
 
 function confirmRemoveBlock() {
@@ -1368,8 +1375,23 @@ function confirmRemoveBlock() {
     _pendingBlockZone = null;
 }
 
+// Blocks reserve a whole day, so mark/unmark both AM & PM half-zones together.
+function _dayZones(date, fitter) {
+    return document.querySelectorAll(
+        `.mw-drop-zone[data-date="${date}"][data-fitter-code="${fitter || ''}"]`);
+}
+
+function markDayBlocked(date, fitter, blockId) {
+    _dayZones(date, fitter).forEach(z => {
+        z.classList.add('blocked');
+        z.dataset.blockId = blockId;
+    });
+}
+
 function removeCalendarBlock(blockId, zone) {
     const url = BLOCK_DELETE_URL.replace('999999', blockId);
+    const date = zone && zone.dataset.date;
+    const fitter = zone && zone.dataset.fitterCode;
     fetch(url, {
         method: 'POST',
         headers: { 'X-CSRFToken': '{{ csrf_token }}' }
@@ -1377,14 +1399,19 @@ function removeCalendarBlock(blockId, zone) {
     .then(r => r.json())
     .then(data => {
         if (data.success && zone) {
-            zone.classList.remove('blocked');
-            delete zone.dataset.blockId;
+            _dayZones(date, fitter).forEach(z => {
+                z.classList.remove('blocked');
+                delete z.dataset.blockId;
+            });
         }
     })
     .catch(() => alert('Error removing block'));
 }
 
-function openAddAppointment(year, month, day, fitterCode) {
+let _selectedStartsPm = false;
+
+function openAddAppointment(year, month, day, fitterCode, startsPm) {
+    _selectedStartsPm = !!startsPm;
     const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     document.getElementById('selectedDate').value = date;
     if (fitterCode) {
@@ -1699,7 +1726,7 @@ function addAppointment() {
             'X-CSRFToken': '{{ csrf_token }}',
             'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: `entity_id=${entityId}&entity_type=${entityType}&fit_date=${fitDate}&fitter=${fitter}`
+        body: `entity_id=${entityId}&entity_type=${entityType}&fit_date=${fitDate}&fitter=${fitter}&starts_pm=${_selectedStartsPm ? '1' : '0'}`
     })
     .then(response => response.json())
     .then(data => {

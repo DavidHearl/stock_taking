@@ -11880,7 +11880,9 @@ def calendar_view(request):
                 # to [0, 14); continuation flags flatten the bar at week edges.
                 fit_days = getattr(appt, 'effective_fit_days', None) or float(appt.fit_duration or 1)
                 half_total = max(1, int(round(fit_days * 2)))
-                start_half = (appt.fit_date - wk_start).days * 2
+                # Even half-column = morning start; +1 shifts the bar into the
+                # afternoon (second half) of the fit date.
+                start_half = (appt.fit_date - wk_start).days * 2 + (1 if appt.starts_pm else 0)
                 end_half = start_half + half_total  # exclusive
                 if end_half <= 0 or start_half >= 14:
                     continue
@@ -12927,7 +12929,8 @@ def add_fit_appointment(request):
         entity_type = request.POST.get('entity_type', 'order')  # 'order' or 'remedial'
         fit_date = request.POST.get('fit_date')
         fitter = request.POST.get('fitter', 'R')  # Default to Ross
-        
+        starts_pm = request.POST.get('starts_pm') in ('1', 'true', 'True', 'on')
+
         try:
             if entity_type == 'order':
                 order = Order.objects.get(id=entity_id)
@@ -12935,7 +12938,7 @@ def add_fit_appointment(request):
                     order=order,
                     remedial=None,
                     fit_date=fit_date,
-                    defaults={'fitter': fitter}
+                    defaults={'fitter': fitter, 'starts_pm': starts_pm}
                 )
                 # Sync the order's fit_date
                 from datetime import datetime as dt_cls
@@ -12955,7 +12958,7 @@ def add_fit_appointment(request):
                     remedial=remedial,
                     order=None,
                     fit_date=fit_date,
-                    defaults={'fitter': fitter}
+                    defaults={'fitter': fitter, 'starts_pm': starts_pm}
                 )
                 customer_name = f"{remedial.remedial_number} - {remedial.first_name} {remedial.last_name}"
             else:
@@ -13030,7 +13033,11 @@ def move_fit_appointment(request, appointment_id):
             # Update fitter if provided
             if 'fitter' in data:
                 appointment.fitter = data['fitter']
-            
+
+            # Update AM/PM start if provided (dropped onto a day's second half)
+            if 'starts_pm' in data:
+                appointment.starts_pm = bool(data['starts_pm'])
+
             # Update fit date if provided
             if 'fit_date' in data:
                 from datetime import datetime
@@ -13119,6 +13126,7 @@ def create_provisional_appointment(request):
         item_id = int(data.get('id', 0))
         fit_date_str = data.get('fit_date', '')
         fitter = data.get('fitter', 'R')
+        starts_pm = bool(data.get('starts_pm', False))
         fit_date = _dt.strptime(fit_date_str, '%Y-%m-%d').date()
 
         if item_type == 'order':
@@ -13127,6 +13135,7 @@ def create_provisional_appointment(request):
                 order=order,
                 fit_date=fit_date,
                 fitter=fitter,
+                starts_pm=starts_pm,
                 is_provisional=True,
                 fit_duration=_order_fit_duration(order) or 1,
             )
@@ -13144,6 +13153,7 @@ def create_provisional_appointment(request):
                 remedial=remedial,
                 fit_date=fit_date,
                 fitter=fitter,
+                starts_pm=starts_pm,
                 is_provisional=True,
             )
             remedial.scheduled_date = fit_date

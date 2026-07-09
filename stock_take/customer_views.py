@@ -840,9 +840,15 @@ def sales_list(request):
             return non_complete.exclude(order_id__in=open_remedial_order_ids)
         return qs
 
-    count_open = status_bracket(sales_base, 'open').count()
-    count_remedial = status_bracket(sales_base, 'remedial').count()
-    count_complete = status_bracket(sales_base, 'complete').count()
+    # Tab badge counts aren't re-rendered for AJAX chunk responses, so skip them
+    # there (otherwise every chunk request runs 3 extra COUNT queries).
+    is_ajax = request.headers.get('x-requested-with') == 'XMLHttpRequest'
+    if is_ajax:
+        count_open = count_remedial = count_complete = 0
+    else:
+        count_open = status_bracket(sales_base, 'open').count()
+        count_remedial = status_bracket(sales_base, 'remedial').count()
+        count_complete = status_bracket(sales_base, 'complete').count()
 
     sales = status_bracket(sales_base, status_filter)
 
@@ -902,21 +908,16 @@ def sales_list(request):
     pfp_sales = list(sales.filter(fit_date__isnull=True))
 
     if status_filter == 'complete':
-        # The "complete" bracket is huge and status grouping is irrelevant there, so
-        # just order by most-recent fit date and compute status for the visible page.
+        # The "complete" bracket is huge, so paginate the queryset directly.
         dated_qs = sales.filter(fit_date__isnull=False).order_by(F('fit_date').desc(nulls_last=True))
         paginator = Paginator(dated_qs, 100)
         page_obj = paginator.get_page(page_number)
         dated_sales = list(page_obj)
-        order_map = _attach_ordering_status(
-            dated_sales + (pfp_sales if page_obj.number == 1 else [])
-        )
     else:
         # Order strictly by fit date descending (furthest-away date first, past dates
         # last) so the "Today" divider lands on the single upcoming -> past boundary.
         dated_qs = sales.filter(fit_date__isnull=False).order_by(F('fit_date').desc(nulls_last=True))
         dated_all = list(dated_qs)
-        order_map = _attach_ordering_status(dated_all + pfp_sales)
         paginator = Paginator(dated_all, 100)
         page_obj = paginator.get_page(page_number)
         dated_sales = list(page_obj)
@@ -944,6 +945,42 @@ def sales_list(request):
             # Amount still owed (never negative).
             s.outstanding_value = max(effective_value - total_paid, Decimal('0'))
 
+    # AJAX sale-type switch — return the rows in chunks so the table fills in as
+    # each chunk arrives (see switchSaleTab / loadSaleChunk) rather than one bulk
+    # swap. Ordering/payment status is computed for just the requested slice, and
+    # the X-Has-More / X-Next-Offset headers tell the client whether to keep going.
+    if is_ajax:
+        CHUNK = 25
+        try:
+            offset = max(0, int(request.GET.get('offset', 0)))
+        except (TypeError, ValueError):
+            offset = 0
+        chunk_sales = dated_sales[offset:offset + CHUNK]
+        chunk_pfp = pfp_sales if offset == 0 else []
+        chunk_order_map = _attach_ordering_status(chunk_sales + chunk_pfp)
+        _attach_payment_status(chunk_sales + chunk_pfp)
+        # offset 0 returns the table shell (card + header + first rows + pagination);
+        # later offsets return just the <tr> rows to append to the existing table.
+        template = ('stock_take/partials/_sales_table.html' if offset == 0
+                    else 'stock_take/partials/_sales_rows.html')
+        resp = render(request, template, {
+            'sales': page_obj,
+            'page_obj': page_obj,
+            'dated_sales': chunk_sales,
+            'pfp_sales': chunk_pfp,
+            'status_filter': status_filter,
+            'search_query': search_query,
+            'order_map': chunk_order_map,
+        })
+        resp['X-Has-More'] = '1' if (offset + CHUNK) < len(dated_sales) else '0'
+        resp['X-Next-Offset'] = str(offset + CHUNK)
+        return resp
+
+    # Full page load — attach ordering/payment status for the whole first page.
+    if status_filter == 'complete':
+        order_map = _attach_ordering_status(dated_sales + pfp_sales)
+    else:
+        order_map = _attach_ordering_status(dated_all + pfp_sales)
     _attach_payment_status(dated_sales + pfp_sales)
 
     # Designer report — only for David Hearl

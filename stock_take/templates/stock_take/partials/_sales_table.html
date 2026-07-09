@@ -1,0 +1,81 @@
+{% load custom_filters %}
+{% if sales or pfp_sales %}
+<div class="orders-table-card">
+    <table class="table orders-table">
+        <thead>
+            <tr>
+                <th>Sale Number</th>
+                <th>Customer</th>
+                <th>Assigned To</th>
+                <th>Value</th>
+                <th>Fit Date</th>
+                <th>Location</th>
+                <th>Status</th>
+                <th class="th-paid">Paid</th>
+                {% if status_filter == 'remedial' %}<th class="th-outstanding">Outstanding</th>{% endif %}
+                <th class="th-actions"></th>
+            </tr>
+        </thead>
+        <tbody id="sales-tbody">
+            {% if pfp_sales %}
+            <tr class="pfp-toggle-row" onclick="togglePfpSales()">
+                <td colspan="{% if status_filter == 'remedial' %}10{% else %}9{% endif %}" class="pfp-toggle-cell">
+                    <i class="bi bi-chevron-right pfp-toggle-chevron" id="pfp-chevron"></i>
+                    <span class="badge-pfp">PFP</span>
+                    <span class="pfp-toggle-label">Pending Fit Planning &middot; {{ pfp_sales|length }} sale{{ pfp_sales|length|pluralize }} with no fit date</span>
+                    <span class="pfp-toggle-hint">click to expand</span>
+                </td>
+            </tr>
+            {% for sale in pfp_sales %}
+            <tr class="pfp-sale-row" style="display:none;">
+                {% include 'stock_take/partials/_sale_row.html' %}
+            </tr>
+            {% endfor %}
+            {% endif %}
+
+            {% for sale in dated_sales %}
+            <tr class="sale-data-row" data-fit-date="{{ sale.fit_date|date:'Y-m-d'|default:'' }}">
+                {% include 'stock_take/partials/_sale_row.html' %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="customers-empty-state">
+    <i class="bi bi-bag"></i>
+    <p>No sales found.</p>
+</div>
+{% endif %}
+
+<!-- Pagination -->
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="customers-pagination">
+    <div class="pagination-info">
+        Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} sales
+    </div>
+    <div class="pagination-controls">
+        {% if page_obj.has_previous %}
+        <a href="?page=1&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+        <a href="?page={{ page_obj.previous_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+        {% endif %}
+
+        {% for num in page_obj.paginator.page_range %}
+            {% if page_obj.number == num %}
+                <span class="page-btn active">{{ num }}</span>
+            {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}
+                <a href="?page={{ num }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+            {% elif num == 1 or num == page_obj.paginator.num_pages %}
+                <a href="?page={{ num }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+            {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}
+                <span class="page-ellipsis">&hellip;</span>
+            {% endif %}
+        {% endfor %}
+
+        {% if page_obj.has_next %}
+        <a href="?page={{ page_obj.next_page_number }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+        <a href="?page={{ page_obj.paginator.num_pages }}&status={{ status_filter }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
