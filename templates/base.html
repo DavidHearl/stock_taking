@@ -197,7 +197,7 @@
 
 
             <!-- IT Section -->
-            {% if role_perms.mobile_devices.can_view or role_perms.laptop_devices.can_view or role_perms.desktop_devices.can_view or role_perms.website_guide.can_view or is_role_admin %}
+            {% if role_perms.mobile_devices.can_view or role_perms.laptop_devices.can_view or role_perms.desktop_devices.can_view or role_perms.website_guide.can_view or role_perms.infrastructure.can_view or is_role_admin %}
             <div class="nav-section">
                 <div class="nav-section-header">IT</div>
                 <div class="nav-section-content">
@@ -214,6 +214,11 @@
                     {% if role_perms.desktop_devices.can_view or is_role_admin %}
                     <a href="{% url 'desktop_devices' %}" class="nav-link {% block nav_it_desktops_active %}{% endblock %}" title="Desktops">
                         <i class="bi bi-display"></i><span class="nav-text">Desktops</span>
+                    </a>
+                    {% endif %}
+                    {% if role_perms.infrastructure.can_view or is_role_admin %}
+                    <a href="{% url 'infrastructure' %}" class="nav-link {% block nav_it_infrastructure_active %}{% endblock %}" title="Infrastructure">
+                        <i class="bi bi-hdd-network"></i><span class="nav-text">Infrastructure</span>
                     </a>
                     {% endif %}
                     {% if role_perms.website_guide.can_view or is_role_admin %}
@@ -826,21 +831,31 @@
     // a MutationObserver watches the buttons' class list, so the thumb follows
     // the .active pill wherever it lands (works with switchCalTab,
     // switchDetailTab, or any other switcher without touching them).
-    document.addEventListener('DOMContentLoaded', function() {
+    // Exposed so dynamically-injected pill navs (e.g. AJAX-swapped tab content)
+    // can be initialised after insertion: window.initPillSliders(container).
+    window.initPillSliders = function(root) {
+        var scope = root || document;
         function moveThumb(nav) {
             var thumb = nav._pillThumb;
             if (!thumb) return;
             var active = nav.querySelector('.tab-button.active');
             if (!active) { thumb.style.opacity = '0'; return; }
             thumb.style.opacity = '1';
-            thumb.style.width = active.offsetWidth + 'px';
-            // Vertical is handled in CSS (top/bottom inset); JS only drives the
-            // horizontal. offsetLeft is border-box relative while the thumb's
-            // abs origin is the padding box, so subtract the tray border.
-            var x = active.offsetLeft - nav.clientLeft;
-            thumb.style.transform = 'translateX(' + x + 'px)';
+            // offsetLeft/Top are border-box relative while the thumb's abs origin
+            // is the padding box, so subtract the tray border.
+            if (nav.classList.contains('tab-nav-pills-vertical')) {
+                // Vertical column: CSS pins left/right; JS drives height + Y.
+                thumb.style.height = active.offsetHeight + 'px';
+                var y = active.offsetTop - nav.clientTop;
+                thumb.style.transform = 'translateY(' + y + 'px)';
+            } else {
+                // Horizontal row: CSS pins top/bottom; JS drives width + X.
+                thumb.style.width = active.offsetWidth + 'px';
+                var x = active.offsetLeft - nav.clientLeft;
+                thumb.style.transform = 'translateX(' + x + 'px)';
+            }
         }
-        document.querySelectorAll('.tab-nav-pills[data-pill-slider]').forEach(function(nav) {
+        scope.querySelectorAll('.tab-nav-pills[data-pill-slider]').forEach(function(nav) {
             if (nav._pillThumb) return;
             var thumb = document.createElement('span');
             thumb.className = 'tab-pill-thumb';
@@ -855,6 +870,10 @@
                 obs.observe(btn, { attributes: true, attributeFilter: ['class'] });
             });
             window.addEventListener('resize', move);
+            // Re-measure when the nav resizes or first becomes visible — e.g. a
+            // pill nav inside a modal that's display:none at load would measure
+            // 0-wide up front; this lands the thumb correctly once it's shown.
+            if (window.ResizeObserver) { new ResizeObserver(move).observe(nav); }
 
             // Place it once with animation suppressed so it doesn't fly in from
             // the corner on load, then re-enable transitions for real moves.
@@ -867,7 +886,8 @@
             // Web-font swap changes button widths after first paint — realign.
             if (document.fonts && document.fonts.ready) { document.fonts.ready.then(move); }
         });
-    });
+    };
+    document.addEventListener('DOMContentLoaded', function() { window.initPillSliders(document); });
     </script>
 
     <script>

@@ -3019,60 +3019,87 @@ dialog::backdrop {
     box-shadow: var(--shadow-sm);
 }
 
-/* ── Sliding active indicator — opt-in via .tab-nav-pills[data-pill-slider] ──
-   Instead of each pill toggling its own background, a single --primary-color
-   "thumb" (injected by the global pill-slider script in base.html) slides
-   beneath the active pill. The buttons stay transparent so only the thumb
-   carries the fill/shadow; it animates its position as .active moves. */
 .tab-nav-pills[data-pill-slider] {
 	position: relative;
 	display: inline-flex;
-	padding: calc(var(--sp-1) + 2px);
-	background-color: var(--bg-secondary);
-	border: 1px solid var(--border-color);
+	align-items: stretch;
+	padding: 0;
+	background-color: transparent;
+	border: none;
 }
 
 .tab-pill-thumb {
 	position: absolute;
-	/* Pin top AND bottom to the tray's padding inset so the thumb always fills
-	   the inner area symmetrically — vertical is CSS-driven (no JS height/Y),
-	   which avoids the sub-pixel/stretch gap that made it look bottom-heavy.
-	   JS only drives width + horizontal position (tabs vary in width). */
-	top: calc(var(--sp-1) + 2px);
-	bottom: calc(var(--sp-1) + 2px);
+	/* Fills the active pill's full height (no inset) so the tint reads as a flat
+	   highlight. Vertical variant re-pins bottom:auto and JS drives its height. */
+	top: 0;
+	bottom: 0;
 	left: 0;
 	z-index: 0;
 	background-color: var(--primary-color);
-	/* Slightly muted so the active fill reads as a soft highlight rather than a
-	   hard block — blends ~10% into the tray behind it in both themes. */
-	opacity: 0.9;
+	/* Solid fill so the active label (--text-on-color) reads in both themes. */
+	opacity: 1;
 	border-radius: var(--radius-md);
 	transition: var(--transition);
 	pointer-events: none;
+	box-shadow: var(--shadow-sm);
 }
 
 .tab-nav-pills[data-pill-slider] .tab-button {
 	position: relative;
 	z-index: 1;
-	padding: 6px var(--sp-6);
+	padding: var(--sp-2) var(--sp-4);
 	font-size: 0.875rem;
+	border-radius: var(--radius-md);
+	color: var(--text-secondary);
 	background-color: transparent;
 	transition: var(--transition);
 }
 
 .tab-nav-pills[data-pill-slider] .tab-button:hover {
-	background-color: transparent;
+	background-color: var(--bg-hover);
 	color: var(--text-primary);
 }
 
+/* The active label sits on the solid primary thumb, so it uses --text-on-color. */
 .tab-nav-pills[data-pill-slider] .tab-button.active {
 	background-color: transparent;
 	box-shadow: none;
 	color: var(--text-on-color);
+	font-weight: 600;
 }
 
 @media (prefers-reduced-motion: reduce) {
 	.tab-pill-thumb { transition: none; }
+}
+
+/* ── Vertical pill tab column — .tab-nav-pills-vertical[data-pill-slider] ──
+   Same sliding-thumb mechanism as the horizontal sales pills, stacked into a
+   left-hand column. Here the CSS pins the thumb's left/right to the tray inset
+   and the global pill-slider script drives its height + Y (mirror of the
+   horizontal case, where CSS pins top/bottom and JS drives width + X). */
+.tab-nav-pills-vertical {
+	flex-direction: column;
+	align-items: stretch;
+}
+
+.tab-nav-pills-vertical[data-pill-slider] {
+	display: flex;
+}
+
+.tab-nav-pills-vertical .tab-button {
+	width: 100%;
+	justify-content: space-between;
+	text-align: left;
+	gap: var(--sp-3);
+}
+
+.tab-nav-pills-vertical[data-pill-slider] .tab-pill-thumb {
+	left: calc(var(--sp-1) + 2px);
+	right: calc(var(--sp-1) + 2px);
+	top: 0;
+	bottom: auto;
+	width: auto;
 }
 
 .tab-content {

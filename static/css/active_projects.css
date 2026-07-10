@@ -1,27 +1,226 @@
 /* ── Active Projects Overview ─────────────────────────────────── */
 
-.active-overview {
+/* ── Tab-switch skeletons ──────────────────────────────────────
+   Wireframe placeholders shown in #activeTabContent while the Overview/Timeline
+   fragment is being fetched, so the swap never reads as a frozen/blank page. */
+.ap-skeleton {
+    padding: 0 8px 24px;
+}
+.ap-skeleton-overview {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.ap-skel-box {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    position: relative;
+    overflow: hidden;
+}
+/* Shimmer sweep — token-driven so it reads in both themes. */
+.ap-skel-box::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text-primary) 12%, transparent), transparent);
+    animation: apSkelShimmer 1.3s infinite;
+}
+@keyframes apSkelShimmer {
+    100% { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .ap-skel-box::after { animation: none; }
+}
+
+/* Overview shape: left stage-nav column + right table panel */
+.ap-skel-nav {
+    flex: 0 0 300px;
     display: flex;
     flex-direction: column;
+    gap: 6px;
+    padding: 6px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+.ap-skel-nav-item { height: 28px; }
+.ap-skel-panel {
+    flex: 1 1 auto;
+    min-width: 0;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    padding-bottom: 8px;
+}
+.ap-skel-panel-head { height: 44px; border-radius: 0; }
+.ap-skel-row { height: 34px; margin: 8px 14px 0; }
+
+/* Timeline shape: legend + gantt rows */
+.ap-skel-legend { height: 28px; width: 60%; margin-bottom: 12px; }
+.ap-skel-gantt {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.ap-skel-gantt-row {
+    display: flex;
+    align-items: center;
     gap: 12px;
+}
+.ap-skel-label { flex: 0 0 200px; height: 24px; }
+.ap-skel-track { flex: 1 1 auto; }
+.ap-skel-bar { height: 22px; }
+
+/* Two-pane layout: a vertical stage tab column on the left, the selected
+   stage's order table on the right. */
+.active-overview {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
     padding: 0 8px 24px;
 }
 
-.active-stage-section {
+/* Vertical stage tab column — uses the shared .tab-nav-pills-vertical
+   pill-slider component (sliding thumb driven globally from base.html). Unlike
+   the flat horizontal default, this menu keeps a card tray behind the pills. */
+.active-stage-tabnav {
+    flex: 0 0 300px;
+    width: 300px;
+    max-height: calc(100vh - 160px);
+    overflow-y: auto;
+    position: sticky;
+    gap: 2px;
+}
+
+/* Re-add the tray background (the global pill default is flat/transparent) with
+   no padding so the tabs — and the active thumb behind them — span the full
+   column width. Zero vertical padding also keeps the first tab lined up with
+   the top of the table. */
+.active-stage-tabnav[data-pill-slider] {
+    padding: 0;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+/* Active thumb fills the full tab width and has square edges. The tray's own
+   rounded corners + overflow clipping round the thumb *only* where it meets the
+   top or bottom of the menu; a thumb sitting on a middle tab stays square. */
+.active-stage-tabnav[data-pill-slider] .tab-pill-thumb {
+    left: 0;
+    right: 0;
+    border-radius: 0;
+}
+
+/* Vertical-menu tab text/padding. Scoped under the nav's own class + attribute
+   so it out-specifies the shared .tab-nav-pills[data-pill-slider] .tab-button
+   rule (which is why an unscoped .active-stage-tab font-size never took effect)
+   — and so it never touches the other tab navs. */
+.active-stage-tabnav[data-pill-slider] .active-stage-tab {
+    font-size: 0.75rem;
+    padding: 6px 8px;
+}
+
+/* Phase separator (Enquiry / Lead / Sale) — a small heading that groups the
+   stages of each workflow phase in the vertical menu. */
+.active-stage-tabnav .active-stage-phase-sep {
+    padding: 8px 12px;
+    font-size: 0.625rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    pointer-events: none;
+}
+
+/* No divider above the first phase — it sits at the top of the tray. The pill
+   thumb is injected as the tray's first child, so the first separator either is
+   :first-child (before the slider JS runs) or immediately follows the thumb. */
+.active-stage-tabnav .active-stage-phase-sep:first-child,
+.active-stage-tabnav .tab-pill-thumb + .active-stage-phase-sep {
+    border-top: none;
+    margin-top: 0;
+}
+
+.active-stage-tab-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.active-stage-tab-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.active-stage-tab-count {
+    flex-shrink: 0;
+    min-width: 22px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
+    border-radius: var(--radius-pill);
+    font-size: 0.72rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+/* The active pill rides on the solid primary thumb — lift the count badge so it
+   reads against it. */
+.active-stage-tab.active .active-stage-tab-count {
+    background: color-mix(in srgb, var(--text-on-color) 22%, transparent);
+    color: var(--text-on-color);
+}
+
+.active-stage-tab-empty {
+    opacity: 0.5;
+}
+
+.active-stage-tab-empty:hover {
+    opacity: 0.85;
+}
+
+/* Panels — only the active stage's panel is shown */
+.active-stage-panels {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.active-stage-panel {
+    display: none;
     background: var(--bg-secondary);
     border-radius: var(--radius-sm);
     overflow: hidden;
     box-shadow: 0 1px 3px rgba(0,0,0,.08);
 }
 
-.active-stage-header {
+.active-stage-panel.active {
+    display: block;
+}
+
+.active-panel-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 14px;
+    padding: var(--sp-2) var(--sp-3);
     background: var(--bg-tertiary);
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
 }
 
 .active-stage-header-left {
@@ -43,12 +242,7 @@
     font-size: 0.8rem;
     cursor: pointer;
     transition: color 0.15s, border-color 0.15s, background 0.15s;
-    opacity: 0;
     padding: 0;
-}
-
-.active-stage-section:hover .active-stage-sync {
-    opacity: 1;
 }
 
 .active-stage-sync:hover {
@@ -74,10 +268,15 @@
     color: var(--text-on-color);
 }
 
+.active-stage-count-empty {
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+}
+
 /* ── Stage table ─────────────────────────────────────────────── */
 
 .active-stage-body {
-    max-height: calc(32px * 8 + 64px);
+    max-height: calc(100vh - 260px);
     overflow-y: auto;
 }
 
@@ -409,65 +608,34 @@
 }
 
 /* ════════════════════════════════════════════════════════════
-   Toolbar (page chrome used by this page only)
+   Page header — flat row: view tabs on the left, actions on the right
+   (replaces the old boxed .cal-toolbar; no tray chrome, matches the
+   site-wide flat tab style).
    ════════════════════════════════════════════════════════════ */
-.cal-toolbar {
+.active-projects-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 8px 12px;
-    background: var(--bg-secondary);
-    border-radius: var(--radius-lg);
+    gap: 12px;
     margin-bottom: 16px;
     flex-wrap: wrap;
-    position: sticky;
-    top: calc(var(--topbar-height, 52px) + 8px);
-    z-index: 100;
 }
 
-.cal-toolbar .btn {
-    padding: 4px 12px;
-    font-size: 0.8rem;
-    height: 30px;
+.active-projects-header .active-view-toggle {
+    flex-shrink: 0;
 }
 
-.cal-toolbar-right {
+.active-projects-header-actions {
     display: flex;
     align-items: center;
     gap: 8px;
+    margin-left: auto;
+    flex-shrink: 0;
 }
 
-.view-toggle {
-    display: flex;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-pill);
-    overflow: hidden;
-}
-
-.view-toggle-btn {
-    padding: 4px 16px;
+.active-projects-header-actions .btn {
+    padding: 4px 12px;
     font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-decoration: none;
-    transition: all 0.2s;
-    border-right: 1px solid var(--border-color);
-}
-
-.view-toggle-btn:last-child {
-    border-right: none;
-}
-
-.view-toggle-btn:hover {
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-}
-
-.view-toggle-btn.active {
-    background: var(--primary-color);
-    color: var(--text-on-color);
+    height: 30px;
 }
 
 /* ════════════════════════════════════════════════════════════

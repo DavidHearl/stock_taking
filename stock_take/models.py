@@ -2761,6 +2761,7 @@ PAGE_SECTIONS = [
         ('laptop_devices', 'Laptops'),
         ('desktop_devices', 'Desktops'),
         ('website_guide', 'Sliderobes Website'),
+        ('infrastructure', 'Infrastructure'),
     ]),
     ('Other', [
         ('tickets', 'Tickets'),
@@ -3496,6 +3497,38 @@ class DesktopComponent(models.Model):
 
     def __str__(self):
         return f"{self.component_type}: {self.name}"
+
+
+class LaptopSpec(models.Model):
+    """A candidate laptop being considered for purchase (procurement shortlist).
+
+    Flat spec record so a shortlist of laptops can be compared side by side in a
+    dense table, unlike the component-row DesktopMachine build.
+    """
+
+    name = models.CharField(max_length=150, help_text='Model name, e.g. "MacBook Pro 14 M4 Pro"')
+    cpu = models.CharField(max_length=200, blank=True, default='')
+    ram = models.CharField(max_length=100, blank=True, default='', help_text='e.g. "32GB"')
+    storage = models.CharField(max_length=100, blank=True, default='', help_text='e.g. "1TB SSD"')
+    gpu = models.CharField(max_length=200, blank=True, default='')
+    display = models.CharField(max_length=200, blank=True, default='', help_text='e.g. "14\\" 3024×1964"')
+    price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        help_text='Quoted unit price'
+    )
+    vendor = models.CharField(max_length=120, blank=True, default='', help_text='Store / supplier')
+    link = models.URLField(max_length=500, blank=True, default='')
+    notes = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'Laptop Spec'
+        verbose_name_plural = 'Laptop Specs'
+
+    def __str__(self):
+        return self.name
 
 
 class OverheadPurchaseOrder(models.Model):

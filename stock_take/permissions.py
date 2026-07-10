@@ -141,6 +141,7 @@ URL_TO_PAGE = {
     'laptop_devices': 'laptop_devices',
     'desktop_devices': 'desktop_devices',
     'website_guide': 'website_guide',
+    'infrastructure': 'infrastructure',
 }
 
 

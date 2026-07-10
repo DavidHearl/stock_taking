@@ -8,7 +8,7 @@ from django.db import transaction
 from django.http import JsonResponse
 from django.db.models import Sum
 from django.contrib.auth.models import User
-from .models import MobileDevice, PhoneTemplate, DesktopMachine, DesktopComponent
+from .models import MobileDevice, PhoneTemplate, DesktopMachine, DesktopComponent, LaptopSpec
 from .permissions import page_permission_required
 
 
@@ -222,10 +222,86 @@ def mobile_sim_transfer(request, device_id):
 
 # ─── Laptop & Desktop placeholders ───────────────────────────────────────────
 
+# Branch locations for the laptop asset register (mirrors the sales/dashboard
+# location set — see _LOCATION_CONTRACT_PREFIX in dashboard_view.py).
+LAPTOP_LOCATIONS = ['Belfast', 'Dublin', 'Nottingham', 'Wyedean', 'Midlands']
+
+
+def _serialize_laptop_spec(spec):
+    """Build a plain dict for a LaptopSpec for JSON/front-end use."""
+    return {
+        'id': spec.id,
+        'name': spec.name,
+        'cpu': spec.cpu,
+        'ram': spec.ram,
+        'storage': spec.storage,
+        'gpu': spec.gpu,
+        'display': spec.display,
+        'price': '{:.2f}'.format(spec.price) if spec.price is not None else '',
+        'vendor': spec.vendor,
+        'link': spec.link,
+        'notes': spec.notes,
+    }
+
+
 @login_required
 @page_permission_required('laptop_devices')
 def laptop_devices(request):
-    return render(request, 'stock_take/it_laptops.html', {})
+    specs = [_serialize_laptop_spec(s) for s in LaptopSpec.objects.all()]
+    return render(request, 'stock_take/it_laptops.html', {
+        'locations': LAPTOP_LOCATIONS,
+        'laptop_specs': specs,
+    })
+
+
+@login_required
+@page_permission_required('laptop_devices', action='edit')
+def laptop_spec_save(request, spec_id=None):
+    """Create or update a laptop procurement spec (AJAX)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    try:
+        payload = json.loads(request.body.decode('utf-8'))
+    except (ValueError, UnicodeDecodeError):
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    name = (payload.get('name') or '').strip()
+    if not name:
+        return JsonResponse({'error': 'Laptop name is required'}, status=400)
+
+    price_raw = payload.get('price')
+    price = _parse_price(price_raw) if str(price_raw or '').strip() else None
+
+    if spec_id:
+        spec = get_object_or_404(LaptopSpec, id=spec_id)
+    else:
+        spec = LaptopSpec()
+
+    spec.name = name[:150]
+    spec.cpu = (payload.get('cpu') or '').strip()[:200]
+    spec.ram = (payload.get('ram') or '').strip()[:100]
+    spec.storage = (payload.get('storage') or '').strip()[:100]
+    spec.gpu = (payload.get('gpu') or '').strip()[:200]
+    spec.display = (payload.get('display') or '').strip()[:200]
+    spec.price = price
+    spec.vendor = (payload.get('vendor') or '').strip()[:120]
+    spec.link = (payload.get('link') or '').strip()[:500]
+    spec.notes = (payload.get('notes') or '').strip()
+    spec.save()
+
+    return JsonResponse({'success': True, 'spec': _serialize_laptop_spec(spec)})
+
+
+@login_required
+@page_permission_required('laptop_devices', action='delete')
+def laptop_spec_delete(request, spec_id):
+    """Delete a laptop procurement spec (AJAX)."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    spec = get_object_or_404(LaptopSpec, id=spec_id)
+    spec.delete()
+    return JsonResponse({'success': True})
 
 
 @login_required
@@ -233,6 +309,13 @@ def laptop_devices(request):
 def website_guide(request):
     """IT – Setup guide for cloning and running the Sliderobes website locally."""
     return render(request, 'stock_take/it_website.html', {})
+
+
+@login_required
+@page_permission_required('infrastructure')
+def infrastructure(request):
+    """IT – Network infrastructure / UniFi rack planner (mockup)."""
+    return render(request, 'stock_take/it_infrastructure.html', {})
 
 
 @login_required

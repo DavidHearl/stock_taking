@@ -16491,12 +16491,14 @@ def active_projects(request):
     }
 
     # ── Overview tab: stages with their orders ──
-    all_stages = list(WorkflowStage.objects.filter(phase='sale').order_by('order'))
+    # Show the full workflow (enquiry → lead → sale), not just the sale phase, so
+    # active orders sitting in earlier stages still appear as their own tab.
+    all_stages = list(WorkflowStage.objects.all().order_by('order'))
 
-    sale_stage_ids = [s.id for s in all_stages]
+    all_stage_ids = [s.id for s in all_stages]
     progress_qs = (
         OrderWorkflowProgress.objects
-        .filter(current_stage_id__in=sale_stage_ids)
+        .filter(current_stage_id__in=all_stage_ids)
         .select_related('order', 'order__customer', 'current_stage')
         .order_by('current_stage__order', 'order__fit_date')
     )
@@ -16578,6 +16580,15 @@ def active_projects(request):
             stage_groups.append(entry)
         else:
             hidden_stages.append(entry)
+
+    # Default-selected tab: first stage (in workflow order) that has orders,
+    # else the first stage overall.
+    if stage_groups:
+        default_stage_id = stage_groups[0]['stage'].id
+    elif all_stage_entries:
+        default_stage_id = all_stage_entries[0]['stage'].id
+    else:
+        default_stage_id = None
 
     # ── All open sales for sync ──
     # Match the sales page definition: category 3, not cancelled/complete/won.
@@ -16821,6 +16832,7 @@ def active_projects(request):
         'stage_groups': stage_groups,
         'hidden_stages': hidden_stages,
         'all_stage_entries': all_stage_entries,
+        'default_stage_id': default_stage_id,
         'all_overview_order_ids': all_overview_order_ids,
         'all_sync_order_ids': all_sync_order_ids,
         'all_sync_order_names': all_sync_order_names,
@@ -16837,6 +16849,11 @@ def active_projects(request):
         'weeks_ahead': weeks_ahead,
         'role_colours': role_colours,
     }
+
+    # Client-side tab switch (Overview ⇄ Timeline) fetches just the tab body
+    # so the heavy timeline dataset stays lazy and no full page reload happens.
+    if request.GET.get('partial') == '1':
+        return render(request, 'stock_take/partials/active_projects_content.html', context)
 
     return render(request, 'stock_take/active_projects.html', context)
 

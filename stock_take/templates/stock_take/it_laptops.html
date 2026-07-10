@@ -11,15 +11,356 @@
 {% endblock %}
 
 {% block content %}
-<div class="it-page">
-    <div class="it-header">
-        <div class="it-header-left">
-            <h1 class="it-title"><i class="bi bi-laptop"></i> Laptops</h1>
-        </div>
-    </div>
-    <div class="it-placeholder">
-        <i class="bi bi-laptop"></i>
-        <p>Laptop asset register coming soon.</p>
-    </div>
+<div class="it-page it-page-tight">
+	<div class="it-laptops-bar">
+		<h1 class="it-title"><i class="bi bi-laptop"></i> Laptops</h1>
+		<div class="tab-nav tab-nav-pills" data-pill-slider>
+			<button class="tab-button active" data-laptop-tab="procurement">Procurement</button>
+			<button class="tab-button" data-laptop-tab="active">Active Machines</button>
+		</div>
+	</div>
+
+	<!-- ══ Procurement tab ══ -->
+	<div class="it-tab-panel" id="tabProcurement">
+		<div class="it-tab-toolbar">
+			<p class="it-section-sub">Laptops under consideration — compare specs before you buy.</p>
+			<button class="btn btn-success btn-sm" id="addLaptopSpecBtn">
+				<i class="bi bi-plus-lg"></i> New Laptop Spec
+			</button>
+		</div>
+
+		<div id="laptopSpecEmpty" class="it-placeholder">
+			<p>No laptop specs yet. Click <strong>New Laptop Spec</strong> to add one.</p>
+		</div>
+
+		<div class="it-table-wrapper" id="laptopSpecTableWrap" style="display:none;">
+			<table class="table it-table laptop-spec-table">
+				<thead>
+					<tr>
+						<th>Laptop</th>
+						<th>CPU</th>
+						<th>RAM</th>
+						<th>Storage</th>
+						<th>GPU</th>
+						<th>Display</th>
+						<th class="num">Price</th>
+						<th>Vendor</th>
+						<th class="actions-col"></th>
+					</tr>
+				</thead>
+				<tbody id="laptopSpecBody"></tbody>
+			</table>
+		</div>
+	</div>
+
+	<!-- ══ Active Machines tab ══ -->
+	<div class="it-tab-panel" id="tabActive" style="display:none;">
+		<div class="it-laptops-overview">
+
+			<!-- Vertical location tabs (shared pill-slider component, stacked) -->
+			<div class="it-location-tabnav tab-nav-pills tab-nav-pills-vertical" data-pill-slider>
+				{% for location in locations %}
+				<button type="button" class="tab-button it-location-tab {% if forloop.first %}active{% endif %}" data-location="{{ location }}">
+					<span class="it-location-tab-name">{{ location }}</span>
+					<span class="tab-count">0</span>
+				</button>
+				{% endfor %}
+			</div>
+
+			<!-- Per-location panels -->
+			<div class="it-location-panels">
+				{% for location in locations %}
+				<div class="it-location-panel {% if forloop.first %}active{% endif %}" id="locationPanel-{{ forloop.counter }}" data-location="{{ location }}">
+					<div class="it-location-panel-head">
+						<span class="it-section-title">{{ location }}</span>
+					</div>
+					<div class="it-placeholder">
+						<p>No laptops registered in {{ location }} yet.</p>
+					</div>
+				</div>
+				{% endfor %}
+			</div>
+
+		</div>
+	</div>
 </div>
+
+<!-- Add / Edit Laptop Spec modal -->
+<div class="modal-overlay" id="laptopSpecModal">
+	<div class="modal-dialog it-dialog-520">
+		<div class="modal-header">
+			<h3 id="laptopSpecTitle">New Laptop Spec</h3>
+			<button class="modal-close" id="closeLaptopSpecModal">&times;</button>
+		</div>
+		<div class="modal-body device-form-body">
+			<div class="device-form-section it-section-no-border">
+				<div class="device-form-row">
+					<div class="form-group form-group-grow">
+						<label>Laptop <span class="required-star">*</span></label>
+						<input type="text" id="ls_name" class="form-control" placeholder="MacBook Pro 14 M4 Pro">
+					</div>
+					<div class="form-group">
+						<label>Price (&pound;)</label>
+						<input type="number" min="0" step="0.01" id="ls_price" class="form-control" placeholder="0.00">
+					</div>
+				</div>
+				<div class="device-form-row">
+					<div class="form-group form-group-grow">
+						<label>CPU</label>
+						<input type="text" id="ls_cpu" class="form-control" placeholder="Apple M4 Pro 12-core">
+					</div>
+					<div class="form-group">
+						<label>RAM</label>
+						<input type="text" id="ls_ram" class="form-control" placeholder="32GB">
+					</div>
+					<div class="form-group">
+						<label>Storage</label>
+						<input type="text" id="ls_storage" class="form-control" placeholder="1TB SSD">
+					</div>
+				</div>
+				<div class="device-form-row">
+					<div class="form-group form-group-grow">
+						<label>GPU</label>
+						<input type="text" id="ls_gpu" class="form-control" placeholder="18-core GPU">
+					</div>
+					<div class="form-group form-group-grow">
+						<label>Display</label>
+						<input type="text" id="ls_display" class="form-control" placeholder="14&quot; 3024&times;1964">
+					</div>
+				</div>
+				<div class="device-form-row">
+					<div class="form-group">
+						<label>Vendor</label>
+						<input type="text" id="ls_vendor" class="form-control" placeholder="Apple / Amazon&hellip;">
+					</div>
+					<div class="form-group form-group-grow">
+						<label>Link</label>
+						<input type="url" id="ls_link" class="form-control" placeholder="https://">
+					</div>
+				</div>
+				<div class="device-form-row">
+					<div class="form-group form-group-grow">
+						<label>Notes</label>
+						<textarea id="ls_notes" class="form-control" rows="2"></textarea>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div class="modal-footer">
+			<button type="button" class="btn btn-cancel" id="cancelLaptopSpecModal">Cancel</button>
+			<button type="button" class="btn btn-success" id="saveLaptopSpecBtn">
+				<i class="bi bi-check-lg"></i> Save
+			</button>
+		</div>
+	</div>
+</div>
+
+{% csrf_token %}
+{{ laptop_specs|json_script:"laptopSpecsData" }}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+	'use strict';
+
+	// ── Top-level tab switching (Procurement / Active Machines) ──
+	var topPanels = {
+		procurement: document.getElementById('tabProcurement'),
+		active: document.getElementById('tabActive')
+	};
+	document.querySelectorAll('[data-laptop-tab]').forEach(function (btn) {
+		btn.addEventListener('click', function () {
+			document.querySelectorAll('[data-laptop-tab]').forEach(function (b) { b.classList.remove('active'); });
+			this.classList.add('active');
+			var tab = this.dataset.laptopTab;
+			Object.keys(topPanels).forEach(function (key) {
+				if (topPanels[key]) topPanels[key].style.display = key === tab ? '' : 'none';
+			});
+		});
+	});
+
+	// ── Vertical location tab switching ──
+	var locationPanels = document.querySelectorAll('.it-location-panel');
+	document.querySelectorAll('.it-location-tab').forEach(function (btn) {
+		btn.addEventListener('click', function () {
+			document.querySelectorAll('.it-location-tab').forEach(function (b) { b.classList.remove('active'); });
+			this.classList.add('active');
+			var location = this.dataset.location;
+			locationPanels.forEach(function (panel) {
+				panel.classList.toggle('active', panel.dataset.location === location);
+			});
+		});
+	});
+
+	// ── Procurement spec builder ──
+	var specs = [];
+	var editingId = null;
+
+	try {
+		var raw = document.getElementById('laptopSpecsData').textContent;
+		specs = raw ? JSON.parse(raw) : [];
+		if (!Array.isArray(specs)) specs = [];
+	} catch (e) { specs = []; }
+
+	var emptyState = document.getElementById('laptopSpecEmpty');
+	var tableWrap = document.getElementById('laptopSpecTableWrap');
+	var tbody = document.getElementById('laptopSpecBody');
+	var modal = document.getElementById('laptopSpecModal');
+	var saveBtn = document.getElementById('saveLaptopSpecBtn');
+
+	var fields = ['name', 'cpu', 'ram', 'storage', 'gpu', 'display', 'price', 'vendor', 'link', 'notes'];
+
+	function getCsrf() {
+		return document.querySelector('[name=csrfmiddlewaretoken]').value;
+	}
+
+	function escapeHtml(value) {
+		return String(value == null ? '' : value)
+			.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+	}
+
+	function parseJsonResponse(res) {
+		return res.text().then(function (text) {
+			var data = {};
+			if (text) { try { data = JSON.parse(text); } catch (e) { data = { error: text }; } }
+			if (!res.ok) throw new Error(data.error || ('Request failed (' + res.status + ')'));
+			return data;
+		});
+	}
+
+	function cell(value) {
+		return '<td>' + (escapeHtml(value) || '<span class="it-muted">&mdash;</span>') + '</td>';
+	}
+
+	function render() {
+		var hasSpecs = specs.length > 0;
+		emptyState.style.display = hasSpecs ? 'none' : '';
+		tableWrap.style.display = hasSpecs ? '' : 'none';
+
+		tbody.innerHTML = specs.map(function (s) {
+			var name = escapeHtml(s.name);
+			var nameCell = s.link
+				? '<a href="' + escapeHtml(s.link) + '" target="_blank" rel="noopener">' + name + '</a>'
+				: name;
+			var price = s.price ? '&pound;' + escapeHtml(s.price) : '<span class="it-muted">&mdash;</span>';
+			return '<tr data-id="' + s.id + '">' +
+				'<td class="laptop-spec-name">' + nameCell +
+					(s.notes ? ' <i class="bi bi-sticky it-muted" title="' + escapeHtml(s.notes) + '"></i>' : '') + '</td>' +
+				cell(s.cpu) + cell(s.ram) + cell(s.storage) + cell(s.gpu) + cell(s.display) +
+				'<td class="num">' + price + '</td>' +
+				cell(s.vendor) +
+				'<td class="actions-cell">' +
+					'<button type="button" class="btn-icon edit-spec-btn" title="Edit"><i class="bi bi-pencil"></i></button>' +
+					'<button type="button" class="btn-icon delete-spec-btn" title="Delete"><i class="bi bi-trash"></i></button>' +
+				'</td>' +
+			'</tr>';
+		}).join('');
+	}
+
+	function openModal() { modal.classList.add('active'); }
+	function closeModal() { modal.classList.remove('active'); }
+
+	function fillForm(spec) {
+		fields.forEach(function (f) {
+			var el = document.getElementById('ls_' + f);
+			if (el) el.value = spec ? (spec[f] || '') : '';
+		});
+	}
+
+	function collectForm() {
+		var out = {};
+		fields.forEach(function (f) {
+			var el = document.getElementById('ls_' + f);
+			out[f] = el ? el.value.trim() : '';
+		});
+		return out;
+	}
+
+	document.getElementById('addLaptopSpecBtn').addEventListener('click', function () {
+		editingId = null;
+		document.getElementById('laptopSpecTitle').textContent = 'New Laptop Spec';
+		fillForm(null);
+		openModal();
+		document.getElementById('ls_name').focus();
+	});
+
+	document.getElementById('closeLaptopSpecModal').addEventListener('click', closeModal);
+	document.getElementById('cancelLaptopSpecModal').addEventListener('click', closeModal);
+	modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+
+	tbody.addEventListener('click', function (e) {
+		var row = e.target.closest('tr[data-id]');
+		if (!row) return;
+		var id = parseInt(row.dataset.id, 10);
+
+		if (e.target.closest('.edit-spec-btn')) {
+			var spec = specs.filter(function (s) { return s.id === id; })[0];
+			if (!spec) return;
+			editingId = id;
+			document.getElementById('laptopSpecTitle').textContent = 'Edit Laptop Spec';
+			fillForm(spec);
+			openModal();
+			return;
+		}
+
+		if (e.target.closest('.delete-spec-btn')) {
+			if (!confirm('Delete this laptop spec?')) return;
+			fetch('/it/laptops/spec/' + id + '/delete/', {
+				method: 'POST',
+				headers: { 'X-CSRFToken': getCsrf(), 'X-Requested-With': 'XMLHttpRequest' }
+			})
+				.then(parseJsonResponse)
+				.then(function (data) {
+					if (!data.success) throw new Error(data.error || 'Delete failed');
+					specs = specs.filter(function (s) { return s.id !== id; });
+					render();
+				})
+				.catch(function (err) { alert(err.message || 'Could not delete spec.'); });
+		}
+	});
+
+	saveBtn.addEventListener('click', function () {
+		var payload = collectForm();
+		if (!payload.name) {
+			alert('Please enter a laptop name.');
+			document.getElementById('ls_name').focus();
+			return;
+		}
+
+		var url = editingId === null
+			? '/it/laptops/spec/save/'
+			: '/it/laptops/spec/' + editingId + '/save/';
+
+		saveBtn.disabled = true;
+		fetch(url, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'X-CSRFToken': getCsrf(),
+				'X-Requested-With': 'XMLHttpRequest'
+			},
+			body: JSON.stringify(payload)
+		})
+			.then(parseJsonResponse)
+			.then(function (data) {
+				if (!data.success) throw new Error(data.error || 'Save failed');
+				if (editingId === null) {
+					specs.push(data.spec);
+				} else {
+					for (var i = 0; i < specs.length; i++) {
+						if (specs[i].id === editingId) { specs[i] = data.spec; break; }
+					}
+				}
+				render();
+				closeModal();
+			})
+			.catch(function (err) { alert(err.message || 'Could not save spec.'); })
+			.finally(function () { saveBtn.disabled = false; });
+	});
+
+	render();
+}());
+</script>
 {% endblock %}
