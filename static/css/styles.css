@@ -1470,7 +1470,7 @@ body.light-mode .theme-sun {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 16px;
+    padding: 12px;
     border-bottom: 1px solid var(--border-color);
     background-color: transparent;
     font-weight: 600;
@@ -3060,10 +3060,10 @@ dialog::backdrop {
 	border-radius: var(--radius-md);
 	color: var(--text-secondary);
 	background-color: transparent;
-	/* Ease the active emphasis (faux-bold below) in over ~0.8s so the swap reads
-	   as a gentle settle, not a snap. Background/colour stay on the snappy
-	   default so hover still feels responsive. */
-	transition: background-color var(--transition), color var(--transition), text-shadow 0.8s ease;
+	/* Same weight on active and inactive so switching never reflows the row
+	   (a weight change widens the glyphs and shoves neighbours / the thumb). */
+	font-weight: 500;
+	transition: background-color var(--transition), color var(--transition);
 }
 
 .tab-nav-pills[data-pill-slider] .tab-button:hover {
@@ -3075,14 +3075,10 @@ dialog::backdrop {
 .tab-nav-pills[data-pill-slider] .tab-button.active {
 	background-color: transparent;
 	box-shadow: none;
+	/* The solid primary thumb behind the label is the active affordance, so the
+	   label just switches to --text-on-color. No weight change or faux-bold
+	   text-shadow — those thickened the glyphs and read as strange/smeared. */
 	color: var(--text-on-color);
-	/* Emphasise the active label WITHOUT a real weight change. A 500→600 bump
-	   makes bold text wider, which reflows the button — shoving its neighbours
-	   and moving the thumb's measured target (the visible "jump" on switch).
-	   Faux-bold via text-shadow thickens the glyphs with identical metrics, so
-	   nothing shifts, and it fades in gently via the transition above. */
-	font-weight: 500;
-	text-shadow: 0.4px 0 0 currentColor, -0.4px 0 0 currentColor;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3346,10 +3342,61 @@ dialog::backdrop {
     color: var(--success-color);
 }
 
+/* ── Search input (canonical, app-wide) ────────────────────────────────────
+   The single search-bar component. A flex wrapper holding a Bootstrap search
+   icon and a borderless input. Pages that need a different radius (pill) or a
+   fixed/max width override just those properties on their own scoped selector
+   — the look, focus outline, icon and placeholder all come from here.
+     <div class="search-input-wrapper">
+       <i class="bi bi-search"></i>
+       <input type="text" placeholder="…">
+     </div>                                                                   */
 .search-input-wrapper {
-    position: relative;
-    display: flex;
-    align-items: center;
+	position: relative;
+	display: flex;
+	align-items: center;
+	flex: 1;
+	min-width: 0;
+	gap: var(--sp-2);
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-md);
+	padding: 0 12px;
+	transition: border-color var(--transition);
+}
+
+.search-input-wrapper:focus-within {
+	/* Solid blue outline only — no glow/shadow. */
+	border-color: var(--primary-color);
+}
+
+/* gap on the wrapper spaces the icon, input and any inline clear button. */
+.search-input-wrapper i {
+	color: var(--text-secondary);
+	font-size: 0.875rem;
+	flex-shrink: 0;
+}
+
+.search-input-wrapper input {
+	flex: 1;
+	min-width: 0;
+	border: none;
+	background: none;
+	padding: 8px 0;
+	font-size: 0.875rem;
+	color: var(--text-primary);
+	width: 100%;
+	outline: none;
+}
+
+/* The wrapper shows the focus outline via :focus-within, so suppress the
+   input's own focus ring to avoid a doubled outline inside the rounded box. */
+.search-input-wrapper input:focus {
+	box-shadow: none;
+}
+
+.search-input-wrapper input::placeholder {
+	color: var(--text-muted);
 }
 
 .entity-hero-header {
@@ -4030,36 +4077,6 @@ dialog::backdrop {
 .costing-badge.danger {
     background-color: var(--danger-subtle);
     color: var(--danger-color);
-}
-
-.search-input-wrapper:focus-within {
-    border-color: var(--primary-color);
-    /* Soft glow, not a hard 1px ring. A 1px box-shadow stacked outside the 1px
-       border read as a doubled ~2px outline (heaviest on the sides/bottom). */
-    box-shadow: 0 0 0 3px var(--accent-glow);
-}
-
-/* Borderless inputs inside a search wrapper: the wrapper shows the focus
-   outline (via :focus-within above), so suppress the input's own ring to
-   avoid a second outline drawn inside the rounded wrapper. */
-.search-input-wrapper input:focus {
-    box-shadow: none;
-}
-
-.search-input-wrapper i {
-    color: var(--text-secondary);
-    margin-right: 8px;
-    font-size: 0.875rem;
-}
-
-.search-input-wrapper input {
-    border: none;
-    background: none;
-    padding: 8px 0;
-    font-size: 0.875rem;
-    color: var(--text-primary);
-    width: 100%;
-    outline: none;
 }
 
 .filter-tab.active {
