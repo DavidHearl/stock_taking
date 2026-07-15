@@ -1,3 +1,4 @@
+import re
 from django import template
 from datetime import datetime
 
@@ -186,3 +187,61 @@ def get_item(dictionary, key):
     if result is None:
         result = dictionary.get(str(key))
     return result
+
+
+# Internal material SKU prefix. Kept in full on the generated PNX/CSV files,
+# but not shown to the user on screen — see material_code / material_thickness.
+MATERIAL_DISPLAY_PREFIX = 'SHT_MFC_EGG_'
+
+# Egger board SKU shape: SHT_MFC_EGG_<code>_<thickness>_  (e.g. SHT_MFC_EGG_H1234ST9_18_)
+_MATERIAL_EGG_RE = re.compile(r'^' + re.escape(MATERIAL_DISPLAY_PREFIX) + r'(.+)_(\d+)_$')
+
+
+@register.filter
+def strip_material_prefix(value):
+    """Strip the internal material SKU prefix (SHT_MFC_EGG_) for display only.
+
+    The full value is still written to the PNX and CSV exports — this filter
+    only affects what the user sees on screen."""
+    if not value:
+        return value
+    s = str(value)
+    if s.startswith(MATERIAL_DISPLAY_PREFIX):
+        return s[len(MATERIAL_DISPLAY_PREFIX):]
+    return s
+
+
+@register.filter
+def material_code(value):
+    """The material colour code shown to the user, with both the internal SKU
+    prefix (SHT_MFC_EGG_) and the trailing thickness (_18_) removed. The full
+    SKU is still written to the PNX/CSV exports — this is display only."""
+    if not value:
+        return value
+    s = str(value)
+    m = _MATERIAL_EGG_RE.match(s)
+    if m:
+        return m.group(1)
+    if s.startswith(MATERIAL_DISPLAY_PREFIX):
+        return s[len(MATERIAL_DISPLAY_PREFIX):]
+    return s
+
+
+@register.filter
+def material_thickness(value):
+    """The board thickness (e.g. '18') parsed from an Egger material SKU, or ''
+    when the value doesn't carry one."""
+    if not value:
+        return ''
+    m = _MATERIAL_EGG_RE.match(str(value))
+    return m.group(2) if m else ''
+
+
+@register.filter
+def material_prefix(value):
+    """Return the SKU prefix (SHT_MFC_EGG_) if the value carries it, otherwise
+    ''. Used to reconstruct the full matname when the user edits the displayed
+    (code-only) value."""
+    if value and str(value).startswith(MATERIAL_DISPLAY_PREFIX):
+        return MATERIAL_DISPLAY_PREFIX
+    return ''

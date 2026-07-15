@@ -71,7 +71,13 @@
 	--radius-sm: 8px;
 	--radius-md: 12px;
 	--radius-lg: 16px;
-	--radius-pill: 999px;
+	/* Pills are squared off to match buttons — points at --radius-sm rather than
+	   a fully-rounded 999px so every pill/badge reads as a rectangular button. */
+	--radius-pill: var(--radius-sm);
+	/* Fully-rounded / stadium shape for genuinely round elements — toggle-switch
+	   tracks and circular dots/indicators. Use this (not --radius-pill) when the
+	   element must stay a circle or stadium rather than a squared-off button. */
+	--radius-round: 999px;
 
 	/* Transitions */
 	--transition: all 0.2s ease;
@@ -1022,7 +1028,7 @@ body.light-mode .sidebar.collapsed:hover .logo-icon {
     position: relative;
     width: 52px;
     height: 32px;
-    border-radius: var(--radius-pill);
+    border-radius: var(--radius-round);
     border: 1px solid var(--border-color);
     cursor: pointer;
     padding: 0;
@@ -3053,7 +3059,10 @@ dialog::backdrop {
 	border-radius: var(--radius-md);
 	color: var(--text-secondary);
 	background-color: transparent;
-	transition: var(--transition);
+	/* Ease the active emphasis (faux-bold below) in over ~0.8s so the swap reads
+	   as a gentle settle, not a snap. Background/colour stay on the snappy
+	   default so hover still feels responsive. */
+	transition: background-color var(--transition), color var(--transition), text-shadow 0.8s ease;
 }
 
 .tab-nav-pills[data-pill-slider] .tab-button:hover {
@@ -3066,7 +3075,13 @@ dialog::backdrop {
 	background-color: transparent;
 	box-shadow: none;
 	color: var(--text-on-color);
-	font-weight: 600;
+	/* Emphasise the active label WITHOUT a real weight change. A 500→600 bump
+	   makes bold text wider, which reflows the button — shoving its neighbours
+	   and moving the thumb's measured target (the visible "jump" on switch).
+	   Faux-bold via text-shadow thickens the glyphs with identical metrics, so
+	   nothing shifts, and it fades in gently via the transition above. */
+	font-weight: 500;
+	text-shadow: 0.4px 0 0 currentColor, -0.4px 0 0 currentColor;
 }
 
 @media (prefers-reduced-motion: reduce) {

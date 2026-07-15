@@ -155,6 +155,7 @@
                                     <th class="col-dim">Length</th>
                                     {% endif %}
                                     <th class="col-dim">Width</th>
+                                    <th class="col-thickness">Thickness</th>
                                     <th class="col-cnt">QTY</th>
                                     <th title="PRFID1">E1</th>
                                     <th title="PRFID3">E3</th>
@@ -201,19 +202,20 @@
                                         {% else %}
                                         <span class="matname-swatch matname-swatch-empty"></span>
                                         {% endif %}
-                                        <input type="text" 
-                                               class="quantity-input pnx-text-input" 
-                                               value="{{ item.matname }}"
+                                        <input type="text"
+                                               class="quantity-input pnx-mat-part"
+                                               value="{{ item.matname|material_code }}"
+                                               data-part="code"
                                                data-pnx-id="{{ item.id }}"
-                                               data-field="matname"
                                                data-boards-po-id="{{ bpo_data.po.id }}"
-                                               data-original-value="{{ item.matname }}">
+                                               data-matname-prefix="{{ item.matname|material_prefix }}"
+                                               data-original-value="{{ item.matname|material_code }}">
                                     </td>
                                     {% if bpo_data.po.is_angled %}
                                     <td>
-                                        <input type="number" 
-                                               class="quantity-input pnx-dimension-input no-pnx-spinner" 
-                                               min="0" 
+                                        <input type="number"
+                                               class="quantity-input pnx-dimension-input no-pnx-spinner"
+                                               min="0"
                                                step="1"
                                                value="{% if item.left_height %}{{ item.left_height|floatformat:0 }}{% else %}0{% endif %}"
                                                data-pnx-id="{{ item.id }}"
@@ -267,10 +269,22 @@
                                                data-boards-po-id="{{ bpo_data.po.id }}"
                                                data-original-value="{{ item.cwidth|floatformat:0 }}">
                                     </td>
+                                    <td class="thickness-cell">
+                                        <input type="number"
+                                               class="quantity-input pnx-mat-part no-pnx-spinner"
+                                               min="0"
+                                               step="1"
+                                               value="{{ item.matname|material_thickness }}"
+                                               data-part="thickness"
+                                               data-pnx-id="{{ item.id }}"
+                                               data-boards-po-id="{{ bpo_data.po.id }}"
+                                               data-original-value="{{ item.matname|material_thickness }}"
+                                               {% if not item.matname|material_prefix %}disabled title="Thickness only applies to Egger board materials"{% endif %}>
+                                    </td>
                                     <td>
-                                        <input type="number" 
-                                               class="quantity-input pnx-dimension-input" 
-                                               min="0" 
+                                        <input type="number"
+                                               class="quantity-input pnx-dimension-input"
+                                               min="0"
                                                step="1"
                                                value="{{ item.cnt|floatformat:0 }}"
                                                data-pnx-id="{{ item.id }}"
@@ -678,7 +692,7 @@
                     </a>
                     <h3>{{ apo.display_number }}: OS Doors
                         {% if apo.status == 'Approved' or apo.status == 'Received' %}
-                            <span class="badge badge-ordered badge-ml">Ordered</span>
+                            <span class="badge badge-ordered badge-ml">Ordered</span>{% if apo.status == 'Received' %} <span class="badge badge-received">Received {{ apo.received_date|format_date_str }}</span>{% elif apo.expected_date %} <span class="po-date-hint">Expected: {{ apo.expected_date|format_date_str }}</span>{% endif %}
                         {% elif apo.status %}
                             <span class="badge badge-warning badge-ml">{{ apo.status }}</span>
                         {% endif %}
@@ -2965,9 +2979,9 @@ document.addEventListener('DOMContentLoaded', function() {
             const value = this.value.trim();
             const originalValue = this.getAttribute('data-original-value');
             const key = `${pnxId}_${field}`;
-            
+
             if (!pnxDimensionChangesByPO[boardsPoId]) pnxDimensionChangesByPO[boardsPoId] = {};
-            
+
             if (value !== originalValue) {
                 pnxDimensionChangesByPO[boardsPoId][key] = { pnxId: pnxId, field: field, value: value };
                 showSaveBtn(boardsPoId);
@@ -2975,6 +2989,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 delete pnxDimensionChangesByPO[boardsPoId][key];
                 hideSaveBtnIfEmpty(boardsPoId);
             }
+        });
+    });
+
+    // Handle material code + thickness edits. These two inputs are two halves
+    // of one matname — the user sees the colour code and thickness separately,
+    // but the PNX/CSV must keep the full SKU (SHT_MFC_EGG_<code>_<thickness>_),
+    // so rebuild it whenever either half changes.
+    document.querySelectorAll('.pnx-mat-part').forEach(function(input) {
+        input.addEventListener('input', function() {
+            rebuildMatnameChange(this.getAttribute('data-pnx-id'), this.getAttribute('data-boards-po-id'));
         });
     });
 
@@ -3008,7 +3032,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (result.success) {
                     showAlert('PNX items updated and files regenerated!', 'success');
                     // Update original values for inputs in this PO section only
-                    document.querySelectorAll(`.pnx-dimension-input[data-boards-po-id="${boardsPoId}"], .pnx-text-input[data-boards-po-id="${boardsPoId}"]`).forEach(function(input) {
+                    document.querySelectorAll(`.pnx-dimension-input[data-boards-po-id="${boardsPoId}"], .pnx-text-input[data-boards-po-id="${boardsPoId}"], .pnx-mat-part[data-boards-po-id="${boardsPoId}"]`).forEach(function(input) {
                         input.setAttribute('data-original-value', input.value);
                     });
                     pnxDimensionChangesByPO[boardsPoId] = {};
@@ -5893,6 +5917,49 @@ function showPNXAnalysisModal(data) {
     document.getElementById('confirm-pnx-btn').style.display = 'inline-flex';
 }
 
+// Strip the internal material SKU prefix (SHT_MFC_EGG_) for display only.
+// The full matname is preserved in the PNX/CSV exports.
+function stripMaterialPrefix(matname) {
+    const prefix = 'SHT_MFC_EGG_';
+    if (matname && matname.startsWith(prefix)) {
+        return matname.slice(prefix.length);
+    }
+    return matname || '';
+}
+
+// Rebuild the full matname (SHT_MFC_EGG_<code>_<thickness>_) from the two
+// displayed halves and register it as a pending change. The user only ever
+// sees/edits the colour code and thickness, but the PNX/CSV keep the full SKU.
+function rebuildMatnameChange(pnxId, boardsPoId) {
+    const codeInput = document.querySelector(`.pnx-mat-part[data-part="code"][data-pnx-id="${pnxId}"]`);
+    if (!codeInput) return;
+    const thickInput = document.querySelector(`.pnx-mat-part[data-part="thickness"][data-pnx-id="${pnxId}"]`);
+
+    const prefix = codeInput.getAttribute('data-matname-prefix') || '';
+    const code = codeInput.value.trim();
+    const thickness = thickInput ? thickInput.value.trim() : '';
+
+    // Reattach the prefix, and the thickness only for prefixed (Egger) boards.
+    let full = prefix + code;
+    if (prefix && thickness !== '') {
+        full += `_${thickness}_`;
+    }
+
+    const origCode = codeInput.getAttribute('data-original-value') || '';
+    const origThick = thickInput ? (thickInput.getAttribute('data-original-value') || '') : '';
+    const key = `${pnxId}_matname`;
+
+    if (!pnxDimensionChangesByPO[boardsPoId]) pnxDimensionChangesByPO[boardsPoId] = {};
+
+    if (code !== origCode || thickness !== origThick) {
+        pnxDimensionChangesByPO[boardsPoId][key] = { pnxId: pnxId, field: 'matname', value: full };
+        showSaveBtn(boardsPoId);
+    } else {
+        delete pnxDimensionChangesByPO[boardsPoId][key];
+        hideSaveBtnIfEmpty(boardsPoId);
+    }
+}
+
 function renderPNXAnalysisModal() {
     const content = document.getElementById('pnx-analysis-content');
     let html = '';
@@ -5945,7 +6012,7 @@ function renderPNXAnalysisModal() {
         pnxStagingData.newItems.forEach(item => {
             html += '<tr>';
             html += `<td><strong>${item.barcode}</strong></td>`;
-            html += `<td>${item.matname}</td>`;
+            html += `<td>${stripMaterialPrefix(item.matname)}</td>`;
             html += `<td>${item.dimensions}</td>`;
             html += `<td>${item.customer || ''}</td>`;
             html += `<td><span class="pnx-stage-qty-add">${item.qty}</span></td>`;
@@ -5969,7 +6036,7 @@ function renderPNXAnalysisModal() {
             const change = item.qty - item.old_qty;
             html += '<tr>';
             html += `<td><strong>${item.barcode}</strong></td>`;
-            html += `<td>${item.matname}</td>`;
+            html += `<td>${stripMaterialPrefix(item.matname)}</td>`;
             html += `<td>${item.dimensions}</td>`;
             html += `<td>${item.old_qty}</td>`;
             html += `<td><strong class="pnx-stage-qty-update">${item.qty}</strong></td>`;
@@ -6004,7 +6071,7 @@ function renderPNXAnalysisModal() {
             html += `<tr data-duplicate-index="${index}">`;
             html += `<td><input type="checkbox" class="duplicate-checkbox" data-barcode="${item.barcode}"></td>`;
             html += `<td>${item.barcode}</td>`;
-            html += `<td>${item.matname}</td>`;
+            html += `<td>${stripMaterialPrefix(item.matname)}</td>`;
             html += `<td>${item.dimensions}</td>`;
             html += `<td>${item.qty}</td>`;
             html += '</tr>';
@@ -6996,7 +7063,7 @@ function submitAdditionalBoardsPO(event) {
     .then(result => {
         if (result.success) {
             closeModal('addAdditionalPOModal');
-            showAlert(`Additional Boards PO ${result.po_number} added`, 'success');
+            showAlert(`Additional Boards ${result.po_number} added`, 'success');
             location.reload();
         } else {
             showAlert('Error: ' + (result.error || 'Unknown'), 'danger');

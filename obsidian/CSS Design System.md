@@ -80,7 +80,8 @@ Example: a "pending" badge uses `background: var(--warning-subtle); color: var(-
 | `--radius-sm` | 9px | Buttons, inputs, tabs, small controls, swatches |
 | `--radius-md` | 14px | Cards, panels |
 | `--radius-lg` | 18px | Large containers, modals |
-| `--radius-pill` | 999px | Status badges & pills only (not action buttons) — always fully rounded |
+| `--radius-pill` | = `--radius-sm` (8px) | Status badges & pills — squared off to read as rectangular buttons (no longer fully rounded) |
+| `--radius-round` | 999px | Genuinely round elements only: toggle-switch tracks and circular dots/indicators. Use this, not `--radius-pill`, when the shape must stay a circle or stadium. |
 
 ### Shadows
 
