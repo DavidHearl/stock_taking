@@ -37,6 +37,16 @@
         </div>
         
     <div class="full-width-section">
+		<!-- Section sub-tabs (Boards / Accessories / OS Doors / Glass / Raumplus) -->
+		<div class="tab-nav-pills section-tab-nav" data-pill-slider>
+			<button type="button" class="tab-button active" data-section-tab="boards" onclick="switchSectionTab('boards')">Boards{% if order_pnx_items %} <span class="tab-count">{{ order_pnx_items|length }}</span>{% endif %}</button>
+			<button type="button" class="tab-button" data-section-tab="accessories" onclick="switchSectionTab('accessories')">Accessories{% if non_glass_accessories %} <span class="tab-count">{{ non_glass_accessories|length }}</span>{% endif %}</button>
+			<button type="button" class="tab-button" data-section-tab="osdoors" onclick="switchSectionTab('osdoors')">OS Doors{% if order.os_doors.count %} <span class="tab-count">{{ order.os_doors.count }}</span>{% endif %}</button>
+			<button type="button" class="tab-button" data-section-tab="glass" onclick="switchSectionTab('glass')">Glass{% if glass_items %} <span class="tab-count">{{ glass_items|length }}</span>{% endif %}</button>
+			<button type="button" class="tab-button" data-section-tab="raumplus" onclick="switchSectionTab('raumplus')">Raumplus{% if raumplus_accessories %} <span class="tab-count">{{ raumplus_accessories|length }}</span>{% endif %}</button>
+		</div>
+
+		<div class="section-tab-panel active" id="section-panel-boards" data-section-panel="boards">
         {% for bpo_data in boards_po_list %}
         <div class="card{% if order.boards_not_required %} boards-not-required{% endif %}">
             <div class="card-header">
@@ -376,43 +386,50 @@
             </div>
         </div>
         {% endif %}
+		</div><!-- /section-panel-boards -->
 
+		<div class="section-tab-panel" id="section-panel-accessories" data-section-panel="accessories">
             <!-- Accessories Section -->
             <div class="card">
                 <div class="card-header">
-                    <h3>
-                        Accessories
-                        <button type="button" class="btn btn-sm btn-primary" onclick="generateAccessoriesCSV('{% url 'generate_and_upload_accessories_csv' order.id %}')">
-                            <i class="bi bi-stars"></i> Generate
-                        </button>
-                    </h3>
-                    <div class="header-actions">
-                        <button type="button" class="btn btn-sm btn-ghost" id="toggle-stock-detail" onclick="toggleStockDetail()" title="Show/hide Allocated & Incoming">
-                            <i class="bi bi-eye-slash"></i> Stock Detail
-                        </button>
-                        <button class="btn btn-sm btn-success btn-add-icon" type="button" onclick="openModal('addItemModal')" title="Add Item">
-                            Add <i class="bi bi-plus-lg"></i>
-                        </button>
-                        {% if order.original_csv %}
-                        <button class="btn btn-sm btn-ghost-warning" type="button" onclick="regenerateCSV({{ order.id }})">
-                            <i class="bi bi-arrow-repeat"></i> Regenerate CSV
-                        </button>
-                        {% endif %}
-                        {% if order.accessories.exists %}
-                        <button type="button" class="btn btn-sm btn-ghost-success btn-save-changes d-none-init btn-save-dims" id="save-accessory-changes">
-                            <i class="bi bi-save"></i> Save Changes
-                        </button>
-                        <button type="button" class="btn btn-sm btn-danger hidden" id="delete-accessories-selected" title="Delete selected">
-                            <i class="bi bi-trash"></i> <span id="accessory-selected-count">0</span>
-                        </button>
-                        <button type="button" class="btn btn-sm btn-primary hidden" id="acc-add-to-po" onclick="openAddToPOModal('accessory')">
-                            <i class="bi bi-cart-plus"></i> Add to PO
-                        </button>
-                        <button type="button" class="btn btn-sm btn-ghost-success hidden" id="acc-create-po" onclick="createPOFromSelected('accessory')">
-                            <i class="bi bi-file-earmark-plus"></i> Create PO
-                        </button>
-                        {% endif %}
-                    </div>
+					<h3>Accessories</h3>
+					<div class="header-actions">
+						<button type="button" class="btn btn-sm btn-ghost" id="toggle-stock-detail" onclick="toggleStockDetail()" title="Show/hide Allocated & Incoming">
+							<i class="bi bi-eye-slash"></i> Stock Detail
+						</button>
+						<button class="btn btn-sm btn-success btn-add-icon" type="button" onclick="openModal('addItemModal')" title="Add Item">
+							Add <i class="bi bi-plus-lg"></i>
+						</button>
+						{% if order.accessories.exists %}
+						<button type="button" class="btn btn-sm btn-ghost-success btn-save-changes d-none-init btn-save-dims" id="save-accessory-changes">
+							<i class="bi bi-save"></i> Save Changes
+						</button>
+						<button type="button" class="btn btn-sm btn-danger hidden" id="delete-accessories-selected" title="Delete selected">
+							<i class="bi bi-trash"></i> <span id="accessory-selected-count">0</span>
+						</button>
+						<button type="button" class="btn btn-sm btn-primary hidden" id="acc-add-to-po" onclick="openAddToPOModal('accessory')">
+							<i class="bi bi-cart-plus"></i> Add to PO
+						</button>
+						<button type="button" class="btn btn-sm btn-ghost-success hidden" id="acc-create-po" onclick="createPOFromSelected('accessory')">
+							<i class="bi bi-file-earmark-plus"></i> Create PO
+						</button>
+						{% endif %}
+						<div class="kebab-menu">
+							<button type="button" class="kebab-trigger" title="More options" onclick="toggleKebab(this, event)">
+								<i class="bi bi-three-dots-vertical"></i>
+							</button>
+							<div class="kebab-dropdown">
+								<button type="button" class="kebab-item" onclick="generateAccessoriesCSV('{% url 'generate_and_upload_accessories_csv' order.id %}')">
+									<i class="bi bi-stars"></i> Generate CSV
+								</button>
+								{% if order.original_csv %}
+								<button type="button" class="kebab-item" onclick="regenerateCSV({{ order.id }})">
+									<i class="bi bi-arrow-repeat"></i> Regenerate CSV
+								</button>
+								{% endif %}
+							</div>
+						</div>
+					</div>
                 </div>
                 <div class="card-body">
                     
@@ -524,6 +541,9 @@
                 </div>
             </div>
 
+		</div><!-- /section-panel-accessories -->
+
+		<div class="section-tab-panel" id="section-panel-osdoors" data-section-panel="osdoors">
         <!-- OS Doors Section -->
         {% if order.os_doors.all or order.os_doors_required %}
 
@@ -849,32 +869,30 @@
         {% endfor %}
 
         {% else %}
-        <div class="section-divider collapsed" onclick="toggleSectionDivider(this)">
-            <span class="section-divider-label"><i class="bi bi-chevron-down"></i> OS Doors</span>
-        </div>
-        <div class="section-divider-content collapsed">
-            <div class="card">
-                <div class="card-header">
-                    <h3>OS Doors</h3>
-                    <div class="header-actions">
-                        <button type="button"
-                                class="btn btn-sm btn-create-po-icon"
-                                title="Create a new PO for OS Doors"
-                                onclick="createOSDoorsPO({{ order.id }})">
-                            <i class="bi bi-file-earmark-plus"></i>
-                        </button>
-                        <button class="btn btn-sm btn-success btn-add-icon" type="button" onclick="openAddOSDoorModal('')" title="Add OS Door">
-                            Add <i class="bi bi-plus-lg"></i>
-                        </button>
-                    </div>
+        <div class="card">
+            <div class="card-header">
+                <h3>OS Doors</h3>
+                <div class="header-actions">
+                    <button type="button"
+                            class="btn btn-sm btn-ghost-success"
+                            title="Create a new PO for OS Doors"
+                            onclick="createOSDoorsPO({{ order.id }})">
+                        <i class="bi bi-file-earmark-plus"></i> Create PO
+                    </button>
+                    <button class="btn btn-sm btn-success btn-add-icon" type="button" onclick="openAddOSDoorModal('')" title="Add OS Door">
+                        Add <i class="bi bi-plus-lg"></i>
+                    </button>
                 </div>
-                <div class="card-body">
-                    <p class="text-muted">No OS doors added yet.</p>
-                </div>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">No OS doors added yet.</p>
             </div>
         </div>
         {% endif %}
 
+		</div><!-- /section-panel-osdoors -->
+
+		<div class="section-tab-panel" id="section-panel-glass" data-section-panel="glass">
         <!-- Glass Section -->
         {% if glass_items %}
         <div class="card">
@@ -1013,26 +1031,24 @@
             </div>
         </div>
         {% else %}
-        <div class="section-divider collapsed" onclick="toggleSectionDivider(this)">
-            <span class="section-divider-label"><i class="bi bi-chevron-down"></i> Glass</span>
-        </div>
-        <div class="section-divider-content collapsed">
-            <div class="card">
-                <div class="card-header">
-                    <h3>Glass</h3>
-                    <div class="header-actions">
-                        <button class="btn btn-sm btn-success btn-add-icon" type="button" onclick="openModal('addGlassModal')" title="Add Glass">
-                            Add <i class="bi bi-plus-lg"></i>
-                        </button>
-                    </div>
+        <div class="card">
+            <div class="card-header">
+                <h3>Glass</h3>
+                <div class="header-actions">
+                    <button class="btn btn-sm btn-success btn-add-icon" type="button" onclick="openModal('addGlassModal')" title="Add Glass">
+                        Add <i class="bi bi-plus-lg"></i>
+                    </button>
                 </div>
-                <div class="card-body">
-                    <p class="text-muted">No glass items added yet.</p>
-                </div>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">No glass items added yet.</p>
             </div>
         </div>
         {% endif %}
 
+		</div><!-- /section-panel-glass -->
+
+		<div class="section-tab-panel" id="section-panel-raumplus" data-section-panel="raumplus">
         <!-- Raumplus Section -->
         {% if raumplus_accessories %}
         <div class="card">
@@ -1042,6 +1058,9 @@
                     <span class="badge badge-info badge-ml">{{ raumplus_accessories|length }} item{{ raumplus_accessories|length|pluralize }}</span>
                 </h3>
                 <div class="header-actions">
+                    <button class="btn btn-sm btn-success btn-add-icon" type="button" onclick="openModal('addItemModal')" title="Add Raumplus Item">
+                        Add <i class="bi bi-plus-lg"></i>
+                    </button>
                     <button type="button" class="btn btn-sm btn-danger hidden" id="delete-raumplus-selected" title="Delete selected">
                         <i class="bi bi-trash"></i> <span id="raumplus-selected-count">0</span>
                     </button>
@@ -1139,20 +1158,21 @@
             </div>
         </div>
         {% else %}
-        <div class="section-divider collapsed" onclick="toggleSectionDivider(this)">
-            <span class="section-divider-label"><i class="bi bi-chevron-down"></i> Raumplus</span>
-        </div>
-        <div class="section-divider-content collapsed">
-            <div class="card">
-                <div class="card-header">
-                    <h3>Raumplus</h3>
+        <div class="card">
+            <div class="card-header">
+                <h3>Raumplus</h3>
+                <div class="header-actions">
+                    <button class="btn btn-sm btn-success btn-add-icon" type="button" onclick="openModal('addItemModal')" title="Add Raumplus Item">
+                        Add <i class="bi bi-plus-lg"></i>
+                    </button>
                 </div>
-                <div class="card-body">
-                    <p class="text-muted">No Raumplus items added yet.</p>
-                </div>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">No Raumplus items added yet.</p>
             </div>
         </div>
         {% endif %}
+		</div><!-- /section-panel-raumplus -->
 
         </div>
 

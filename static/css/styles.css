@@ -1,6 +1,31 @@
 /* ===== Font Imports (must be first) ===== */
 @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
 
+/* The card surface is a gradient. Plain gradients can't be transitioned (they
+   animate discretely), so its two colour stops are registered as typed custom
+   properties — those DO interpolate, letting the card cross-fade with the rest
+   of the page on a theme change. See --bg-card below and the theme-animating
+   block. */
+@property --bg-card-stop-1 {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #23242a;
+}
+
+@property --bg-card-stop-2 {
+	syntax: "<color>";
+	inherits: true;
+	initial-value: #1c1d22;
+}
+
+/* Assemble the card gradient on `body` so its var() stops resolve against
+   body's values — which flip with `light-mode` and interpolate under
+   `theme-animating`. Declaring it on :root instead would bake the dark stops in
+   and cards would never change theme. Cards inherit this value. */
+body {
+	--bg-card: linear-gradient(160deg, var(--bg-card-stop-1) 0%, var(--bg-card-stop-2) 100%);
+}
+
 /* ===== CSS Variables (Dark mode default) ===== */
 /* "Atlas Cobalt" design system — see obsidian/CSS Design System.md and
    Admin → Design Rules for the full token reference. */
@@ -14,7 +39,12 @@
 	--bg-nav: #1f2024;
 	--bg-input: #2a2b30;
 	--bg-hover: rgba(70, 114, 216, 0.08);
-	--bg-card: linear-gradient(160deg, #23242a 0%, #1c1d22 100%);
+	--bg-card-stop-1: #23242a;
+	--bg-card-stop-2: #1c1d22;
+	/* --bg-card is assembled from the stops on `body` (see below), NOT here — a
+	   custom property resolves its inner var() at the element it's declared on,
+	   so defining it on :root would bake in these dark stops and ignore the
+	   light-mode override / the animating stops. */
 	--bg-page: #141518;
 	--bg-zebra: #212226;
 
@@ -1023,68 +1053,137 @@ body.light-mode .sidebar.collapsed:hover .logo-icon {
     box-shadow: 0 0 0 2px var(--primary-subtle);
 }
 
-/* Theme Toggle — pill slider */
-.theme-toggle {
-    position: relative;
-    width: 52px;
-    height: 32px;
-    border-radius: var(--radius-round);
-    border: 1px solid var(--border-color);
-    cursor: pointer;
-    padding: 0;
-    flex-shrink: 0;
-    background: linear-gradient(135deg, var(--primary-hover) 0%, var(--purple-color) 100%);
-    box-shadow: var(--shadow-sm);
-    transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
-    overflow: hidden;
+/* Theme Toggle — labelled sliding switch (Light / Dark) */
+.theme-switch {
+	position: relative;
+	height: 34px;
+	padding: 0;
+	flex-shrink: 0;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-round);
+	background: var(--bg-secondary);
+	box-shadow: var(--shadow-sm);
+	cursor: pointer;
+	transition: border-color var(--transition), box-shadow var(--transition);
 }
 
-.theme-toggle:hover {
-    border-color: var(--primary-color);
-    box-shadow: var(--shadow-md);
+.theme-switch:hover {
+	border-color: var(--primary-color);
+	box-shadow: var(--shadow-md);
 }
 
-.theme-thumb {
-    position: absolute;
-    top: 4px;
-    left: 4px;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: var(--text-primary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.6875rem;
-    color: var(--bg-primary);
-    box-shadow: var(--shadow-sm);
-    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), background var(--transition), color var(--transition);
+.theme-switch-track {
+	position: relative;
+	display: block;
+	width: 84px;
+	height: 100%;
 }
 
-.theme-moon {
-    display: flex;
+/* Only the active theme's label is shown; it sits opposite the thumb and swaps
+   sides as the thumb slides across. */
+.theme-switch-label {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.01em;
+	white-space: nowrap;
+	color: var(--text-secondary);
+	pointer-events: none;
+	transition: opacity var(--transition);
 }
 
-.theme-sun {
-    display: none;
+/* Dark active (default): thumb on the left, "Dark" fills the space to its right. */
+.theme-switch-label-dark {
+	left: 30px;
+	right: 8px;
 }
 
-body.light-mode .theme-toggle {
-    background: linear-gradient(135deg, var(--info-color) 0%, var(--primary-color) 100%);
+/* Light active: thumb on the right, "Light" fills the space to its left. */
+.theme-switch-label-light {
+	left: 8px;
+	right: 30px;
+	opacity: 0;
 }
 
-body.light-mode .theme-thumb {
-    transform: translateX(22px);
-    background: var(--warning-color);
-    color: var(--text-on-color);
+.theme-switch-thumb {
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	width: 28px;
+	height: 28px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	background: var(--primary-color);
+	box-shadow: var(--shadow-sm);
+	/* Springy overshoot so the slide feels physical rather than linear. */
+	transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), background var(--transition);
+	z-index: 1;
 }
 
-body.light-mode .theme-moon {
-    display: none;
+.theme-switch-thumb i {
+	display: block;
+	font-size: 0.875rem;
+	line-height: 1;
+	color: var(--text-on-color);
+	/* Fade/rotate the icon as it swaps so the change reads as one motion. */
+	transition: transform var(--transition), opacity var(--transition);
 }
 
-body.light-mode .theme-sun {
-    display: flex;
+/* Default (dark): only the moon icon shows inside the thumb. */
+.theme-switch-thumb .theme-icon-light {
+	display: none;
+}
+
+/* Light mode: thumb slides right, icon + label swap to the light variants. */
+body.light-mode .theme-switch-thumb {
+	transform: translateX(50px);
+}
+
+body.light-mode .theme-switch-thumb .theme-icon-dark {
+	display: none;
+}
+
+body.light-mode .theme-switch-thumb .theme-icon-light {
+	display: inline-flex;
+}
+
+body.light-mode .theme-switch-label-dark {
+	opacity: 0;
+}
+
+/* Smooth the colour swap when toggling themes so light mode doesn't flash in
+   abruptly — the page darkens/lightens gradually over ~1s. Applied only during
+   the toggle (via the `theme-animating` class added in JS) so it never adds
+   cost to normal interactions. */
+body.theme-animating *,
+body.theme-animating *::before,
+body.theme-animating *::after {
+	transition: background-color 1s ease, border-color 1s ease, color 1s ease, fill 1s ease, box-shadow 1s ease !important;
+}
+
+/* Body owns the card gradient stops; cards inherit the animating value so their
+   gradient cross-fades. Transitioning the stops here (not on every descendant)
+   avoids each card re-triggering its own transition while chasing the inherited
+   value. */
+body.theme-animating {
+	transition: background-color 1s ease, border-color 1s ease, color 1s ease, fill 1s ease, box-shadow 1s ease, --bg-card-stop-1 1s ease, --bg-card-stop-2 1s ease !important;
+}
+
+/* The thumb still needs its own transform transition during the toggle, or the
+   blanket rule above (which omits transform) makes it snap instead of slide. */
+body.theme-animating .theme-switch-thumb {
+	transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 1s ease !important;
+}
+
+body.light-mode .theme-switch-label-light {
+	opacity: 1;
 }
 
 /* Validation bell */

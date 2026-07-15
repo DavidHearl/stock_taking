@@ -336,10 +336,14 @@
                 <option value="{{ loc }}"{% if current_location == loc %} selected{% endif %}>{{ loc }}</option>
                 {% endfor %}
             </select>
-            <button class="theme-toggle" id="themeToggle" onclick="toggleDarkMode()" title="Toggle theme">
-                <span class="theme-thumb">
-                    <i class="bi bi-moon-fill theme-moon"></i>
-                    <i class="bi bi-sun-fill theme-sun"></i>
+            <button class="theme-switch" id="themeToggle" onclick="toggleDarkMode()" title="Toggle theme" aria-label="Toggle light or dark theme">
+                <span class="theme-switch-track">
+                    <span class="theme-switch-label theme-switch-label-dark">Dark</span>
+                    <span class="theme-switch-label theme-switch-label-light">Light</span>
+                    <span class="theme-switch-thumb" aria-hidden="true">
+                        <i class="bi bi-moon-stars-fill theme-icon-dark"></i>
+                        <i class="bi bi-sun-fill theme-icon-light"></i>
+                    </span>
                 </span>
             </button>
             <div class="profile-menu-wrapper" id="profileMenuWrapper">
@@ -578,7 +582,22 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    document.body.classList.toggle('light-mode', !data.dark_mode);
+                    // Enable colour transitions so the theme cross-fades over ~1s
+                    // instead of flashing (see the `theme-animating` rule in
+                    // styles.css). The class must take effect a frame BEFORE the
+                    // theme flips — otherwise the browser applies the new colours
+                    // and the transition in the same pass and skips the animation.
+                    document.body.classList.add('theme-animating');
+                    requestAnimationFrame(function() {
+                        requestAnimationFrame(function() {
+                            document.body.classList.toggle('light-mode', !data.dark_mode);
+                        });
+                    });
+                    // Remove after the 1s transition finishes so normal
+                    // interactions aren't slowed by the blanket transition.
+                    window.setTimeout(function() {
+                        document.body.classList.remove('theme-animating');
+                    }, 1200);
                 }
             })
             .catch(error => console.error('Error toggling dark mode:', error));
