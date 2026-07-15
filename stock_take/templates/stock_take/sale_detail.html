@@ -2400,8 +2400,15 @@
                     </div>
                 </div>
             </div>
-            <div class="fin-summary-body">
-                <!-- Headline totals (above the diagram) -->
+            <div class="fin-summary-body fin-waffle-section"
+                data-boards="{{ boards_cost|default:'0'|floatformat:2 }}"
+                data-accessories="{{ accessories_cost|default:'0'|floatformat:2 }}"
+                data-os-doors="{{ os_doors_cost|default:'0'|floatformat:2 }}"
+                data-installation="{{ calculated_installation_cost|default:'0'|floatformat:2 }}"
+                data-manufacturing="{{ calculated_manufacturing_cost|default:'0'|floatformat:2 }}"
+                data-profit="{{ order.profit|default:'0'|floatformat:2 }}"
+                data-total-exc="{{ order.total_value_exc_vat|default:'0'|floatformat:2 }}">
+                <!-- Group 1: headline totals -->
                 <div class="fin-totals fin-totals-top">
                     <div class="fin-row fin-row-primary">
                         <span class="fin-label">Total (Inc VAT)</span>
@@ -2419,16 +2426,13 @@
                     </div>
                 </div>
 
-                <!-- Cost-breakdown waffle (integrated) -->
-                <div class="fin-waffle-section"
-                    data-boards="{{ boards_cost|default:'0'|floatformat:2 }}"
-                    data-accessories="{{ accessories_cost|default:'0'|floatformat:2 }}"
-                    data-os-doors="{{ os_doors_cost|default:'0'|floatformat:2 }}"
-                    data-installation="{{ calculated_installation_cost|default:'0'|floatformat:2 }}"
-                    data-manufacturing="{{ calculated_manufacturing_cost|default:'0'|floatformat:2 }}"
-                    data-profit="{{ order.profit|default:'0'|floatformat:2 }}"
-                    data-total-exc="{{ order.total_value_exc_vat|default:'0'|floatformat:2 }}">
+                <!-- Group 2: cost-breakdown chart -->
+                <div class="fin-waffle-chart">
                     <div class="fin-waffle fin-waffle-inline" id="financialChartCanvas"></div>
+                </div>
+
+                <!-- Group 3: chart breakdown / legend -->
+                <div class="fin-waffle-breakdown">
                     <div id="financialChartLegend" class="fin-waffle-legend"></div>
                 </div>
             </div>
@@ -2789,9 +2793,11 @@ function buildFinancialWaffle() {
 
     document.getElementById('financialChartLegend').innerHTML = entries.map(e => {
         return `<div class="fin-waffle-legend-item" data-cat="${slug(e.label)}">
-            <span class="fin-waffle-swatch${e.est ? ' fin-waffle-swatch-est' : ''}" style="background:${e.color};"></span>
-            <span class="fin-waffle-cat">${e.label}${e.est ? ' <span class="fin-waffle-est-tag">est</span>' : ''}</span>
-            <span class="fin-waffle-val">£${e.value.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2})}</span>
+            <div class="fin-waffle-legend-left">
+                <span class="fin-waffle-swatch${e.est ? ' fin-waffle-swatch-est' : ''}" style="background:${e.color};"></span>
+                <div class="fin-waffle-cat">${e.label}${e.est ? ' <span class="fin-waffle-est-tag">est</span>' : ''}</div>
+            </div>
+            <div class="fin-waffle-val"><span class="fin-currency">£</span><span class="fin-amount">${e.value.toLocaleString('en-GB', {minimumFractionDigits:2, maximumFractionDigits:2})}</span></div>
         </div>`;
     }).join('');
 
