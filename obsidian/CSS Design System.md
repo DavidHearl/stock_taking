@@ -98,6 +98,23 @@ Example: a "pending" badge uses `background: var(--warning-subtle); color: var(-
 - `--font-body` — `'Manrope'` — the default `body` font-family; everything not covered above.
 - Both are loaded via the Google Fonts `@import` at the top of `styles.css`. Don't reference "Inter" — it's no longer the site's body font.
 
+**Font-size scale.** Never hardcode a `font-size` in px or a raw rem — use a `--fs-*` token. The scale (defined in `styles.css` `:root`, theme-independent):
+
+| token | value | px | use |
+|---|---|---|---|
+| `--fs-2xs` | 0.5rem | 8 | micro labels |
+| `--fs-xs` | 0.625rem | 10 | tiny badges / meta |
+| `--fs-sm` | 0.75rem | 12 | secondary / dense text, most badges |
+| `--fs-md` | 0.875rem | 14 | **base UI/body text — the `body` default** |
+| `--fs-lg` | 1rem | 16 | emphasis, section labels |
+| `--fs-xl` | 1.125rem | 18 | card titles |
+| `--fs-2xl` | 1.25rem | 20 | subheadings |
+| `--fs-3xl` | 1.5rem | 24 | page/section headings |
+| `--fs-4xl` | 2rem | 32 | scale cap — large icons, hero numbers |
+
+- `body` sets `font-size: var(--fs-md)`, so most text needs **no** explicit `font-size` — only declare one when a component genuinely differs from 14px.
+- These are the *only* sizes the UI should use. `python manage.py lint_css --fix` maps any stray px/rem font-size to the nearest token (capped at `--fs-4xl`) and enforces it.
+
 ### Layout dimensions
 
 `--sidebar-width` (260px), `--sidebar-collapsed-width` (72px), `--topbar-height` (52px). Reference these when positioning fixed/absolute elements relative to the chrome — don't hardcode.
@@ -129,7 +146,7 @@ Bootstrap Icons (`<i class="bi bi-..."></i>`) are the icon set already in use (e
 
 ## Checklist before adding/editing CSS
 
-1. Am I using tokens for every colour, radius, shadow, spacing, and transition? (No raw hex, no magic pixel gaps.)
+1. Am I using tokens for every colour, radius, shadow, spacing, transition, and **font-size** (`--fs-*`)? (No raw hex, no magic pixel gaps, no px/raw-rem font sizes.)
 2. Does it still read correctly in **both** themes? (If you only tested dark, you probably hardcoded something.)
 3. Is my class prefix consistent with the feature's existing block name?
 4. Is this in the right file — the feature's own CSS, not `styles.css`? (`styles.css` is global chrome + the token definitions only.)
