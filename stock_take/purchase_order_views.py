@@ -5790,6 +5790,66 @@ def approved_pos_report_pdf(request):
     return response
 
 
+def _build_xero_board_line_items(boards_po, gl_code, tax_type):
+	"""Build Xero line items from a board PO's PNX boards.
+
+	Board POs (e.g. Carnehill) have no PurchaseOrderProduct rows — their lines live
+	on the linked BoardsPO. Group the PNX items by material and dimensions (mirroring
+	the grouping shown on the PO detail page) so Xero gets one line per board type
+	with a sensible description, quantity and unit price.
+	"""
+	from collections import defaultdict
+	from decimal import Decimal
+
+	pnx_items = list(boards_po.pnx_items.all())
+	if not pnx_items:
+		return []
+
+	is_angled = boards_po.is_angled
+	groups = defaultdict(lambda: {
+		'matname': '', 'cleng': 0.0, 'cwidth': 0.0,
+		'left_height': None, 'right_height': None, 'top_edge': 0.0,
+		'qty': Decimal('0'), 'cost': Decimal('0'),
+	})
+	for item in pnx_items:
+		if is_angled and item.left_height is not None:
+			key = (item.matname, float(item.left_height or 0), float(item.right_height or 0),
+			       float(item.cwidth), float(item.top_edge or 0))
+		else:
+			key = (item.matname, float(item.cleng), float(item.cwidth))
+		grp = groups[key]
+		grp['matname'] = item.matname
+		grp['cleng'] = float(item.cleng)
+		grp['cwidth'] = float(item.cwidth)
+		grp['left_height'] = float(item.left_height) if item.left_height is not None else None
+		grp['right_height'] = float(item.right_height) if item.right_height is not None else None
+		grp['top_edge'] = float(item.top_edge or 0)
+		grp['qty'] += item.cnt
+		grp['cost'] += item.get_cost()
+
+	line_items = []
+	for key, grp in sorted(groups.items(), key=lambda x: x[0]):
+		qty = grp['qty']
+		unit_price = (grp['cost'] / qty) if qty else Decimal('0')
+		if grp['left_height'] is not None:
+			dims = f"L:{grp['left_height']:.0f} R:{grp['right_height']:.0f} W:{grp['cwidth']:.0f}"
+			if grp['top_edge'] > 0:
+				dims += f" TE:{grp['top_edge']:.0f}"
+			name = f"{grp['matname']} — {dims}mm"
+		else:
+			name = f"{grp['matname']} — {grp['cleng']:.0f}×{grp['cwidth']:.0f}mm"
+		line = {
+			'description': name,
+			'quantity': float(qty),
+			'unit_amount': round(float(unit_price), 4),
+			'account_code': gl_code,
+		}
+		if tax_type:
+			line['tax_type'] = tax_type
+		line_items.append(line)
+	return line_items
+
+
 @login_required
 def purchase_order_push_to_xero(request, po_id):
     """
@@ -5837,9 +5897,6 @@ def purchase_order_push_to_xero(request, po_id):
 
         # Build line items from PO products
         products = po.products.all().order_by('sort_order', 'id')
-        if not products.exists():
-            return JsonResponse({'success': False, 'error': 'Purchase order has no line items'}, status=400)
-
         line_items = []
         for product in products:
             line = {
@@ -5855,6 +5912,16 @@ def purchase_order_push_to_xero(request, po_id):
             if product.supplier_code:
                 line['item_code'] = product.supplier_code
             line_items.append(line)
+
+        # Board POs (e.g. Carnehill) carry no PurchaseOrderProduct rows — their lines
+        # live on the linked BoardsPO. Fall back to building lines from its PNX boards.
+        if not line_items:
+            boards_po = BoardsPO.objects.filter(po_number=po.display_number).first()
+            if boards_po:
+                line_items = _build_xero_board_line_items(boards_po, gl_code, supplier_tax_type)
+
+        if not line_items:
+            return JsonResponse({'success': False, 'error': 'Purchase order has no line items'}, status=400)
 
         # Format dates for Xero (YYYY-MM-DD)
         issue_date = None

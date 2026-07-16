@@ -1501,6 +1501,30 @@
     </div>
 </div>
 
+<!-- Push to Xero Modal -->
+<div class="modal-overlay" id="xero-push-modal" style="display:none;" onclick="closeXeroPushModal(event)">
+	<div class="modal-dialog modal-w-480" onclick="event.stopPropagation()">
+		<div class="modal-header">
+			<h3><i class="bi bi-cloud-upload"></i> Push to Xero</h3>
+			<button class="modal-close" onclick="closeXeroPushModal()">&times;</button>
+		</div>
+		<div class="modal-body">
+			<p class="po-modal-lead" id="xero-push-lead">Push purchase order <strong>{{ purchase_order.display_number }}</strong> to Xero as an approved purchase order?</p>
+			<div class="modal-form-group">
+				<label for="xero-gl-code">GL account code</label>
+				<input type="text" id="xero-gl-code" class="modal-input" value="B1001">
+				<div class="email-recipients-hint">Lines without their own account code post to this code.</div>
+			</div>
+		</div>
+		<div class="modal-footer">
+			<button class="btn btn-secondary" onclick="closeXeroPushModal()">Not now</button>
+			<button class="btn btn-success" id="confirm-xero-push-btn" onclick="confirmXeroPush()">
+				<i class="bi bi-cloud-upload"></i> Push to Xero
+			</button>
+		</div>
+	</div>
+</div>
+
 <!-- Receive PO Modal (Partial / Full) -->
 <div class="modal-overlay" id="receive-modal" style="display:none;" onclick="closeReceiveModal(event)">
     <div class="modal-dialog receive-modal-dialog" onclick="event.stopPropagation()">
@@ -2709,8 +2733,11 @@ function sendPOEmail() {
         if (result.success) {
             showNotification(result.message || 'Email sent successfully!', 'success');
             closeSendModal();
-            // Reload to reflect auto-approved status
-            if (result.new_status) {
+            // Sending auto-approves a Draft PO. If it was just approved and isn't yet on
+            // Xero, offer to push it (default yes); otherwise reload to reflect the status.
+            if (result.new_status === 'Approved' && !{{ purchase_order.xero_purchase_order_id|yesno:"true,false" }}) {
+                openXeroPushModal(true);
+            } else if (result.new_status) {
                 setTimeout(() => location.reload(), 1000);
             }
         } else {
@@ -2846,7 +2873,13 @@ function updatePOStatus(newStatus, skipConfirm) {
     .then(result => {
         if (result.success) {
             showNotification(`Purchase order ${result.status.toLowerCase()} successfully.`, 'success');
-            setTimeout(() => location.reload(), 800);
+            // On approval, offer to push straight to Xero (default yes) rather than reloading.
+            if (newStatus === 'Approved' && !{{ purchase_order.xero_purchase_order_id|yesno:"true,false" }}) {
+                document.getElementById('approve-modal').style.display = 'none';
+                openXeroPushModal(true);
+            } else {
+                setTimeout(() => location.reload(), 800);
+            }
         } else {
             showNotification('Error: ' + (result.error || 'Failed'), 'error');
         }
@@ -2855,45 +2888,76 @@ function updatePOStatus(newStatus, skipConfirm) {
 }
 
 // ---- Push to Xero ----
+// When the modal is opened right after approval, closing it should reload so the
+// page reflects the new Approved status; when opened from the kebab it just closes.
+let xeroReloadOnClose = false;
+
+function openXeroPushModal(afterApproval) {
+	xeroReloadOnClose = !!afterApproval;
+	const lead = document.getElementById('xero-push-lead');
+	if (lead) {
+		lead.innerHTML = afterApproval
+			? 'Purchase order <strong>{{ purchase_order.display_number }}</strong> has been approved. Push it to Xero now?'
+			: 'Push purchase order <strong>{{ purchase_order.display_number }}</strong> to Xero as an approved purchase order?';
+	}
+	document.getElementById('xero-push-modal').style.display = 'flex';
+	// Default action is "yes" — focus the push button so Enter confirms.
+	setTimeout(() => document.getElementById('confirm-xero-push-btn').focus(), 50);
+}
+
+function closeXeroPushModal(event) {
+	if (event && event.target !== event.currentTarget) return;
+	document.getElementById('xero-push-modal').style.display = 'none';
+	if (xeroReloadOnClose) {
+		xeroReloadOnClose = false;
+		location.reload();
+	}
+}
+
+// Kebab "Push to Xero" entry point.
 function pushToXero() {
-    // Prompt for the GL account code, defaulting to the stock code. Lines without
-    // their own account_code post to this code. Cancel aborts the push.
-    const glCode = prompt('Push this purchase order to Xero as approved.\n\nGL account code for lines (defaults to stock):', 'B1001');
-    if (glCode === null) return;
+	document.getElementById('po-more-dropdown')?.classList.remove('open');
+	openXeroPushModal(false);
+}
 
-    const btn = document.getElementById('xero-push-btn');
-    btn.disabled = true;
-    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Pushing...';
+function confirmXeroPush() {
+	const glInput = document.getElementById('xero-gl-code');
+	const glCode = (glInput && glInput.value.trim()) || 'B1001';
 
-    fetch('{% url "purchase_order_push_to_xero" purchase_order.workguru_id %}', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': '{{ csrf_token }}',
-        },
-        body: JSON.stringify({ gl_code: glCode.trim() }),
-    })
-    .then(res => {
-        if (!res.ok && res.headers.get('content-type')?.indexOf('application/json') === -1) {
-            throw new Error(`Server error ${res.status}: ${res.statusText}`);
-        }
-        return res.json();
-    })
-    .then(result => {
-        if (result.success) {
-            showNotification('Purchase order pushed to Xero successfully.', 'success');
-            setTimeout(() => location.reload(), 800);
-        } else {
-            showNotification('Error: ' + (result.error || 'Failed to push to Xero'), 'error');
-            btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero';
-        }
-    })
-    .catch(err => {
-        showNotification('Network error: ' + err.message, 'error');
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero';
-    });
+	const btn = document.getElementById('confirm-xero-push-btn');
+	btn.disabled = true;
+	btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Pushing...';
+
+	fetch('{% url "purchase_order_push_to_xero" purchase_order.workguru_id %}', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			'X-CSRFToken': '{{ csrf_token }}',
+		},
+		body: JSON.stringify({ gl_code: glCode }),
+	})
+	.then(res => {
+		if (!res.ok && res.headers.get('content-type')?.indexOf('application/json') === -1) {
+			throw new Error(`Server error ${res.status}: ${res.statusText}`);
+		}
+		return res.json();
+	})
+	.then(result => {
+		if (result.success) {
+			showNotification('Purchase order pushed to Xero successfully.', 'success');
+			xeroReloadOnClose = false;
+			setTimeout(() => location.reload(), 800);
+		} else {
+			showNotification('Error: ' + (result.error || 'Failed to push to Xero'), 'error');
+			btn.disabled = false;
+			btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero';
+		}
+	})
+	.catch(err => {
+		showNotification('Network error: ' + err.message, 'error');
+		btn.disabled = false;
+		btn.innerHTML = '<i class="bi bi-cloud-upload"></i> Push to Xero';
+	});
 }
 
 // ---- Toggle Products Section ----
