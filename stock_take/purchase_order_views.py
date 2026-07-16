@@ -5892,7 +5892,15 @@ def purchase_order_push_to_xero(request, po_id):
         # may be a VAT percentage (e.g. "20") — Xero line items need a tax *code*
         # (e.g. "INPUT2"), so resolve it before sending.
         supplier_obj = Supplier.objects.filter(workguru_id=po.supplier_id).first() if po.supplier_id else None
-        raw_tax_rate = supplier_obj.supplier_tax_rate if supplier_obj else None
+        # Prefer the explicit Xero tax code (supplier_tax_rate), but fall back to the
+        # numeric vat_rate that the PDF uses. Most suppliers only have vat_rate set
+        # (it's the field the UI maintains) — without this fallback their POs push to
+        # Xero with no VAT. resolve_purchase_tax_type accepts either form.
+        raw_tax_rate = None
+        if supplier_obj:
+            raw_tax_rate = supplier_obj.supplier_tax_rate or (
+                str(supplier_obj.vat_rate) if supplier_obj.vat_rate is not None else None
+            )
         supplier_tax_type = xero_api.resolve_purchase_tax_type(raw_tax_rate)
 
         # Build line items from PO products

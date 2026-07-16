@@ -110,6 +110,7 @@ URL_TO_PAGE = {
     'update_fit_status': 'fit_board',
     'delete_fit_appointment': 'fit_board',
     'move_fit_appointment': 'fit_board',
+    'confirm_fit_appointment': 'fit_board',
     'timesheets': 'timesheets',
     'workflow': 'workflow',
 

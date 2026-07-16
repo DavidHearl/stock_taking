@@ -6574,30 +6574,63 @@ def preview_accessory_csv(request, csv_id):
 
 @login_required
 def update_order_financial(request, order_id):
-    """Update financial fields for an order"""
+    """Update a financial field on an order (sale-detail Financial Summary editor).
+
+    Only the sale-detail page calls this. When the inc-VAT total changes we also
+    recompute exc-VAT and profit so the summary stays internally consistent, and
+    mirror the value onto the linked AnthillSale.sale_value so the customer
+    payment pool / payment breakdown reflects the edited contract value (the pool
+    reads sale_value first, falling back to the order total)."""
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'Invalid request method'})
-    
+
     order = get_object_or_404(Order, id=order_id)
-    
+
     try:
         import json
+        from decimal import Decimal
         data = json.loads(request.body)
         field = data.get('field')
         value = data.get('value', 0)
-        
+
         # Validate field name
-        valid_fields = ['materials_cost', 'installation_cost', 'manufacturing_cost', 
+        valid_fields = ['materials_cost', 'installation_cost', 'manufacturing_cost',
                        'total_value_inc_vat', 'total_value_exc_vat', 'profit']
         if field not in valid_fields:
             return JsonResponse({'success': False, 'error': 'Invalid field'})
-        
+
         # Update the field
-        from decimal import Decimal
         setattr(order, field, Decimal(str(value)))
-        order.save()
-        
-        return JsonResponse({'success': True})
+        update_fields = [field]
+
+        # Editing the headline inc-VAT total drives exc-VAT and profit too —
+        # recompute them so the reloaded summary/waffle don't show stale figures.
+        if field == 'total_value_inc_vat':
+            inc = order.total_value_inc_vat or Decimal('0')
+            order.total_value_exc_vat = (inc / Decimal('1.2')).quantize(Decimal('0.01')) if inc > 0 else Decimal('0.00')
+            materials = order.materials_cost or Decimal('0')
+            installation = order.installation_cost or Decimal('0')
+            manufacturing = order.manufacturing_cost or Decimal('0')
+            order.profit = order.total_value_exc_vat - materials - installation - manufacturing
+            update_fields += ['total_value_exc_vat', 'profit']
+
+        order.save(update_fields=update_fields)
+
+        # Keep the linked sale's value aligned so the payment breakdown/pool
+        # (which reads AnthillSale.sale_value) reflects the edited total.
+        if field == 'total_value_inc_vat':
+            sale_id = data.get('sale_id')
+            if sale_id:
+                sale = order.anthill_sale.filter(pk=sale_id).first()
+                if sale:
+                    sale.sale_value = Decimal(str(value))
+                    sale.save(update_fields=['sale_value'])
+
+        return JsonResponse({
+            'success': True,
+            'total_value_exc_vat': str(order.total_value_exc_vat),
+            'profit': str(order.profit),
+        })
     except Exception as e:
         return JsonResponse({'success': False, 'error': str(e)})
 
@@ -11913,20 +11946,24 @@ def calendar_view(request):
     ]
 
     # ── Side-panel data ────────────────────────────────────────────────────
-    # PFP orders: matches the sales tab PFP group exactly — orders with no
-    # order_date and no fit_date, deduplicated by sale_number.
-    # Also exclude any order that already has a FitAppointment (belt-and-braces
-    # guard for historical records whose Order.fit_date was never backfilled).
-    _appointed_order_ids = set(
-        FitAppointment.objects.filter(order__isnull=False)
+    # The job panel is the "needs a confirmed fit date" to-do list. A job leaves
+    # it only once it has a *confirmed* (non-provisional) appointment. Jobs that
+    # were dragged onto the calendar are provisional (FitAppointment.is_provisional
+    # — "dragged, not yet confirmed"); they keep a tentative card on the calendar
+    # but stay in this panel until confirmed, so they can be adjusted/finalised.
+    # Only confirmed appointments count as scheduled here.
+    _confirmed_order_ids = set(
+        FitAppointment.objects
+        .filter(order__isnull=False, is_provisional=False)
         .values_list('order_id', flat=True)
     )
+    # PFP orders: still-at-PFP jobs (no order date) that lack a confirmed fit.
+    # Deduplicated by sale_number. A provisional fit_date does not remove them.
     _pfp_candidates = (
         Order.objects.filter(
             order_date__isnull=True,
-            fit_date__isnull=True,
         )
-        .exclude(id__in=_appointed_order_ids)
+        .exclude(id__in=_confirmed_order_ids)
         .order_by('last_name', 'first_name')
     )
     pfp_orders = []
@@ -11941,16 +11978,16 @@ def calendar_view(request):
             break
 
     # Jobs that have moved on from PFP (they now have an order date) but still
-    # need a fit date — they don't yet appear on the calendar and would
-    # otherwise be invisible in the job list. Ordered jobs with no fit_date and
-    # no appointment, excluding finished ones.
+    # need a confirmed fit date. Ordered, unfinished jobs without a confirmed
+    # appointment — this includes provisionally-scheduled ones (dragged onto the
+    # calendar but not yet confirmed), which previously vanished from the panel
+    # the moment they were dragged.
     _await_candidates = (
         Order.objects.filter(
             order_date__isnull=False,
-            fit_date__isnull=True,
             job_finished=False,
         )
-        .exclude(id__in=_appointed_order_ids)
+        .exclude(id__in=_confirmed_order_ids)
         .order_by('last_name', 'first_name')
     )
     awaiting_orders = []
@@ -13087,8 +13124,29 @@ def move_fit_appointment(request, appointment_id):
             })
         except Exception as e:
             return JsonResponse({'success': False, 'error': str(e)})
-    
+
     return JsonResponse({'success': False, 'error': 'Invalid request method'})
+
+
+@login_required
+def confirm_fit_appointment(request, appointment_id):
+    """Confirm a provisional fit appointment.
+
+    Dragging a job onto the calendar creates a *provisional* appointment; the
+    job keeps a tentative card on the calendar but stays in the "needs
+    scheduling" side panel until it is confirmed here. Clearing the provisional
+    flag finalises the fit and drops the job off that to-do list.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'error': 'POST required'})
+    try:
+        appointment = get_object_or_404(FitAppointment, id=appointment_id)
+        if appointment.is_provisional:
+            appointment.is_provisional = False
+            appointment.save(update_fields=['is_provisional'])
+        return JsonResponse({'success': True, 'appointment_id': appointment.id})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
 
 
 def _order_fit_duration(order):
@@ -13115,7 +13173,14 @@ def _order_fit_duration(order):
 
 @login_required
 def create_provisional_appointment(request):
-    """Create a provisional FitAppointment by dragging a PFP order or remedial onto the calendar."""
+    """Provisionally schedule an order or remedial by dragging it onto the calendar.
+
+    An order/remedial has at most one FitAppointment, so if one already exists
+    (a provisional slot the job kept while sitting in the panel, or a job being
+    re-scheduled from the All-Sales search) it is moved in place rather than
+    duplicated. The drag always (re)sets the provisional flag — placing a job
+    from a list is a tentative action until it is confirmed on the calendar.
+    """
     if request.method != 'POST':
         return JsonResponse({'success': False, 'error': 'POST required'})
     try:
@@ -13131,14 +13196,22 @@ def create_provisional_appointment(request):
 
         if item_type == 'order':
             order = get_object_or_404(Order, id=item_id)
-            appt = FitAppointment.objects.create(
-                order=order,
-                fit_date=fit_date,
-                fitter=fitter,
-                starts_pm=starts_pm,
-                is_provisional=True,
-                fit_duration=_order_fit_duration(order) or 1,
-            )
+            appt = FitAppointment.objects.filter(order=order).order_by('id').first()
+            if appt:
+                appt.fit_date = fit_date
+                appt.fitter = fitter
+                appt.starts_pm = starts_pm
+                appt.is_provisional = True
+                appt.save(update_fields=['fit_date', 'fitter', 'starts_pm', 'is_provisional'])
+            else:
+                appt = FitAppointment.objects.create(
+                    order=order,
+                    fit_date=fit_date,
+                    fitter=fitter,
+                    starts_pm=starts_pm,
+                    is_provisional=True,
+                    fit_duration=_order_fit_duration(order) or 1,
+                )
             order.fit_date = fit_date
             order.save(update_fields=['fit_date'])
             # Also keep the linked AnthillSale in sync

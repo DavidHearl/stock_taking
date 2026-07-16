@@ -1,0 +1,62 @@
+{% load static humanize %}
+{% if invoice_type == 'sales' %}
+{# ─── Sales toolbar: search + actions, inline with the type tabs ─── #}
+<div class="inv-toolbar inv-toolbar--inline">
+	<div class="search-input-wrapper">
+		<i class="bi bi-search"></i>
+		<input type="text" id="invoiceSearch" placeholder="Search invoices..." autocomplete="off">
+	</div>
+	<div class="inv-toolbar-actions">
+		<button class="inv-sync-btn" id="hide-no-date-btn" onclick="toggleHideNoDate()">
+			<i class="bi bi-calendar-x" id="hide-no-date-icon"></i>
+			<span id="hide-no-date-text">Show No-Date</span>
+		</button>
+		<button class="inv-sync-btn" id="add-invoice-btn" onclick="toggleAddInvoiceModal()">
+			<i class="bi bi-plus-lg"></i>
+			<span>Add Invoice</span>
+		</button>
+		<button class="inv-sync-btn" id="check-xero-btn" onclick="checkXero()">
+			<i class="bi bi-search" id="check-xero-icon"></i>
+			<span id="check-xero-text">Check Xero</span>
+		</button>
+		<button class="inv-sync-btn anthill" id="sync-btn" onclick="syncFromAnthill()">
+			<i class="bi bi-arrow-repeat" id="sync-icon"></i>
+			<span id="sync-text">Sync from Anthill</span>
+		</button>
+	</div>
+</div>
+{% else %}
+{# ─── Purchase toolbar: search + actions, inline with the type tabs ─── #}
+<div class="pinv-toolbar pinv-toolbar--inline">
+	<form method="get" action="" class="search-input-wrapper pinv-search-box">
+		<i class="bi bi-search"></i>
+		<input type="text" name="q" id="pinv-search" value="{{ search_query }}"
+		       placeholder="Search by invoice number or supplier…" autocomplete="off">
+		<input type="hidden" name="type" value="purchase">
+		{% if search_query %}<a href="?type=purchase" class="pinv-search-clear">&times;</a>{% endif %}
+	</form>
+	<span class="pinv-selection-count" id="pinv-selection-count" style="display:none;"></span>
+	<button class="pinv-btn inv-btn-muted" id="sync-xero-btn" onclick="syncXeroPayments()" title="Check payment status of all Xero-linked invoices">
+		<i class="bi bi-arrow-repeat"></i>
+		<span>Sync from Xero</span>
+	</button>
+	<button class="pinv-btn" onclick="openCreateModal()">
+		<i class="bi bi-plus-lg"></i>
+		<span>Add Invoice</span>
+	</button>
+	<div class="kebab-menu pinv-bulk-kebab-wrap">
+		<button type="button" class="kebab-trigger pinv-bulk-kebab-trigger" onclick="toggleKebab(this, event)" title="Bulk actions">
+			<i class="bi bi-three-dots-vertical"></i>
+		</button>
+		<div class="kebab-dropdown">
+			<button type="button" class="kebab-item" onclick="pushSelectedToXero()">
+				<i class="bi bi-cloud-upload"></i> Push to Xero
+			</button>
+			<div class="kebab-divider"></div>
+			<button type="button" class="kebab-item" onclick="clearPinvSelection()">
+				<i class="bi bi-x-circle"></i> Clear selection
+			</button>
+		</div>
+	</div>
+</div>
+{% endif %}

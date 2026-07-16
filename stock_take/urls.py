@@ -514,6 +514,7 @@ urlpatterns = [
     path('fit-board/update-order-status/<int:order_id>/', views.update_order_fit_status, name='update_order_fit_status'),
     path('fit-board/delete-appointment/<int:appointment_id>/', views.delete_fit_appointment, name='delete_fit_appointment'),
     path('fit-board/move-appointment/<int:appointment_id>/', views.move_fit_appointment, name='move_fit_appointment'),
+    path('fit-board/confirm-appointment/<int:appointment_id>/', views.confirm_fit_appointment, name='confirm_fit_appointment'),
     path('fit-board/refresh-anthill/', views.refresh_anthill_fit_dates, name='refresh_anthill_fit_dates'),
     path('fit-board/bulk-import/', views.bulk_import_fit_dates, name='bulk_import_fit_dates'),
     path('calendar/provisional-appointment/', views.create_provisional_appointment, name='create_provisional_appointment'),

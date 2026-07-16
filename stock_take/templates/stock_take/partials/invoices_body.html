@@ -1,0 +1,298 @@
+{% load static humanize custom_filters %}
+{% if invoice_type == 'sales' %}
+{# ═══════════════════════ SALES INVOICES ═══════════════════════ #}
+
+<!-- Invoices Table -->
+<div class="inv-table-container">
+    {% if invoices %}
+    <table class="table inv-table" id="invoices-table">
+        <thead>
+            <tr>
+                <th>Contract #</th>
+                <th>Customer</th>
+                <th>Showroom</th>
+                <th>Payment Type</th>
+                <th>Date</th>
+                <th>Method</th>
+                <th>Status</th>
+                <th class="text-right">Amount</th>
+                <th class="text-center">Xero</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for invoice in invoices %}
+            <tr {% if invoice.sale_pk %}onclick="window.location='{% url 'sale_detail' invoice.sale_pk %}'" class="cursor-pointer"{% endif %} data-has-date="{% if invoice.date %}1{% else %}0{% endif %}">
+                <td>
+                    {% if invoice.sale_pk %}<a href="{% url 'sale_detail' invoice.sale_pk %}" class="inv-number">{{ invoice.contract_number|default:invoice.invoice_number }}</a>{% else %}<span class="inv-number">{{ invoice.contract_number|default:invoice.invoice_number }}</span>{% endif %}
+                </td>
+                <td>
+                    {% if invoice.customer %}<a href="{% url 'customer_detail' invoice.customer.pk %}" class="inv-client" title="{{ invoice.client_name }}" onclick="event.stopPropagation();">{{ invoice.client_name }}</a>{% elif invoice.sale_customer_pk %}<a href="{% url 'customer_detail' invoice.sale_customer_pk %}" class="inv-client" title="{{ invoice.client_name }}" onclick="event.stopPropagation();">{{ invoice.client_name }}</a>{% else %}<span class="inv-client" title="{{ invoice.client_name }}">{{ invoice.client_name }}</span>{% endif %}
+                </td>
+                <td>{{ invoice.showroom|default:"—" }}</td>
+                <td>{{ invoice.payment_type|default:"—" }}</td>
+                <td>
+                    {% if invoice.date %}{{ invoice.date|date:"d M Y" }}{% else %}—{% endif %}
+                </td>
+                <td>{{ invoice.payment_method|default:"—" }}</td>
+                <td>
+                    <span class="inv-status {{ invoice.anthill_payment_status|lower|default:invoice.status|lower }}">{{ invoice.anthill_payment_status|default:invoice.status }}</span>
+                </td>
+                <td class="number-cell">£{{ invoice.total|floatformat:2|intcomma }}</td>
+                <td class="text-center">
+                    <span class="inv-xero-cell">
+                        {% if invoice.xero_id %}
+                        <a href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID={{ invoice.xero_id }}" target="_blank" class="inv-xero-link" title="View in Xero" onclick="event.stopPropagation();"><i class="bi bi-box-arrow-up-right"></i></a>
+                        {% endif %}
+                        <button class="inv-xero-push" title="Push to Xero as Draft" onclick="event.stopPropagation(); pushToXero({{ invoice.id }})">
+                            <i class="bi bi-cloud-upload"></i>
+                        </button>
+                    </span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="inv-empty">
+        <i class="bi bi-receipt"></i>
+        <p>No invoices found{% if not last_sync %} — click <strong>Sync Invoices</strong> to import{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Sales Pagination -->
+{% if page_obj.has_other_pages %}
+<nav class="inv-pagination" aria-label="Invoice pages">
+    {% if page_obj.has_previous %}
+    <a href="?type=sales&page={{ page_obj.previous_page_number }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">&laquo; Prev</a>
+    {% endif %}
+    {% for page_n in page_obj.paginator.page_range %}
+        {% if page_n == page_obj.number %}
+        <span class="inv-page-btn active">{{ page_n }}</span>
+        {% elif page_n == 1 or page_n == page_obj.paginator.num_pages %}
+        <a href="?type=sales&page={{ page_n }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">{{ page_n }}</a>
+        {% elif page_n >= page_obj.number|add:"-2" and page_n <= page_obj.number|add:"2" %}
+        <a href="?type=sales&page={{ page_n }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">{{ page_n }}</a>
+        {% elif page_n == page_obj.number|add:"-3" or page_n == page_obj.number|add:"3" %}
+        <span class="inv-page-ellipsis">&hellip;</span>
+        {% endif %}
+    {% endfor %}
+    {% if page_obj.has_next %}
+    <a href="?type=sales&page={{ page_obj.next_page_number }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">Next &raquo;</a>
+    {% endif %}
+</nav>
+{% endif %}
+
+<!-- Add Invoice Modal -->
+<div class="modal-overlay" id="add-invoice-modal" style="display:none;" onclick="closeAddInvoiceModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3><i class="bi bi-plus-lg"></i> Add Invoice</h3>
+            <button class="modal-close" onclick="closeAddInvoiceModal()">&times;</button>
+        </div>
+        <div class="modal-body inv-modal-col">
+            <div class="inv-form-grid-2">
+                <div>
+                    <label class="inv-modal-flabel">Invoice Number *</label>
+                    <input type="text" id="new-inv-number" placeholder="e.g. INV-001"
+                           class="inv-modal-input">
+                </div>
+                <div>
+                    <label class="inv-modal-flabel">Client Name</label>
+                    <input type="text" id="new-inv-client" placeholder="Client name"
+                           class="inv-modal-input">
+                </div>
+                <div>
+                    <label class="inv-modal-flabel">Date</label>
+                    <input type="date" id="new-inv-date"
+                           class="inv-modal-input">
+                </div>
+                <div>
+                    <label class="inv-modal-flabel">Due Date</label>
+                    <input type="date" id="new-inv-due-date"
+                           class="inv-modal-input">
+                </div>
+                <div>
+                    <label class="inv-modal-flabel">Total (£)</label>
+                    <input type="number" id="new-inv-total" step="0.01" min="0" placeholder="0.00"
+                           class="inv-modal-input">
+                </div>
+                <div>
+                    <label class="inv-modal-flabel">Status</label>
+                    <select id="new-inv-status"
+                            class="inv-modal-input">
+                        <option value="Draft">Draft</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Sent">Sent</option>
+                        <option value="Paid">Paid</option>
+                    </select>
+                </div>
+            </div>
+            <div>
+                <label class="inv-modal-flabel">Description</label>
+                <input type="text" id="new-inv-desc" placeholder="Optional description"
+                       class="inv-modal-input">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="closeAddInvoiceModal()">Cancel</button>
+            <button type="button" class="btn-save" onclick="submitNewInvoice()">
+                <i class="bi bi-check-lg"></i> Create Invoice
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Anthill Sync Log Modal -->
+<div class="modal-overlay" id="anthill-sync-modal" style="display:none;" onclick="closeAnthillSyncModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3><i class="bi bi-cloud-download"></i> Anthill Payments Sync{% if current_location %} — {{ current_location }}{% endif %}</h3>
+            <button class="modal-close" onclick="closeAnthillSyncModal()">&times;</button>
+        </div>
+        <div class="modal-body inv-modal-scroll-65">
+            <div id="anthill-period-picker" class="inv-pad-2024">
+                <p class="inv-modal-subtext">Select a time period to sync:</p>
+                <div class="inv-period-grid">
+                    <button class="btn-cancel" onclick="startSync('today')"><i class="bi bi-calendar-day"></i>&nbsp; Today</button>
+                    <button class="btn-cancel" onclick="startSync('this_week')"><i class="bi bi-calendar-week"></i>&nbsp; This Week</button>
+                    <button class="btn-cancel" onclick="startSync('last_7_days')"><i class="bi bi-calendar3"></i>&nbsp; Last 7 Days</button>
+                    <button class="btn-cancel" onclick="startSync('last_28_days')"><i class="bi bi-calendar3"></i>&nbsp; Last 28 Days</button>
+                    <button class="btn-cancel" onclick="startSync('this_month')"><i class="bi bi-calendar-month"></i>&nbsp; This Month</button>
+                    <button class="btn-cancel" onclick="startSync('this_year')"><i class="bi bi-calendar-range"></i>&nbsp; This Year</button>
+                    <button class="btn-cancel" onclick="startSync('last_12_months')"><i class="bi bi-calendar3-range"></i>&nbsp; Last 12 Months</button>
+                    <button class="btn-cancel" onclick="startSync('all_time')"><i class="bi bi-clock-history"></i>&nbsp; All Time</button>
+                </div>
+            </div>
+            <div id="anthill-sync-status" class="inv-sync-status" style="display:none;">
+                <i class="bi bi-arrow-repeat spinning"></i> Fetching payments from Anthill...
+                <span id="anthill-sync-timer" class="inv-sync-timer"></span>
+            </div>
+            <table class="table inv-table" id="anthill-sync-table" style="display:none;">
+                <thead>
+                    <tr>
+                        <th class="text-center"></th>
+                        <th>Showroom</th><th>Date</th><th>Customer</th><th>Type</th>
+                        <th class="text-right">Amount</th><th>Status</th><th>Contract #</th><th>Method</th>
+                    </tr>
+                </thead>
+                <tbody id="anthill-sync-tbody"></tbody>
+            </table>
+        </div>
+        <div class="modal-footer">
+            <span id="anthill-sync-summary" class="inv-sync-summary"></span>
+            <button type="button" class="btn-cancel" onclick="closeAnthillSyncModal()">Close</button>
+            <button type="button" class="btn-save" id="anthill-import-btn" style="display:none;" onclick="importNewInvoices()">
+                <i class="bi bi-plus-lg"></i> Import New
+            </button>
+        </div>
+    </div>
+</div>
+
+{% else %}
+{# ═══════════════════════ PURCHASE INVOICES ═══════════════════════ #}
+
+<!-- Purchase Invoices Table -->
+<div class="pinv-table-container pinv-table-container--full">
+    {% if invoices %}
+    <table class="table pinv-table" id="purchase-invoices-table">
+        <thead>
+            <tr>
+                <th class="text-center">
+                    <input type="checkbox" id="pinv-select-all" title="Select all" onclick="event.stopPropagation()" onchange="togglePinvSelectAll(this)">
+                </th>
+                <th>Invoice #</th>
+                <th>Supplier</th>
+                <th>Date</th>
+                <th>Due Date</th>
+                <th>Status</th>
+                <th class="text-right">Total</th>
+                <th class="text-right">Outstanding</th>
+                <th>Payment</th>
+                <th class="text-center" title="Xero"><i class="bi bi-cloud"></i></th>
+                <th class="text-center" title="PDF"><i class="bi bi-paperclip"></i></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for invoice in invoices %}
+            <tr onclick="window.location='{% url 'purchase_invoice_detail' invoice.id %}'" class="cursor-pointer">
+                <td class="text-center">
+                    <input type="checkbox" class="pinv-row-check" value="{{ invoice.id }}"
+                           data-xero-id="{{ invoice.xero_id }}"
+                           data-invoice-number="{{ invoice.invoice_number }}"
+                           onclick="event.stopPropagation(); updatePinvSelection();">
+                </td>
+                <td>
+                    <a href="{% url 'purchase_invoice_detail' invoice.id %}" class="pinv-number">{{ invoice.invoice_number }}</a>
+                </td>
+                <td>
+                    <span class="pinv-supplier" title="{{ invoice.supplier_name }}">{{ invoice.supplier_name|default:"—" }}</span>
+                </td>
+                <td>{{ invoice.date|date:"d M Y"|default:"—" }}</td>
+                <td>{{ invoice.due_date|date:"d M Y"|default:"—" }}</td>
+                <td><span class="pinv-status {{ invoice.status|lower }}">{{ invoice.status }}</span></td>
+                <td class="number-cell">£{{ invoice.total|floatformat:2|intcomma }}</td>
+                <td class="number-cell">
+                    {% if invoice.amount_outstanding > 0 %}
+                    <span class="text-danger">£{{ invoice.amount_outstanding|floatformat:2|intcomma }}</span>
+                    {% else %}
+                    <span class="text-success">£0.00</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if invoice.payment_status == 'paid' %}<span class="pinv-payment paid">Paid</span>
+                    {% elif invoice.payment_status == 'partial' %}<span class="pinv-payment partial">Partial</span>
+                    {% else %}<span class="pinv-payment unpaid">Unpaid</span>{% endif %}
+                </td>
+                <td class="text-center">
+                    {% if invoice.xero_id %}
+                    <a href="https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={{ invoice.xero_id }}" target="_blank" onclick="event.stopPropagation()" title="View in Xero" class="pinv-tbl-icon xero-linked"><i class="bi bi-check-circle-fill"></i></a>
+                    {% else %}
+                    <button class="pinv-tbl-icon xero-unlinked" onclick="event.stopPropagation(); checkXeroStatus({{ invoice.id }}, this)" title="Not in Xero — click to search Xero"><i class="bi bi-x-circle-fill"></i></button>
+                    {% endif %}
+                </td>
+                <td class="text-center">
+                    {% if invoice.attachment %}
+                    <a href="{{ invoice.attachment.url }}" target="_blank" onclick="event.stopPropagation()" title="View attachment" class="pinv-tbl-icon pdf-link"><i class="bi bi-file-earmark-pdf"></i></a>
+                    {% else %}
+                    <span class="pinv-tbl-icon pdf-none" title="No attachment"><i class="bi bi-dash"></i></span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="pinv-empty">
+        <i class="bi bi-receipt"></i>
+        <p>No purchase invoices yet — click <strong>Add Invoice</strong> to get started.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Purchase Pagination -->
+{% if page_obj.has_other_pages %}
+<nav class="inv-pagination" aria-label="Purchase invoice pages">
+    {% if page_obj.has_previous %}
+    <a href="?type=purchase&page={{ page_obj.previous_page_number }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">&laquo; Prev</a>
+    {% endif %}
+    {% for page_n in page_obj.paginator.page_range %}
+        {% if page_n == page_obj.number %}
+        <span class="inv-page-btn active">{{ page_n }}</span>
+        {% elif page_n == 1 or page_n == page_obj.paginator.num_pages %}
+        <a href="?type=purchase&page={{ page_n }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">{{ page_n }}</a>
+        {% elif page_n >= page_obj.number|add:"-2" and page_n <= page_obj.number|add:"2" %}
+        <a href="?type=purchase&page={{ page_n }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">{{ page_n }}</a>
+        {% elif page_n == page_obj.number|add:"-3" or page_n == page_obj.number|add:"3" %}
+        <span class="inv-page-ellipsis">&hellip;</span>
+        {% endif %}
+    {% endfor %}
+    {% if page_obj.has_next %}
+    <a href="?type=purchase&page={{ page_obj.next_page_number }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">Next &raquo;</a>
+    {% endif %}
+</nav>
+{% endif %}
+
+{% include 'stock_take/partials/invoice_modal.html' with attachment_mode='upload' %}
+
+{% endif %}{# end invoice_type check #}

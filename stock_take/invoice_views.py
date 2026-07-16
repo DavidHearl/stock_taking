@@ -16,6 +16,7 @@ from django.db import transaction
 from django.core.paginator import Paginator
 from django.db.models import Case, Count, ExpressionWrapper, DecimalField as OrmDecimalField, F, IntegerField, Q, Sum, When
 from django.shortcuts import render, get_object_or_404
+from django.template.loader import render_to_string
 from django.contrib.auth.decorators import login_required
 from django.http import StreamingHttpResponse, JsonResponse
 from django.utils import timezone
@@ -188,6 +189,16 @@ def invoices_list(request):
     context['invoice_type'] = invoice_type
     context['status_filter'] = status_filter
     context['search_query'] = search_query
+
+    # Client-side tab switch (Sales ⇄ Purchase / status / pagination) fetches
+    # just the toolbar + body fragments, so there's no full page reload.
+    if request.GET.get('partial') == '1':
+        return JsonResponse({
+            'toolbar': render_to_string('stock_take/partials/invoices_toolbar.html', context, request=request),
+            'body': render_to_string('stock_take/partials/invoices_body.html', context, request=request),
+            'title': 'Invoices ({:,})'.format(context.get('total_invoices', 0)),
+        })
+
     return render(request, 'stock_take/invoices.html', context)
 
 

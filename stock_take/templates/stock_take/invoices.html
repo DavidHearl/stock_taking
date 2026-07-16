@@ -39,401 +39,31 @@
 
 {% block content %}
 
-<!-- Type Selector Tabs -->
-<div class="tab-nav tab-nav-pills inv-mb-20" data-pill-slider>
-    <a href="?type=sales{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if invoice_type == 'sales' %}active{% endif %}">
-        Sales Invoices
-    </a>
-    <a href="?type=purchase{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if invoice_type == 'purchase' %}active{% endif %}">
-        Purchase Invoices
-    </a>
+<!-- Top bar: type selector tabs + per-type toolbar, all on one row -->
+<div class="inv-topbar" id="inv-topbar">
+	<div class="tab-nav tab-nav-pills" data-pill-slider>
+		<a href="?type=sales{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if invoice_type == 'sales' %}active{% endif %}" data-inv-type="sales">
+			Sales Invoices
+		</a>
+		<a href="?type=purchase{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if invoice_type == 'purchase' %}active{% endif %}" data-inv-type="purchase">
+			Purchase Invoices
+		</a>
+	</div>
+	<div class="inv-toolbar-slot" id="inv-toolbar">
+		{% include 'stock_take/partials/invoices_toolbar.html' %}
+	</div>
 </div>
 
-{% if invoice_type == 'sales' %}
-{# ═══════════════════════ SALES INVOICES ═══════════════════════ #}
-
-<!-- Toolbar: search + actions -->
-<div class="inv-toolbar">
-    <div class="search-input-wrapper">
-        <i class="bi bi-search"></i>
-        <input type="text" id="invoiceSearch" placeholder="Search invoices..." autocomplete="off">
-    </div>
-    <div class="inv-toolbar-actions">
-        <button class="inv-sync-btn" id="add-invoice-btn" onclick="toggleAddInvoiceModal()">
-            <i class="bi bi-plus-lg"></i>
-            <span>Add Invoice</span>
-        </button>
-        <button class="inv-sync-btn" id="check-xero-btn" onclick="checkXero()">
-            <i class="bi bi-search" id="check-xero-icon"></i>
-            <span id="check-xero-text">Check Xero</span>
-        </button>
-        <button class="inv-sync-btn anthill" id="sync-btn" onclick="syncFromAnthill()">
-            <i class="bi bi-arrow-repeat" id="sync-icon"></i>
-            <span id="sync-text">Sync from Anthill</span>
-        </button>
-    </div>
+<!-- Tab body (table / status tabs / modals) — swapped client-side without a full reload -->
+<div id="inv-body">
+	{% include 'stock_take/partials/invoices_body.html' %}
 </div>
-
-<!-- Status Tabs -->
-<div class="inv-toolbar inv-mb-16">
-    <div class="tab-nav tab-nav-pills" data-pill-slider>
-        <a href="?type=sales{% if search_query %}&q={{ search_query }}{% endif %}&status=all"
-           class="tab-button {% if status_filter == 'all' %}active{% endif %}">
-            All ({{ total_invoices }})
-        </a>
-        <a href="?type=sales{% if search_query %}&q={{ search_query }}{% endif %}&status=unpaid"
-           class="tab-button {% if status_filter == 'unpaid' %}active{% endif %}">
-            Unpaid ({{ unpaid_count }})
-        </a>
-    </div>
-    <div class="inv-ml-auto">
-        <button class="inv-sync-btn" id="hide-no-date-btn" onclick="toggleHideNoDate()">
-            <i class="bi bi-calendar-x" id="hide-no-date-icon"></i>
-            <span id="hide-no-date-text">Show No-Date</span>
-        </button>
-    </div>
-</div>
-
-<!-- Invoices Table -->
-<div class="inv-table-container">
-    {% if invoices %}
-    <table class="table inv-table" id="invoices-table">
-        <thead>
-            <tr>
-                <th>Contract #</th>
-                <th>Customer</th>
-                <th>Showroom</th>
-                <th>Payment Type</th>
-                <th>Date</th>
-                <th>Method</th>
-                <th>Status</th>
-                <th class="text-right">Amount</th>
-                <th>Payment</th>
-                <th class="text-center">Xero</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for invoice in invoices %}
-            <tr {% if invoice.sale_pk %}onclick="window.location='{% url 'sale_detail' invoice.sale_pk %}'" class="cursor-pointer"{% endif %} data-has-date="{% if invoice.date %}1{% else %}0{% endif %}">
-                <td>
-                    {% if invoice.sale_pk %}<a href="{% url 'sale_detail' invoice.sale_pk %}" class="inv-number">{{ invoice.contract_number|default:invoice.invoice_number }}</a>{% else %}<span class="inv-number">{{ invoice.contract_number|default:invoice.invoice_number }}</span>{% endif %}
-                </td>
-                <td>
-                    {% if invoice.customer %}<a href="{% url 'customer_detail' invoice.customer.pk %}" class="inv-client" title="{{ invoice.client_name }}" onclick="event.stopPropagation();">{{ invoice.client_name }}</a>{% elif invoice.sale_customer_pk %}<a href="{% url 'customer_detail' invoice.sale_customer_pk %}" class="inv-client" title="{{ invoice.client_name }}" onclick="event.stopPropagation();">{{ invoice.client_name }}</a>{% else %}<span class="inv-client" title="{{ invoice.client_name }}">{{ invoice.client_name }}</span>{% endif %}
-                </td>
-                <td>{{ invoice.showroom|default:"—" }}</td>
-                <td>{{ invoice.payment_type|default:"—" }}</td>
-                <td>
-                    {% if invoice.date %}{{ invoice.date|date:"d M Y" }}{% else %}—{% endif %}
-                </td>
-                <td>{{ invoice.payment_method|default:"—" }}</td>
-                <td>
-                    <span class="inv-status {{ invoice.anthill_payment_status|lower|default:invoice.status|lower }}">{{ invoice.anthill_payment_status|default:invoice.status }}</span>
-                </td>
-                <td class="number-cell">£{{ invoice.total|floatformat:2|intcomma }}</td>
-                <td>
-                    {% if invoice.is_overdue %}<span class="inv-payment overdue">Overdue</span>
-                    {% elif invoice.payment_status == 'paid' %}<span class="inv-payment paid">Paid</span>
-                    {% elif invoice.payment_status == 'partial' %}<span class="inv-payment partial">Partial</span>
-                    {% else %}<span class="inv-payment unpaid">Unpaid</span>{% endif %}
-                </td>
-                <td class="text-center">
-                    <span class="inv-xero-cell">
-                        {% if invoice.xero_id %}
-                        <a href="https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID={{ invoice.xero_id }}" target="_blank" class="inv-xero-link" title="View in Xero" onclick="event.stopPropagation();"><i class="bi bi-box-arrow-up-right"></i></a>
-                        {% endif %}
-                        <button class="inv-xero-push" title="Push to Xero as Draft" onclick="event.stopPropagation(); pushToXero({{ invoice.id }})">
-                            <i class="bi bi-cloud-upload"></i>
-                        </button>
-                    </span>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="inv-empty">
-        <i class="bi bi-receipt"></i>
-        <p>No invoices found{% if not last_sync %} — click <strong>Sync Invoices</strong> to import{% endif %}</p>
-    </div>
-    {% endif %}
-</div>
-
-<!-- Sales Pagination -->
-{% if page_obj.has_other_pages %}
-<nav class="inv-pagination" aria-label="Invoice pages">
-    {% if page_obj.has_previous %}
-    <a href="?type=sales&page={{ page_obj.previous_page_number }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">&laquo; Prev</a>
-    {% endif %}
-    {% for page_n in page_obj.paginator.page_range %}
-        {% if page_n == page_obj.number %}
-        <span class="inv-page-btn active">{{ page_n }}</span>
-        {% elif page_n == 1 or page_n == page_obj.paginator.num_pages %}
-        <a href="?type=sales&page={{ page_n }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">{{ page_n }}</a>
-        {% elif page_n >= page_obj.number|add:"-2" and page_n <= page_obj.number|add:"2" %}
-        <a href="?type=sales&page={{ page_n }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">{{ page_n }}</a>
-        {% elif page_n == page_obj.number|add:"-3" or page_n == page_obj.number|add:"3" %}
-        <span class="inv-page-ellipsis">&hellip;</span>
-        {% endif %}
-    {% endfor %}
-    {% if page_obj.has_next %}
-    <a href="?type=sales&page={{ page_obj.next_page_number }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">Next &raquo;</a>
-    {% endif %}
-</nav>
-{% endif %}
-
-<!-- Add Invoice Modal -->
-<div class="modal-overlay" id="add-invoice-modal" style="display:none;" onclick="closeAddInvoiceModal(event)">
-    <div class="modal-dialog inv-w-520" onclick="event.stopPropagation()">
-        <div class="modal-header">
-            <h3><i class="bi bi-plus-lg"></i> Add Invoice</h3>
-            <button class="modal-close" onclick="closeAddInvoiceModal()">&times;</button>
-        </div>
-        <div class="modal-body inv-modal-col">
-            <div class="inv-form-grid-2">
-                <div>
-                    <label class="inv-modal-flabel">Invoice Number *</label>
-                    <input type="text" id="new-inv-number" placeholder="e.g. INV-001"
-                           class="inv-modal-input">
-                </div>
-                <div>
-                    <label class="inv-modal-flabel">Client Name</label>
-                    <input type="text" id="new-inv-client" placeholder="Client name"
-                           class="inv-modal-input">
-                </div>
-                <div>
-                    <label class="inv-modal-flabel">Date</label>
-                    <input type="date" id="new-inv-date"
-                           class="inv-modal-input">
-                </div>
-                <div>
-                    <label class="inv-modal-flabel">Due Date</label>
-                    <input type="date" id="new-inv-due-date"
-                           class="inv-modal-input">
-                </div>
-                <div>
-                    <label class="inv-modal-flabel">Total (£)</label>
-                    <input type="number" id="new-inv-total" step="0.01" min="0" placeholder="0.00"
-                           class="inv-modal-input">
-                </div>
-                <div>
-                    <label class="inv-modal-flabel">Status</label>
-                    <select id="new-inv-status"
-                            class="inv-modal-input">
-                        <option value="Draft">Draft</option>
-                        <option value="Approved">Approved</option>
-                        <option value="Sent">Sent</option>
-                        <option value="Paid">Paid</option>
-                    </select>
-                </div>
-            </div>
-            <div>
-                <label class="inv-modal-flabel">Description</label>
-                <input type="text" id="new-inv-desc" placeholder="Optional description"
-                       class="inv-modal-input">
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn-cancel" onclick="closeAddInvoiceModal()">Cancel</button>
-            <button type="button" class="btn-save" onclick="submitNewInvoice()">
-                <i class="bi bi-check-lg"></i> Create Invoice
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- Anthill Sync Log Modal -->
-<div class="modal-overlay" id="anthill-sync-modal" style="display:none;" onclick="closeAnthillSyncModal(event)">
-    <div class="modal-dialog inv-w-1200" onclick="event.stopPropagation()">
-        <div class="modal-header">
-            <h3><i class="bi bi-cloud-download"></i> Anthill Payments Sync{% if current_location %} — {{ current_location }}{% endif %}</h3>
-            <button class="modal-close" onclick="closeAnthillSyncModal()">&times;</button>
-        </div>
-        <div class="modal-body inv-modal-scroll-65">
-            <div id="anthill-period-picker" class="inv-pad-2024">
-                <p class="inv-modal-subtext">Select a time period to sync:</p>
-                <div class="inv-period-grid">
-                    <button class="btn-cancel" onclick="startSync('today')"><i class="bi bi-calendar-day"></i>&nbsp; Today</button>
-                    <button class="btn-cancel" onclick="startSync('this_week')"><i class="bi bi-calendar-week"></i>&nbsp; This Week</button>
-                    <button class="btn-cancel" onclick="startSync('last_7_days')"><i class="bi bi-calendar3"></i>&nbsp; Last 7 Days</button>
-                    <button class="btn-cancel" onclick="startSync('last_28_days')"><i class="bi bi-calendar3"></i>&nbsp; Last 28 Days</button>
-                    <button class="btn-cancel" onclick="startSync('this_month')"><i class="bi bi-calendar-month"></i>&nbsp; This Month</button>
-                    <button class="btn-cancel" onclick="startSync('this_year')"><i class="bi bi-calendar-range"></i>&nbsp; This Year</button>
-                    <button class="btn-cancel" onclick="startSync('last_12_months')"><i class="bi bi-calendar3-range"></i>&nbsp; Last 12 Months</button>
-                    <button class="btn-cancel" onclick="startSync('all_time')"><i class="bi bi-clock-history"></i>&nbsp; All Time</button>
-                </div>
-            </div>
-            <div id="anthill-sync-status" class="inv-sync-status" style="display:none;">
-                <i class="bi bi-arrow-repeat spinning"></i> Fetching payments from Anthill...
-                <span id="anthill-sync-timer" class="inv-sync-timer"></span>
-            </div>
-            <table class="table inv-table" id="anthill-sync-table" style="display:none;">
-                <thead>
-                    <tr>
-                        <th class="inv-w-32 text-center"></th>
-                        <th>Showroom</th><th>Date</th><th>Customer</th><th>Type</th>
-                        <th class="text-right">Amount</th><th>Status</th><th>Contract #</th><th>Method</th>
-                    </tr>
-                </thead>
-                <tbody id="anthill-sync-tbody"></tbody>
-            </table>
-        </div>
-        <div class="modal-footer">
-            <span id="anthill-sync-summary" class="inv-sync-summary"></span>
-            <button type="button" class="btn-cancel" onclick="closeAnthillSyncModal()">Close</button>
-            <button type="button" class="btn-save" id="anthill-import-btn" style="display:none;" onclick="importNewInvoices()">
-                <i class="bi bi-plus-lg"></i> Import New
-            </button>
-        </div>
-    </div>
-</div>
-
-{% else %}
-{# ═══════════════════════ PURCHASE INVOICES ═══════════════════════ #}
-
-<!-- Toolbar -->
-<div class="pinv-toolbar">
-    <form method="get" action="" class="search-input-wrapper pinv-search-box">
-        <i class="bi bi-search"></i>
-        <input type="text" name="q" id="pinv-search" value="{{ search_query }}"
-               placeholder="Search by invoice number or supplier…" autocomplete="off">
-        <input type="hidden" name="type" value="purchase">
-        {% if search_query %}<a href="?type=purchase" class="pinv-search-clear">&times;</a>{% endif %}
-    </form>
-    <span class="pinv-selection-count" id="pinv-selection-count" style="display:none;"></span>
-    <button class="pinv-btn inv-btn-muted" id="sync-xero-btn" onclick="syncXeroPayments()" title="Check payment status of all Xero-linked invoices">
-        <i class="bi bi-arrow-repeat"></i>
-        <span>Sync from Xero</span>
-    </button>
-    <button class="pinv-btn" onclick="openCreateModal()">
-        <i class="bi bi-plus-lg"></i>
-        <span>Add Invoice</span>
-    </button>
-    <div class="kebab-menu pinv-bulk-kebab-wrap">
-        <button type="button" class="kebab-trigger pinv-bulk-kebab-trigger" onclick="toggleKebab(this, event)" title="Bulk actions">
-            <i class="bi bi-three-dots-vertical"></i>
-        </button>
-        <div class="kebab-dropdown">
-            <button type="button" class="kebab-item" onclick="pushSelectedToXero()">
-                <i class="bi bi-cloud-upload"></i> Push to Xero
-            </button>
-            <div class="kebab-divider"></div>
-            <button type="button" class="kebab-item" onclick="clearPinvSelection()">
-                <i class="bi bi-x-circle"></i> Clear selection
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- Purchase Invoices Table -->
-<div class="pinv-table-container pinv-table-container--full">
-    {% if invoices %}
-    <table class="table pinv-table" id="purchase-invoices-table">
-        <thead>
-            <tr>
-                <th class="inv-w-36 text-center">
-                    <input type="checkbox" id="pinv-select-all" title="Select all" onclick="event.stopPropagation()" onchange="togglePinvSelectAll(this)">
-                </th>
-                <th>Invoice #</th>
-                <th>Supplier</th>
-                <th>Date</th>
-                <th>Due Date</th>
-                <th>Status</th>
-                <th class="text-right">Total</th>
-                <th class="text-right">Outstanding</th>
-                <th>Payment</th>
-                <th class="inv-w-36 text-center" title="Xero"><i class="bi bi-cloud"></i></th>
-                <th class="inv-w-36 text-center" title="PDF"><i class="bi bi-paperclip"></i></th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for invoice in invoices %}
-            <tr onclick="window.location='{% url 'purchase_invoice_detail' invoice.id %}'" class="cursor-pointer">
-                <td class="text-center">
-                    <input type="checkbox" class="pinv-row-check" value="{{ invoice.id }}"
-                           data-xero-id="{{ invoice.xero_id }}"
-                           data-invoice-number="{{ invoice.invoice_number }}"
-                           onclick="event.stopPropagation(); updatePinvSelection();">
-                </td>
-                <td>
-                    <a href="{% url 'purchase_invoice_detail' invoice.id %}" class="pinv-number">{{ invoice.invoice_number }}</a>
-                </td>
-                <td>
-                    <span class="pinv-supplier" title="{{ invoice.supplier_name }}">{{ invoice.supplier_name|default:"—" }}</span>
-                </td>
-                <td>{{ invoice.date|date:"d M Y"|default:"—" }}</td>
-                <td>{{ invoice.due_date|date:"d M Y"|default:"—" }}</td>
-                <td><span class="pinv-status {{ invoice.status|lower }}">{{ invoice.status }}</span></td>
-                <td class="number-cell">£{{ invoice.total|floatformat:2|intcomma }}</td>
-                <td class="number-cell">
-                    {% if invoice.amount_outstanding > 0 %}
-                    <span class="text-danger">£{{ invoice.amount_outstanding|floatformat:2|intcomma }}</span>
-                    {% else %}
-                    <span class="text-success">£0.00</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if invoice.payment_status == 'paid' %}<span class="pinv-payment paid">Paid</span>
-                    {% elif invoice.payment_status == 'partial' %}<span class="pinv-payment partial">Partial</span>
-                    {% else %}<span class="pinv-payment unpaid">Unpaid</span>{% endif %}
-                </td>
-                <td class="text-center">
-                    {% if invoice.xero_id %}
-                    <a href="https://go.xero.com/AccountsPayable/View.aspx?InvoiceID={{ invoice.xero_id }}" target="_blank" onclick="event.stopPropagation()" title="View in Xero" class="pinv-tbl-icon xero-linked"><i class="bi bi-check-circle-fill"></i></a>
-                    {% else %}
-                    <button class="pinv-tbl-icon xero-unlinked" onclick="event.stopPropagation(); checkXeroStatus({{ invoice.id }}, this)" title="Not in Xero — click to search Xero"><i class="bi bi-x-circle-fill"></i></button>
-                    {% endif %}
-                </td>
-                <td class="text-center">
-                    {% if invoice.attachment %}
-                    <a href="{{ invoice.attachment.url }}" target="_blank" onclick="event.stopPropagation()" title="View attachment" class="pinv-tbl-icon pdf-link"><i class="bi bi-file-earmark-pdf"></i></a>
-                    {% else %}
-                    <span class="pinv-tbl-icon pdf-none" title="No attachment"><i class="bi bi-dash"></i></span>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div class="pinv-empty">
-        <i class="bi bi-receipt"></i>
-        <p>No purchase invoices yet — click <strong>Add Invoice</strong> to get started.</p>
-    </div>
-    {% endif %}
-</div>
-
-<!-- Purchase Pagination -->
-{% if page_obj.has_other_pages %}
-<nav class="inv-pagination" aria-label="Purchase invoice pages">
-    {% if page_obj.has_previous %}
-    <a href="?type=purchase&page={{ page_obj.previous_page_number }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">&laquo; Prev</a>
-    {% endif %}
-    {% for page_n in page_obj.paginator.page_range %}
-        {% if page_n == page_obj.number %}
-        <span class="inv-page-btn active">{{ page_n }}</span>
-        {% elif page_n == 1 or page_n == page_obj.paginator.num_pages %}
-        <a href="?type=purchase&page={{ page_n }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">{{ page_n }}</a>
-        {% elif page_n >= page_obj.number|add:"-2" and page_n <= page_obj.number|add:"2" %}
-        <a href="?type=purchase&page={{ page_n }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">{{ page_n }}</a>
-        {% elif page_n == page_obj.number|add:"-3" or page_n == page_obj.number|add:"3" %}
-        <span class="inv-page-ellipsis">&hellip;</span>
-        {% endif %}
-    {% endfor %}
-    {% if page_obj.has_next %}
-    <a href="?type=purchase&page={{ page_obj.next_page_number }}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="inv-page-btn">Next &raquo;</a>
-    {% endif %}
-</nav>
-{% endif %}
-
-{% include 'stock_take/partials/invoice_modal.html' with attachment_mode='upload' %}
-
-{% endif %}{# end invoice_type check #}
 
 {% endblock %}
 
 {% block extra_js %}
-{% if invoice_type == 'sales' %}
+{# Both tabs' scripts are always loaded so functions stay defined when the
+   opposite tab's markup is swapped in via AJAX (no full page reload). #}
 <script>
 
 // ── Add Invoice Modal ─────────────────────────────────────────
@@ -745,23 +375,11 @@ function toggleHideNoDate() {
     applyDateFilter();
 }
 
-// ── Client-side search filtering ──────────────────────────────
-document.addEventListener('DOMContentLoaded', function() {
-    applyDateFilter();
-    const searchInput = document.getElementById('invoiceSearch');
-    const table = document.getElementById('invoices-table');
-    if (searchInput && table) {
-        searchInput.addEventListener('input', function() {
-            const filter = this.value.toLowerCase();
-            table.querySelectorAll('tbody tr').forEach(row => {
-                row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
-            });
-        });
-    }
-});
+// Client-side search + date filtering are (re)applied by initInvoicesTab()
+// in the tab-switch controller at the end of this block, so they survive the
+// AJAX content swap. No DOMContentLoaded binding here.
 </script>
 
-{% else %}
 {% include 'stock_take/partials/invoice_modal_js.html' %}
 <script>
 
@@ -977,19 +595,8 @@ function syncXeroPayments() {
     .catch(() => { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync from Xero'; });
 }
 
-// ── Client-side search ─────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', function() {
-    const searchInput = document.getElementById('pinv-search');
-    const table = document.getElementById('purchase-invoices-table');
-    if (searchInput && table) {
-        searchInput.addEventListener('input', function() {
-            const filter = this.value.toLowerCase();
-            table.querySelectorAll('tbody tr').forEach(row => {
-                row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
-            });
-        });
-    }
-});
+// Client-side search is handled by the delegated listener in the tab-switch
+// controller at the end of this block, so it survives the AJAX content swap.
 
 // ── Row selection + bulk Xero push ─────────────────────────────
 function getSelectedPinvRows() {
@@ -1062,5 +669,98 @@ function pushSelectedToXero() {
     run(0);
 }
 </script>
-{% endif %}
+
+<script>
+// ── Invoices: client-side tab switching (Sales ⇄ Purchase, status, pages) ──
+// Mirrors the Active Projects pattern: the type-tab pill nav stays fixed so its
+// sliding thumb animates, while the toolbar + body are fetched as a fragment and
+// swapped in with a short fade — no full page reload.
+(function() {
+	const topbar      = document.getElementById('inv-topbar');
+	const toolbarSlot = document.getElementById('inv-toolbar');
+	const body        = document.getElementById('inv-body');
+	const typeNav     = topbar ? topbar.querySelector('.tab-nav-pills') : null;
+	if (!topbar || !toolbarSlot || !body || !typeNav) return;
+
+	// Row search — delegated on the document so it keeps working after a swap.
+	document.addEventListener('input', function(e) {
+		let table = null;
+		if (e.target.id === 'invoiceSearch') table = document.getElementById('invoices-table');
+		else if (e.target.id === 'pinv-search') table = document.getElementById('purchase-invoices-table');
+		else return;
+		if (!table) return;
+		const filter = e.target.value.toLowerCase();
+		table.querySelectorAll('tbody tr').forEach(function(row) {
+			row.style.display = row.textContent.toLowerCase().includes(filter) ? '' : 'none';
+		});
+	});
+
+	// Re-run per-tab init after each swap (and on first load).
+	function initInvoicesTab() {
+		if (typeof applyDateFilter === 'function') applyDateFilter();
+	}
+
+	function setTypePill(type) {
+		typeNav.querySelectorAll('.tab-button').forEach(function(b) {
+			b.classList.toggle('active', b.getAttribute('data-inv-type') === type);
+		});
+	}
+
+	let loading = false;
+	function loadTab(url, push) {
+		if (loading) return;
+		loading = true;
+		toolbarSlot.classList.add('inv-swapping');
+		body.classList.add('inv-swapping');
+		const sep = url.indexOf('?') === -1 ? '?' : '&';
+		fetch(url + sep + 'partial=1', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+			.then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+			.then(function(data) {
+				toolbarSlot.innerHTML = data.toolbar;
+				body.innerHTML = data.body;
+				if (data.title) { const h = document.querySelector('.page-title'); if (h) h.textContent = data.title; }
+				// The swapped-in body may carry its own pill nav (Sales status tabs).
+				if (window.initPillSliders) window.initPillSliders(body);
+				initInvoicesTab();
+				if (push) history.pushState({ invTab: true }, '', url);
+			})
+			.catch(function() { window.location = url; })
+			.finally(function() {
+				toolbarSlot.classList.remove('inv-swapping');
+				body.classList.remove('inv-swapping');
+				loading = false;
+			});
+	}
+
+	function isInPageLink(a) {
+		return a && (a.getAttribute('href') || '').charAt(0) === '?';
+	}
+
+	// Type tabs (fixed nav) — pre-slide the thumb, then swap.
+	typeNav.addEventListener('click', function(e) {
+		const a = e.target.closest('a.tab-button');
+		if (!a || !typeNav.contains(a) || a.classList.contains('active')) return;
+		e.preventDefault();
+		setTypePill(a.getAttribute('data-inv-type'));
+		loadTab(a.getAttribute('href'), true);
+	});
+
+	// Status tabs + pagination live inside the swapped body.
+	body.addEventListener('click', function(e) {
+		const a = e.target.closest('a');
+		if (!isInPageLink(a) || !body.contains(a)) return;
+		e.preventDefault();
+		loadTab(a.getAttribute('href'), true);
+	});
+
+	window.addEventListener('popstate', function() {
+		const url = window.location.pathname + window.location.search;
+		const params = new URLSearchParams(window.location.search);
+		setTypePill(params.get('type') || 'sales');
+		loadTab(url, false);
+	});
+
+	document.addEventListener('DOMContentLoaded', initInvoicesTab);
+})();
+</script>
 {% endblock %}

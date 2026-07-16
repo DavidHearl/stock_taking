@@ -167,6 +167,7 @@
         </div>
         <div class="modal-footer">
             <button type="button" class="btn btn-danger cal-footer-left" onclick="deleteDetailAppointment()">Remove</button>
+            <button type="button" id="detailConfirmBtn" class="btn btn-success" style="display:none;" onclick="confirmDetailAppointment()"><i class="bi bi-check2-circle"></i> Confirm Fit</button>
             <button type="button" class="btn btn-secondary" onclick="closeModal('appointmentDetailModal')">Close</button>
             <button type="button" class="btn btn-primary" onclick="saveDetailMove()">Save Changes</button>
         </div>
@@ -317,6 +318,7 @@
                          data-order-date="{{ appt.order.order_date|date:'d/m/Y' }}"
                          data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
                          data-fit-duration="{{ appt.effective_fit_days }}"
+                         data-provisional="{{ appt.is_provisional|yesno:'true,false' }}"
                          data-address="{{ appt.order.address|default:'-' }}"
                          data-postcode="{{ appt.order.postcode|default:'-' }}"
                          data-designer="{{ appt.order.designer.name|default:'-' }}"
@@ -355,6 +357,7 @@
                          data-fitter-code="{{ appt.fitter }}"
                          data-fit-date="{{ appt.fit_date|date:'d/m/Y' }}"
                          data-fit-duration="{{ appt.effective_fit_days }}"
+                         data-provisional="{{ appt.is_provisional|yesno:'true,false' }}"
                          data-address="{{ appt.remedial.address|default:'-' }}"
                          data-postcode="{{ appt.remedial.postcode|default:'-' }}"
                          data-pos="[]"
@@ -1505,6 +1508,11 @@ function selectAppointmentFromCard(el) {
     document.getElementById('detail-materials').checked = d.materials === 'true';
     document.getElementById('detail-paperwork').checked = d.paperwork === 'true';
 
+    // Provisional (dragged, not yet confirmed) appointments can be confirmed,
+    // which drops the job off the "needs scheduling" side panel.
+    const confirmBtn = document.getElementById('detailConfirmBtn');
+    if (confirmBtn) confirmBtn.style.display = (d.provisional === 'true') ? '' : 'none';
+
     openModal('appointmentDetailModal');
 }
 
@@ -1581,6 +1589,14 @@ function deleteDetailAppointment() {
         method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token }}' }
     }).then(r => r.json()).then(data => { if (data.success) location.reload(); else alert(data.error); })
     .catch(() => alert('Error removing'));
+}
+
+function confirmDetailAppointment() {
+    if (!selectedAppointmentId) return;
+    fetch(`/fit-board/confirm-appointment/${selectedAppointmentId}/`, {
+        method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    }).then(r => r.json()).then(data => { if (data.success) location.reload(); else alert(data.error || 'Confirm failed'); })
+    .catch(() => alert('Error confirming'));
 }
 
 function saveDetailMove() {

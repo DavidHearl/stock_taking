@@ -2394,7 +2394,7 @@
                             <i class="bi bi-pencil"></i> Edit Values
                         </button>
                         <div class="kebab-divider"></div>
-                        <button type="button" class="kebab-item" id="btn-financial-save" onclick="saveFinancials({{ order.id }})">
+                        <button type="button" class="kebab-item" id="btn-financial-save" onclick="saveFinancials({{ order.id }}, {{ sale.pk }})">
                             <i class="bi bi-arrow-clockwise"></i> Update Financials
                         </button>
                     </div>
@@ -2416,7 +2416,7 @@
                             <span class="fin-value" id="total_value_inc_vat_display"><span class="fin-currency">£</span><span class="fin-amount">{{ order.total_value_inc_vat|default:'0.00'|floatformat:2|intcomma }}</span></span>
                             <div class="fin-edit-row" id="fin-edit-row-total" style="display:none;">
                                 <input type="text" inputmode="decimal" class="fin-edit-input" id="total-value-input" value="{{ order.total_value_inc_vat|default:'0.00' }}">
-                                <button type="button" class="fin-confirm-btn" onclick="saveFinancials({{ order.id }})" title="Save value"><i class="bi bi-check-lg"></i></button>
+                                <button type="button" class="fin-confirm-btn" onclick="saveFinancials({{ order.id }}, {{ sale.pk }})" title="Save value"><i class="bi bi-check-lg"></i></button>
                             </div>
                         </div>
                     </div>
@@ -2719,25 +2719,20 @@ function toggleFinancialEdit() {
     }
 }
 
-function saveFinancials(orderId) {
+function saveFinancials(orderId, saleId) {
     const input = document.getElementById('total-value-input');
-    const display = document.getElementById('total_value_inc_vat_display');
-    const editRow = document.getElementById('fin-edit-row-total');
-    const editBtn = document.getElementById('btn-financial-edit');
     const value = parseFloat(input.value) || 0;
     fetch(`/order/${orderId}/update-financial/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
-        body: JSON.stringify({ field: 'total_value_inc_vat', value: value })
+        body: JSON.stringify({ field: 'total_value_inc_vat', value: value, sale_id: saleId })
     })
     .then(r => r.json())
     .then(data => {
         if (data.success) {
-            const amountEl = display.querySelector('.fin-amount');
-            if (amountEl) amountEl.textContent = value.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            editRow.style.display = 'none';
-            display.style.display = '';
-            if (editBtn) editBtn.innerHTML = '<i class="bi bi-pencil"></i> Edit Values';
+            // Reload so the exc-VAT figure, the cost waffle and the payment
+            // breakdown all re-render against the saved value.
+            location.reload();
         } else {
             alert('Error saving: ' + (data.error || 'Unknown error'));
         }
