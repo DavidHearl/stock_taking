@@ -14,932 +14,404 @@
 {% endblock %}
 
 {% block content %}
-<!-- Unified toolbar: switcher + search + actions -->
+<!-- Unified toolbar: tab pills + per-view search/actions. Switching tabs fetches
+     just the fragment (toolbar + body) and glides it in — see switchCustomerTab. -->
 <div class="tabs">
-    <div class="view-mode-switcher">
-        <a href="{% url 'customers_list' %}" class="view-mode-btn {% if view_mode == 'customers' %}active{% endif %}">Customers</a>
-        <a href="{% url 'customers_list' %}?view=contacts" class="view-mode-btn {% if view_mode == 'contacts' %}active{% endif %}">Contacts</a>
-        <a href="{% url 'customers_list' %}?view=events" class="view-mode-btn {% if view_mode == 'events' %}active{% endif %}">Events</a>
-    </div>
-    {% if view_mode == 'events' %}
-    <div class="search-input-wrapper">
-        <i class="bi bi-search"></i>
-        <input type="text" id="event-search" value="{{ search_query }}" placeholder="Search by customer, activity ID, type, status..." autocomplete="off">
-    </div>
-    <div class="tab-actions">
-        {% if location_filter %}
-        <span class="cust-fs-08-sec"><i class="bi bi-geo-alt-fill"></i> {{ location_filter }}</span>
-        {% endif %}
-    </div>
-    {% elif view_mode == 'contacts' %}
-    <div class="search-input-wrapper">
-        <i class="bi bi-search"></i>
-        <input type="text" id="lead-search" value="{{ search_query }}" placeholder="Search by name, email, phone, city or postcode..." autocomplete="off">
-    </div>
-    <div class="tab-actions">
-        <button type="button" class="btn btn-success btn-add-order" onclick="document.getElementById('add-lead-modal').style.display='flex'" title="Add Contact">
-            <i class="bi bi-plus-lg"></i>
-        </button>
-        <div class="bulk-actions-inline" id="bulk-actions-inline">
-            <button class="merge-btn" id="merge-btn" onclick="mergeLeads()" title="Merge selected contacts">
-                <i class="bi bi-arrow-left-right"></i> Merge
-            </button>
-            <button class="bulk-delete-icon" onclick="bulkDeleteLeads()" title="Delete selected">
-                <span class="bulk-count" id="bulk-count">0</span>
-                <i class="bi bi-trash"></i>
-            </button>
-        </div>
-    </div>
-    {% else %}
-    <div class="search-input-wrapper">
-        <i class="bi bi-search"></i>
-        <input type="text" id="customer-search" value="{{ search_query }}" placeholder="Search by name, email, phone, city or postcode..." autocomplete="off">
-    </div>
-    <div class="tab-actions">
-        {% if location_filter %}
-        <span class="cust-fs-08-sec"><i class="bi bi-geo-alt-fill"></i> {{ location_filter }}</span>
-        {% endif %}
-        {% if last_anthill_sync %}
-        <span class="customers-sync-note cust-fs-075-sec" title="Last Anthill import: {{ last_anthill_sync.ran_at|date:'d/m/Y H:i' }} — {{ last_anthill_sync.records_created }} created, {{ last_anthill_sync.records_updated }} updated">
-            <i class="bi bi-arrow-repeat"></i>
-            Anthill: {{ last_anthill_sync.ran_at|timesince }} ago
-            <span class="sync-status-dot sync-{{ last_anthill_sync.status }}"></span>
-        </span>
-        {% endif %}
-        <button type="button" class="btn btn-success btn-add-order" onclick="document.getElementById('add-customer-modal').style.display='flex'" title="Add Customer">
-            <i class="bi bi-plus-lg"></i>
-        </button>
-        <div class="bulk-actions-inline" id="bulk-actions-inline">
-            <button class="merge-btn" id="merge-btn" onclick="mergeCustomers()" title="Merge selected customers">
-                <i class="bi bi-arrow-left-right"></i> Merge
-            </button>
-            <button class="bulk-delete-icon" onclick="bulkDelete()" title="Delete selected">
-                <span class="bulk-count" id="bulk-count">0</span>
-                <i class="bi bi-trash"></i>
-            </button>
-        </div>
-    </div>
-    {% endif %}
+	<div class="tab-nav-pills" data-pill-slider>
+		<a href="{% url 'customers_list' %}" class="tab-button {% if view_mode == 'customers' %}active{% endif %}">Customers</a>
+		<a href="{% url 'customers_list' %}?view=contacts" class="tab-button {% if view_mode == 'contacts' %}active{% endif %}">Contacts</a>
+		<a href="{% url 'customers_list' %}?view=events" class="tab-button {% if view_mode == 'events' %}active{% endif %}">Events</a>
+	</div>
+	<div id="customers-toolbar">
+		{% include 'stock_take/partials/_customers_toolbar.html' %}
+	</div>
 </div>
 
-{% if view_mode == 'events' %}
-<!-- ═══════════════════════════════════════ EVENTS TAB ════════════════════════════════════════ -->
-
-{% if events %}
-<div class="customers-table-container">
-    <table class="customers-table cust-tbl-fixed">
-        <thead>
-            <tr>
-                <th class="cust-w-10">Activity ID</th>
-                <th class="cust-w-16">Customer</th>
-                <th class="cust-w-10">Type</th>
-                <th class="cust-w-8">Status</th>
-                <th class="cust-w-12">Assigned To</th>
-                <th class="cust-w-8">Value</th>
-                <th class="cust-w-10">Contract</th>
-                <th class="cust-w-9">Date</th>
-                <th class="cust-w-9">Location</th>
-                <th class="cust-w-8">Order</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for event in events %}
-            <tr>
-                <td><a href="{% url 'sale_detail' event.pk %}" class="customer-name-link">{{ event.anthill_activity_id }}</a></td>
-                <td>
-                    {% if event.customer %}
-                    <a href="{% url 'customer_detail' event.customer.pk %}" class="customer-name-link">{{ event.customer.name|default:event.customer_name }}</a>
-                    {% else %}{{ event.customer_name|default:"-" }}{% endif %}
-                </td>
-                <td>{{ event.activity_type|default:"-" }}</td>
-                <td>
-                    <span class="badge customer-active-badge {% if event.status == 'won' %}active{% elif event.status == 'dead' %}danger{% else %}inactive{% endif %}">
-                        {{ event.status|default:"-" }}
-                    </span>
-                </td>
-                <td>{{ event.assigned_to_name|default:"-" }}</td>
-                <td class="text-right">{% if event.sale_value %}£{{ event.sale_value|floatformat:0 }}{% else %}-{% endif %}</td>
-                <td><span class="cust-fs-075">{{ event.contract_number|default:"-" }}</span></td>
-                <td>{{ event.activity_date|date:"d/m/Y"|default:"-" }}</td>
-                <td>{{ event.location|default:"-" }}</td>
-                <td>
-                    {% if event.order %}
-                    <a href="{% url 'order_details' event.order.id %}" class="customer-order-badge">{{ event.order.sale_number }}</a>
-                    {% else %}<span class="text-muted">-</span>{% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% else %}
-<div class="customers-empty-state">
-    <i class="bi bi-calendar-event"></i>
-    <p>No events found.</p>
-</div>
-{% endif %}
-
-<!-- Pagination -->
-{% if page_obj.paginator.num_pages > 1 %}
-<div class="customers-pagination">
-    <div class="pagination-info">
-        Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} events
-    </div>
-    <div class="pagination-controls">
-        {% if page_obj.has_previous %}
-        <a href="?view=events&page=1{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
-        <a href="?view=events&page={{ page_obj.previous_page_number }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
-        {% endif %}
-        {% for num in page_obj.paginator.page_range %}
-            {% if page_obj.number == num %}<span class="page-btn active">{{ num }}</span>
-            {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}<a href="?view=events&page={{ num }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
-            {% elif num == 1 or num == page_obj.paginator.num_pages %}<a href="?view=events&page={{ num }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
-            {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}<span class="page-ellipsis">&hellip;</span>
-            {% endif %}
-        {% endfor %}
-        {% if page_obj.has_next %}
-        <a href="?view=events&page={{ page_obj.next_page_number }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
-        <a href="?view=events&page={{ page_obj.paginator.num_pages }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
-        {% endif %}
-    </div>
-</div>
-{% endif %}
-
-{% elif view_mode == 'contacts' %}
-<!-- ═══════════════════════════════════════ CONTACTS TAB ═══════════════════════════════════════ -->
-
-{% if leads %}
-<div class="customers-table-container">
-    <table class="customers-table cust-tbl-fixed">
-        <thead>
-            <tr>
-                <th class="checkbox-col cust-w-40px"><input type="checkbox" id="select-all-leads" onclick="toggleSelectAllLeads(this)"></th>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>City</th>
-                <th>Source</th>
-                <th>Status</th>
-                <th class="text-right cust-w-100px">Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for lead in leads %}
-            <tr data-id="{{ lead.pk }}" data-search="{{ lead.name|lower }} {{ lead.email|lower }} {{ lead.phone|lower }} {{ lead.city|lower }} {{ lead.postcode|lower }} {{ lead.source|lower }}">
-                <td class="checkbox-col"><input type="checkbox" class="lead-select" value="{{ lead.pk }}" onclick="updateLeadSelection()"></td>
-                <td><a href="{% url 'lead_detail' lead.pk %}" class="customer-name-link">{{ lead.name|default:"-" }}</a></td>
-                <td>
-                    {% if lead.email %}
-                    <a href="mailto:{{ lead.email }}" class="customer-email">{{ lead.email }}</a>
-                    {% else %}-{% endif %}
-                </td>
-                <td class="phone-cell">{{ lead.phone|default:"-" }}</td>
-                <td>{{ lead.city|default:"-" }}</td>
-                <td>
-                    {% if lead.source %}
-                    <span class="source-badge {{ lead.source }}">{{ lead.get_source_display }}</span>
-                    {% else %}-{% endif %}
-                </td>
-                <td><span class="badge customer-active-badge {{ lead.status }}">{{ lead.get_status_display }}</span></td>
-                <td class="text-right">
-                    <button class="customer-delete-btn" onclick="deleteLeadRow({{ lead.pk }}, '{{ lead.name|escapejs }}')" title="Delete">
-                        <i class="bi bi-trash"></i>
-                    </button>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-<!-- Pagination -->
-{% if page_obj.has_other_pages %}
-<div class="customers-pagination">
-    <div class="pagination-info">
-        Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ filtered_count|default:page_obj.paginator.count }} results
-    </div>
-    <div class="pagination-controls">
-        {% if page_obj.has_previous %}
-        <a href="?view=contacts&page=1{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn" title="First">&laquo;</a>
-        <a href="?view=contacts&page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
-        {% endif %}
-        {% for num in page_obj.paginator.page_range %}
-            {% if num == page_obj.number %}
-                <span class="page-btn active">{{ num }}</span>
-            {% elif num > page_obj.number|add:"-3" and num < page_obj.number|add:"4" %}
-                <a href="?view=contacts&page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn">{{ num }}</a>
-            {% elif num == 1 or num == page_obj.paginator.num_pages %}
-                <a href="?view=contacts&page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn">{{ num }}</a>
-            {% elif num == page_obj.number|add:"-4" or num == page_obj.number|add:"4" %}
-                <span class="page-ellipsis">&hellip;</span>
-            {% endif %}
-        {% endfor %}
-        {% if page_obj.has_next %}
-        <a href="?view=contacts&page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
-        <a href="?view=contacts&page={{ page_obj.paginator.num_pages }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
-        {% endif %}
-    </div>
-</div>
-{% endif %}
-{% else %}
-<div class="customers-empty-state">
-    <i class="bi bi-funnel"></i>
-    <p>No contacts found.</p>
-</div>
-{% endif %}
-
-<!-- Add Contact Modal -->
-<div class="modal-overlay" id="add-lead-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
-    <div class="modal-box">
-        <div class="modal-header">
-            <h2><i class="bi bi-person-plus"></i> Add New Contact</h2>
-            <button class="modal-close" onclick="document.getElementById('add-lead-modal').style.display='none'">&times;</button>
-        </div>
-        <form method="POST" action="{% url 'lead_create' %}">
-            {% csrf_token %}
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="lead-name">Name <span class="required">*</span></label>
-                    <input type="text" id="lead-name" name="name" required placeholder="Contact name">
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="lead-email">Email</label>
-                        <input type="email" id="lead-email" name="email" placeholder="email@example.com">
-                    </div>
-                    <div class="form-group">
-                        <label for="lead-phone">Phone</label>
-                        <input type="text" id="lead-phone" name="phone" placeholder="Phone number">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="lead-source">Source</label>
-                        <select id="lead-source" name="source" class="cust-form-select">
-                            <option value="">-- Select source --</option>
-                            {% for value, label in source_choices %}
-                            <option value="{{ value }}">{{ label }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="lead-website">Website</label>
-                        <input type="url" id="lead-website" name="website" placeholder="https://...">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="lead-address">Address</label>
-                    <input type="text" id="lead-address" name="address_1" placeholder="Street address">
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="lead-city">City</label>
-                        <input type="text" id="lead-city" name="city" placeholder="City">
-                    </div>
-                    <div class="form-group">
-                        <label for="lead-postcode">Postcode</label>
-                        <input type="text" id="lead-postcode" name="postcode" placeholder="Postcode">
-                    </div>
-                    <div class="form-group">
-                        <label for="lead-country">Country</label>
-                        <input type="text" id="lead-country" name="country" placeholder="Country">
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn-cancel" onclick="document.getElementById('add-lead-modal').style.display='none'">Cancel</button>
-                <button type="submit" class="btn-save">Create Contact</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- Merge Contact Modal -->
-<div class="modal-overlay" id="merge-lead-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
-    <div class="modal-box">
-        <div class="modal-header">
-            <h2><i class="bi bi-arrow-left-right"></i> Merge Contacts</h2>
-            <button class="modal-close" onclick="document.getElementById('merge-lead-modal').style.display='none'">&times;</button>
-        </div>
-        <div class="modal-body">
-            <p class="cust-mb-16">Choose which contact to <strong>keep</strong>. The other contact's data will be transferred into the kept contact, then the other will be deleted.</p>
-            <div class="cust-col-10">
-                <label class="cust-merge-option">
-                    <input type="radio" name="lead-merge-keep" id="lead-merge-option-0" value="" onchange="this.closest('.modal-body').querySelectorAll('label').forEach(l=>l.style.borderColor='var(--border-color)');this.closest('label').style.borderColor='var(--primary-color)';">
-                    <div><strong>Keep: <span id="lead-merge-option-0-name"></span></strong>
-                    <div class="cust-merge-sub">Delete &amp; merge in: <span id="lead-merge-option-0-remove"></span></div></div>
-                </label>
-                <label class="cust-merge-option">
-                    <input type="radio" name="lead-merge-keep" id="lead-merge-option-1" value="" onchange="this.closest('.modal-body').querySelectorAll('label').forEach(l=>l.style.borderColor='var(--border-color)');this.closest('label').style.borderColor='var(--primary-color)';">
-                    <div><strong>Keep: <span id="lead-merge-option-1-name"></span></strong>
-                    <div class="cust-merge-sub">Delete &amp; merge in: <span id="lead-merge-option-1-remove"></span></div></div>
-                </label>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn-cancel" onclick="document.getElementById('merge-lead-modal').style.display='none'">Cancel</button>
-            <button type="button" class="btn-save" onclick="executeLeadMerge()">Merge</button>
-        </div>
-    </div>
-</div>
-
-<!-- Delete Contact Modal -->
-<div class="modal-overlay" id="delete-lead-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
-    <div class="modal-box">
-        <div class="modal-header">
-            <h2><i class="bi bi-exclamation-triangle"></i> Delete Contact</h2>
-            <button class="modal-close" onclick="document.getElementById('delete-lead-modal').style.display='none'">&times;</button>
-        </div>
-        <div class="modal-body cust-delete-body">
-            <div class="delete-modal-icon"><i class="bi bi-trash"></i></div>
-            <p>Are you sure you want to delete <span class="delete-modal-name" id="delete-lead-name"></span>?</p>
-            <p class="cust-hint">This action cannot be undone.</p>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn-cancel" onclick="document.getElementById('delete-lead-modal').style.display='none'">Cancel</button>
-            <button type="button" class="btn-cancel cust-btn-danger" id="confirm-delete-lead-btn">Delete</button>
-        </div>
-    </div>
+<div id="customers-content" class="customers-content">
+	{% include 'stock_take/partials/_customers_body.html' %}
 </div>
 
 <script>
-// --- Contacts client-side search ---
-const leadSearchInput = document.getElementById('lead-search');
-if (leadSearchInput) {
-    leadSearchInput.addEventListener('input', function() {
-        const query = this.value.toLowerCase().trim();
-        const rows = document.querySelectorAll('.customers-table tbody tr');
-        rows.forEach(row => {
-            const text = row.getAttribute('data-search') || '';
-            row.style.display = (!query || text.includes(query)) ? '' : 'none';
-        });
-    });
-    leadSearchInput.focus();
-}
+// ── Tab switching (Customers / Contacts / Events) — client-side ──
+// Mirrors the Sales status pills: the clicked pill goes active (the global
+// pill-slider thumb glides to it), we fetch just the fragment for that view and
+// glide it in. A wireframe fills the table while the fragment loads so no stale
+// rows sit under the new tab. Falls back to a full navigation if the fetch fails.
+(function () {
+	var nav = document.querySelector('.tabs .tab-nav-pills[data-pill-slider]');
+	var toolbar = document.getElementById('customers-toolbar');
+	var content = document.getElementById('customers-content');
+	if (!nav || !content) return;
+	var reqToken = 0;
 
-function clearLeadSelectionAndReload() {
-    document.querySelectorAll('.lead-select').forEach(cb => cb.checked = false);
-    const sa = document.getElementById('select-all-leads');
-    if (sa) { sa.checked = false; sa.indeterminate = false; }
-    location.reload();
-}
+	function skeletonHtml() {
+		var cells = '';
+		for (var c = 0; c < 8; c++) cells += '<td><span class="sk-bar"></span></td>';
+		var rows = '';
+		for (var r = 0; r < 8; r++) rows += '<tr class="sk-loading-row">' + cells + '</tr>';
+		return '<div class="customers-table-container cust-skeleton">' +
+			'<table class="customers-table"><tbody>' + rows + '</tbody></table></div>';
+	}
 
-function toggleSelectAllLeads(el) {
-    document.querySelectorAll('.lead-select').forEach(cb => cb.checked = el.checked);
-    updateLeadSelection();
-}
+	function switchTab(a) {
+		var href = a.getAttribute('href');
+		nav.querySelectorAll('.tab-button').forEach(function (b) { b.classList.remove('active'); });
+		a.classList.add('active'); // MutationObserver in base.html glides the thumb
+		content.classList.remove('glide-in');
+		content.innerHTML = skeletonHtml();
+		var myReq = ++reqToken;
+		fetch(href, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+			.then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+			.then(function (html) {
+				if (myReq !== reqToken) return; // superseded by a newer tab click
+				var doc = new DOMParser().parseFromString(html, 'text/html');
+				var tb = doc.querySelector('[data-region="toolbar"]');
+				var ct = doc.querySelector('[data-region="content"]');
+				if (!ct) throw new Error('bad fragment');
+				if (toolbar && tb) toolbar.innerHTML = tb.innerHTML;
+				content.innerHTML = ct.innerHTML;
+				void content.offsetWidth;
+				content.classList.add('glide-in');
+				if (history.replaceState) history.replaceState(null, '', href);
+				focusCustomersSearch();
+			})
+			.catch(function () {
+				if (myReq !== reqToken) return;
+				window.location.href = href; // fall back to a full page load
+			});
+	}
 
-function updateLeadSelection() {
-    const checked = document.querySelectorAll('.lead-select:checked');
-    const inline = document.getElementById('bulk-actions-inline');
-    const countEl = document.getElementById('bulk-count');
-    const selectAll = document.getElementById('select-all-leads');
-    const allBoxes = document.querySelectorAll('.lead-select');
-    if (checked.length > 0) {
-        inline.classList.add('visible');
-        countEl.textContent = checked.length;
-    } else {
-        inline.classList.remove('visible');
-    }
-    if (selectAll) {
-        selectAll.checked = allBoxes.length > 0 && checked.length === allBoxes.length;
-        selectAll.indeterminate = checked.length > 0 && checked.length < allBoxes.length;
-    }
-    const mergeBtn = document.getElementById('merge-btn');
-    if (mergeBtn) {
-        if (checked.length === 2) mergeBtn.classList.add('visible');
-        else mergeBtn.classList.remove('visible');
-    }
-}
+	nav.querySelectorAll('.tab-button').forEach(function (a) {
+		a.addEventListener('click', function (e) {
+			if (a.classList.contains('active')) { e.preventDefault(); return; }
+			// Leave modified clicks (open-in-new-tab, etc.) to the browser.
+			if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+			e.preventDefault();
+			switchTab(a);
+		});
+	});
+})();
 
-function mergeLeads() {
-    const checked = document.querySelectorAll('.lead-select:checked');
-    if (checked.length !== 2) return;
-    const rows = Array.from(checked).map(cb => cb.closest('tr'));
-    const name0 = rows[0].querySelector('td:nth-child(2)').textContent.trim();
-    const name1 = rows[1].querySelector('td:nth-child(2)').textContent.trim();
-    const id0 = parseInt(rows[0].getAttribute('data-id'));
-    const id1 = parseInt(rows[1].getAttribute('data-id'));
-    document.getElementById('lead-merge-option-0-name').textContent = name0;
-    document.getElementById('lead-merge-option-1-name').textContent = name1;
-    document.getElementById('lead-merge-option-0').value = id0;
-    document.getElementById('lead-merge-option-1').value = id1;
-    document.getElementById('lead-merge-option-0-remove').textContent = name1;
-    document.getElementById('lead-merge-option-1-remove').textContent = name0;
-    document.getElementById('lead-merge-option-0').checked = true;
-    document.getElementById('merge-lead-modal').style.display = 'flex';
+// Focus the active view's search box. Called on load and after each tab swap;
+// delegated input/keydown handlers below survive swaps, so only focus rebinds.
+function focusCustomersSearch() {
+	var input = document.querySelector('#customers-toolbar input[type="text"]');
+	if (input) { try { input.focus(); } catch (e) {} }
 }
+document.addEventListener('DOMContentLoaded', focusCustomersSearch);
 
-function executeLeadMerge() {
-    const selected = document.querySelector('input[name="lead-merge-keep"]:checked');
-    if (!selected) return;
-    const keepId = parseInt(selected.value);
-    const opt0 = parseInt(document.getElementById('lead-merge-option-0').value);
-    const opt1 = parseInt(document.getElementById('lead-merge-option-1').value);
-    const otherId = keepId === opt0 ? opt1 : opt0;
-    document.getElementById('merge-lead-modal').style.display = 'none';
-    fetch('{% url "lead_merge" %}', {
-        method: 'POST',
-        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keep_id: keepId, remove_id: otherId }),
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.success) clearLeadSelectionAndReload();
-        else alert('Error: ' + (data.error || data.message || 'Unknown error'));
-    })
-    .catch(err => alert('Network error: ' + err.message));
-}
-
-let pendingDeleteLeadId = null;
-function deleteLeadRow(id, name) {
-    pendingDeleteLeadId = id;
-    document.getElementById('delete-lead-name').textContent = '"' + name + '"';
-    document.getElementById('delete-lead-modal').style.display = 'flex';
-}
-document.getElementById('confirm-delete-lead-btn').addEventListener('click', function() {
-    if (!pendingDeleteLeadId) return;
-    fetch('/lead/' + pendingDeleteLeadId + '/delete/', {
-        method: 'POST',
-        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.success) clearLeadSelectionAndReload();
-        else alert('Error: ' + (data.error || 'Unknown error'));
-    })
-    .catch(err => alert('Network error: ' + err.message));
+// ── Search (delegated so it keeps working after a tab swap) ──
+var _custSearchTimer;
+document.addEventListener('input', function (e) {
+	var t = e.target;
+	if (t.id === 'customer-search') {
+		clearTimeout(_custSearchTimer);
+		_custSearchTimer = setTimeout(function () { navCustomerSearch(t.value); }, 500);
+	} else if (t.id === 'event-search') {
+		clearTimeout(_custSearchTimer);
+		_custSearchTimer = setTimeout(function () { navEventSearch(t.value); }, 500);
+	} else if (t.id === 'lead-search') {
+		filterLeadRows(t.value); // client-side row filter
+	}
+});
+document.addEventListener('keydown', function (e) {
+	if (e.key !== 'Enter') return;
+	var t = e.target;
+	if (t.id === 'customer-search') { clearTimeout(_custSearchTimer); navCustomerSearch(t.value); }
+	else if (t.id === 'event-search') { clearTimeout(_custSearchTimer); navEventSearch(t.value); }
 });
 
-function bulkDeleteLeads() {
-    const ids = Array.from(document.querySelectorAll('.lead-select:checked')).map(cb => parseInt(cb.value));
-    if (ids.length === 0) return;
-    if (!confirm('Delete ' + ids.length + ' contact(s)? This cannot be undone.')) return;
-    fetch('{% url "leads_bulk_delete" %}', {
-        method: 'POST',
-        headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: ids }),
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.success) clearLeadSelectionAndReload();
-        else alert('Error: ' + (data.error || 'Unknown error'));
-    })
-    .catch(err => alert('Network error: ' + err.message));
-}
-</script>
-
-{% else %}
-<!-- ═══════════════════════════════════════ CUSTOMERS TAB ══════════════════════════════════════ -->
-
-    {% if search_expanded_from %}{% endif %}
-
-    {% if customers %}
-    <div class="customers-table-container">
-        <table class="customers-table">
-            <thead>
-                <tr>
-                    <th class="checkbox-col"><input type="checkbox" id="select-all" onclick="toggleSelectAll(this)"></th>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th>City</th>
-                    <th>Postcode</th>
-                    <th class="text-center">Orders</th>
-                    <th>Active</th>
-                    <th class="text-center">Xero</th>
-                    <th class="text-right">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for customer in customers %}
-                <tr data-id="{{ customer.pk }}" data-search="{{ customer.name|lower }} {{ customer.email|lower }} {{ customer.phone|lower }} {{ customer.city|lower }} {{ customer.postcode|lower }}">
-                    <td class="checkbox-col"><input type="checkbox" class="row-select" value="{{ customer.pk }}" onclick="updateSelection()"></td>
-                    <td>
-                        <a href="{% url 'customer_detail' customer.pk %}" class="customer-name-link">
-                            {{ customer.name|default:customer|default:"-" }}
-                        </a>
-                    </td>
-                    <td>
-                        {% if customer.email %}
-                        <a href="mailto:{{ customer.email }}" class="customer-email">{{ customer.email }}</a>
-                        {% else %}-{% endif %}
-                    </td>
-                    <td>{{ customer.phone|default:"-" }}</td>
-                    <td>{{ customer.city|default:"-" }}</td>
-                    <td>{{ customer.postcode|default:"-" }}</td>
-                    <td class="customer-orders-cell text-center">
-                        {% with orders=customer.orders.all %}
-                        {% if orders %}
-                        <div class="kebab-menu cust-inline-center">
-                            <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="{{ orders|length }} order{{ orders|length|pluralize }}">
-                                <i class="bi bi-three-dots-vertical"></i>
-                            </button>
-                            <span class="orders-kebab-badge">{{ orders|length }}</span>
-                            <div class="kebab-dropdown">
-                                {% for order in orders %}
-                                <a href="{% url 'order_details' order.id %}" class="kebab-item">
-                                    <i class="bi bi-box-seam"></i>
-                                    {{ order.sale_number|default:order.id }}{% if order.get_order_type_display %} &mdash; {{ order.get_order_type_display }}{% endif %}
-                                </a>
-                                {% endfor %}
-                            </div>
-                        </div>
-                        {% else %}-{% endif %}
-                        {% endwith %}
-                    </td>
-                    <td>
-                        {% if customer.is_active %}
-                        <span class="badge customer-active-badge active">Active</span>
-                        {% else %}
-                        <span class="badge customer-active-badge inactive">Inactive</span>
-                        {% endif %}
-                    </td>
-                    <td class="text-center xero-status-cell">
-                        {% if customer.xero_id %}
-                        <i class="bi bi-check-circle-fill xero-linked" title="Linked to Xero"></i>
-                        {% else %}
-                        <i class="bi bi-x-circle xero-unlinked" title="Not in Xero"></i>
-                        {% endif %}
-                    </td>
-                    <td class="text-right">
-                        <button class="customer-delete-btn" onclick="deleteCustomer({{ customer.pk }}, '{{ customer.name|escapejs }}')" title="Delete">
-                            <i class="bi bi-trash"></i>
-                        </button>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="customers-empty-state">
-        <i class="bi bi-people"></i>
-        <p>No customers found.</p>
-    </div>
-    {% endif %}
-
-    <!-- Pagination -->
-    {% if page_obj and page_obj.paginator.num_pages > 1 %}
-    <div class="customers-pagination">
-        <div class="pagination-info">
-            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} customers
-        </div>
-        <div class="pagination-controls">
-            {% if page_obj.has_previous %}
-            <a href="?page=1{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
-            <a href="?page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
-            {% endif %}
-
-            {% for num in page_obj.paginator.page_range %}
-                {% if page_obj.number == num %}
-                    <span class="page-btn active">{{ num }}</span>
-                {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}
-                    <a href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
-                {% elif num == 1 or num == page_obj.paginator.num_pages %}
-                    <a href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
-                {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}
-                    <span class="page-ellipsis">&hellip;</span>
-                {% endif %}
-            {% endfor %}
-
-            {% if page_obj.has_next %}
-            <a href="?page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
-            <a href="?page={{ page_obj.paginator.num_pages }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
-            {% endif %}
-        </div>
-    </div>
-    {% endif %}
-
-<!-- Add Customer Modal -->
-<div class="modal-overlay" id="add-customer-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
-    <div class="modal-box">
-        <div class="modal-header">
-            <h2><i class="bi bi-person-plus"></i> Add New Customer</h2>
-            <button class="modal-close" onclick="document.getElementById('add-customer-modal').style.display='none'">&times;</button>
-        </div>
-        <form method="POST" action="{% url 'customer_create' %}">
-            {% csrf_token %}
-            <div class="modal-body">
-                <div class="form-row">
-                    <div class="form-group cust-flex-100">
-                        <label for="cust-title">Title</label>
-                        <select id="cust-title" name="title">
-                            <option value="">—</option>
-                            <option value="Mr">Mr</option>
-                            <option value="Mrs">Mrs</option>
-                            <option value="Ms">Ms</option>
-                            <option value="Miss">Miss</option>
-                            <option value="Dr">Dr</option>
-                            <option value="Prof">Prof</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="cust-first-name">First Name <span class="required">*</span></label>
-                        <input type="text" id="cust-first-name" name="first_name" required placeholder="First name">
-                    </div>
-                    <div class="form-group">
-                        <label for="cust-last-name">Last Name <span class="required">*</span></label>
-                        <input type="text" id="cust-last-name" name="last_name" required placeholder="Last name">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="cust-email">Email</label>
-                        <input type="email" id="cust-email" name="email" placeholder="email@example.com">
-                    </div>
-                    <div class="form-group">
-                        <label for="cust-phone">Phone</label>
-                        <input type="text" id="cust-phone" name="phone" placeholder="Phone number">
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="cust-website">Website</label>
-                    <input type="url" id="cust-website" name="website" placeholder="https://...">
-                </div>
-                <div class="form-group">
-                    <label for="cust-address">Address</label>
-                    <input type="text" id="cust-address" name="address_1" placeholder="Street address">
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="cust-city">City</label>
-                        <input type="text" id="cust-city" name="city" placeholder="City">
-                    </div>
-                    <div class="form-group">
-                        <label for="cust-postcode">Postcode</label>
-                        <input type="text" id="cust-postcode" name="postcode" placeholder="Postcode">
-                    </div>
-                    <div class="form-group">
-                        <label for="cust-country">Country</label>
-                        <input type="text" id="cust-country" name="country" placeholder="Country">
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn-cancel" onclick="document.getElementById('add-customer-modal').style.display='none'">Cancel</button>
-                <button type="submit" class="btn-save">Create Customer</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- Merge Customer Modal -->
-<div class="modal-overlay" id="merge-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
-    <div class="modal-box">
-        <div class="modal-header">
-            <h2><i class="bi bi-arrow-left-right"></i> Merge Customers</h2>
-            <button class="modal-close" onclick="document.getElementById('merge-modal').style.display='none'">&times;</button>
-        </div>
-        <div class="modal-body">
-            <p class="cust-mb-16">Choose which customer to <strong>keep</strong>. The other customer's orders and data will be transferred into the kept customer, then the other will be deleted.</p>
-            <div class="cust-col-10">
-                <label class="cust-merge-option">
-                    <input type="radio" name="merge-keep" id="merge-option-0" value="" onchange="this.closest('.modal-body').querySelectorAll('label').forEach(l=>l.style.borderColor='var(--border-color)'); this.closest('label').style.borderColor='var(--primary-color)';">
-                    <div>
-                        <strong>Keep: <span id="merge-option-0-name"></span></strong>
-                        <div class="cust-merge-sub">Delete &amp; merge in: <span id="merge-option-0-remove"></span></div>
-                    </div>
-                </label>
-                <label class="cust-merge-option">
-                    <input type="radio" name="merge-keep" id="merge-option-1" value="" onchange="this.closest('.modal-body').querySelectorAll('label').forEach(l=>l.style.borderColor='var(--border-color)'); this.closest('label').style.borderColor='var(--primary-color)';">
-                    <div>
-                        <strong>Keep: <span id="merge-option-1-name"></span></strong>
-                        <div class="cust-merge-sub">Delete &amp; merge in: <span id="merge-option-1-remove"></span></div>
-                    </div>
-                </label>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn-cancel" onclick="document.getElementById('merge-modal').style.display='none'">Cancel</button>
-            <button type="button" class="btn-save" onclick="executeMerge()">Merge</button>
-        </div>
-    </div>
-</div>
-
-{% endif %}{# end view_mode == contacts #}
-
-{% if view_mode == 'events' %}
-<script>
-const eventSearchInput = document.getElementById('event-search');
-let eventSearchTimeout;
-if (eventSearchInput) {
-    eventSearchInput.addEventListener('input', function() {
-        clearTimeout(eventSearchTimeout);
-        eventSearchTimeout = setTimeout(() => {
-            const query = this.value.trim();
-            const params = new URLSearchParams(window.location.search);
-            if (query) params.set('q', query); else params.delete('q');
-            params.delete('page');
-            window.location.href = '?' + params.toString();
-        }, 500);
-    });
-    eventSearchInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') {
-            clearTimeout(eventSearchTimeout);
-            const query = this.value.trim();
-            const params = new URLSearchParams(window.location.search);
-            if (query) params.set('q', query); else params.delete('q');
-            params.delete('page');
-            window.location.href = '?' + params.toString();
-        }
-    });
-    eventSearchInput.focus();
-}
-</script>
-{% endif %}{# end view_mode == events #}
-
-{% if view_mode == 'customers' %}
-<script>
-// --- Server-side search with debounce ---
-const searchInput = document.getElementById('customer-search');
-let searchTimeout;
-if (searchInput) {
-    searchInput.addEventListener('input', function() {
-        clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(() => {
-            const query = this.value.trim();
-            const params = new URLSearchParams(window.location.search);
-            if (query) {
-                params.set('q', query);
-            } else {
-                params.delete('q');
-            }
-            params.delete('page'); // reset to page 1 on search
-            // preserve age and loc filters
-            if (!params.has('age')) params.set('age', '{{ age_filter }}');
-            if (!params.has('loc') && '{{ location_filter }}') params.set('loc', '{{ location_filter }}');
-            window.location.href = '?' + params.toString();
-        }, 500);
-    });
-    searchInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') {
-            clearTimeout(searchTimeout);
-            const query = this.value.trim();
-            const params = new URLSearchParams(window.location.search);
-            if (query) {
-                params.set('q', query);
-            } else {
-                params.delete('q');
-            }
-            params.delete('page');
-            if (!params.has('age')) params.set('age', '{{ age_filter }}');
-            if (!params.has('loc') && '{{ location_filter }}') params.set('loc', '{{ location_filter }}');
-            window.location.href = '?' + params.toString();
-        }
-    });
-    searchInput.focus();
+function navCustomerSearch(value) {
+	var query = value.trim();
+	var params = new URLSearchParams(window.location.search);
+	params.delete('view'); // customers is the default view
+	if (query) params.set('q', query); else params.delete('q');
+	params.delete('page');
+	window.location.href = params.toString() ? '?' + params.toString() : window.location.pathname;
 }
 
+function navEventSearch(value) {
+	var query = value.trim();
+	var params = new URLSearchParams(window.location.search);
+	params.set('view', 'events');
+	if (query) params.set('q', query); else params.delete('q');
+	params.delete('page');
+	window.location.href = '?' + params.toString();
+}
+
+function filterLeadRows(value) {
+	var query = value.toLowerCase().trim();
+	document.querySelectorAll('#customers-content .customers-table tbody tr').forEach(function (row) {
+		var text = row.getAttribute('data-search') || '';
+		row.style.display = (!query || text.indexOf(query) !== -1) ? '' : 'none';
+	});
+}
+
+// ════════════════════════════ Customers ════════════════════════════
 function clearSelectionAndReload() {
-    document.querySelectorAll('.row-select').forEach(cb => cb.checked = false);
-    const sa = document.getElementById('select-all');
-    if (sa) { sa.checked = false; sa.indeterminate = false; }
-    location.reload();
+	document.querySelectorAll('.row-select').forEach(cb => cb.checked = false);
+	const sa = document.getElementById('select-all');
+	if (sa) { sa.checked = false; sa.indeterminate = false; }
+	location.reload();
 }
 
-// --- Merge logic ---
 function checkMergeEligibility() {
-    const mergeBtn = document.getElementById('merge-btn');
-    if (!mergeBtn) return;
-    const checked = document.querySelectorAll('.row-select:checked');
-    if (checked.length === 2) {
-        mergeBtn.classList.add('visible');
-    } else {
-        mergeBtn.classList.remove('visible');
-    }
+	const mergeBtn = document.getElementById('merge-btn');
+	if (!mergeBtn) return;
+	const checked = document.querySelectorAll('.row-select:checked');
+	if (checked.length === 2) {
+		mergeBtn.classList.add('visible');
+	} else {
+		mergeBtn.classList.remove('visible');
+	}
 }
 
 function mergeCustomers() {
-    const checked = document.querySelectorAll('.row-select:checked');
-    if (checked.length !== 2) return;
-    const rows = Array.from(checked).map(cb => cb.closest('tr'));
-    const name0 = rows[0].querySelector('td:nth-child(2)').textContent.trim();
-    const name1 = rows[1].querySelector('td:nth-child(2)').textContent.trim();
-    const id0 = parseInt(rows[0].getAttribute('data-id'));
-    const id1 = parseInt(rows[1].getAttribute('data-id'));
+	const checked = document.querySelectorAll('.row-select:checked');
+	if (checked.length !== 2) return;
+	const rows = Array.from(checked).map(cb => cb.closest('tr'));
+	const name0 = rows[0].querySelector('td:nth-child(2)').textContent.trim();
+	const name1 = rows[1].querySelector('td:nth-child(2)').textContent.trim();
+	const id0 = parseInt(rows[0].getAttribute('data-id'));
+	const id1 = parseInt(rows[1].getAttribute('data-id'));
 
-    // Show merge modal to let user choose which to keep
-    const modal = document.getElementById('merge-modal');
-    document.getElementById('merge-option-0-name').textContent = name0;
-    document.getElementById('merge-option-1-name').textContent = name1;
-    document.getElementById('merge-option-0').value = id0;
-    document.getElementById('merge-option-1').value = id1;
-    document.getElementById('merge-option-0-remove').textContent = name1;
-    document.getElementById('merge-option-1-remove').textContent = name0;
-    document.getElementById('merge-option-0').checked = true;
-    modal.style.display = 'flex';
+	const modal = document.getElementById('merge-modal');
+	document.getElementById('merge-option-0-name').textContent = name0;
+	document.getElementById('merge-option-1-name').textContent = name1;
+	document.getElementById('merge-option-0').value = id0;
+	document.getElementById('merge-option-1').value = id1;
+	document.getElementById('merge-option-0-remove').textContent = name1;
+	document.getElementById('merge-option-1-remove').textContent = name0;
+	document.getElementById('merge-option-0').checked = true;
+	modal.style.display = 'flex';
 }
 
 function executeMerge() {
-    const selected = document.querySelector('input[name="merge-keep"]:checked');
-    if (!selected) return;
-    const keepId = parseInt(selected.value);
-    const otherId = parseInt(selected.value) === parseInt(document.getElementById('merge-option-0').value)
-        ? parseInt(document.getElementById('merge-option-1').value)
-        : parseInt(document.getElementById('merge-option-0').value);
+	const selected = document.querySelector('input[name="merge-keep"]:checked');
+	if (!selected) return;
+	const keepId = parseInt(selected.value);
+	const otherId = parseInt(selected.value) === parseInt(document.getElementById('merge-option-0').value)
+		? parseInt(document.getElementById('merge-option-1').value)
+		: parseInt(document.getElementById('merge-option-0').value);
 
-    document.getElementById('merge-modal').style.display = 'none';
+	document.getElementById('merge-modal').style.display = 'none';
 
-    fetch('{% url "customer_merge" %}', {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ keep_id: keepId, remove_id: otherId }),
-    })
-    .then(async res => {
-        const text = await res.text();
-        let data = null;
-        try {
-            data = JSON.parse(text);
-        } catch (e) {
-            throw new Error(text || ('HTTP ' + res.status));
-        }
-        if (!res.ok) {
-            throw new Error(data.error || data.message || ('HTTP ' + res.status));
-        }
-        return data;
-    })
-    .then(data => {
-        if (data.success) {
-            clearSelectionAndReload();
-        } else {
-            alert('Error: ' + (data.error || data.message || 'Unknown error'));
-        }
-    })
-    .catch(err => alert('Network error: ' + err.message));
+	fetch('{% url "customer_merge" %}', {
+		method: 'POST',
+		headers: {
+			'X-CSRFToken': '{{ csrf_token }}',
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ keep_id: keepId, remove_id: otherId }),
+	})
+	.then(async res => {
+		const text = await res.text();
+		let data = null;
+		try {
+			data = JSON.parse(text);
+		} catch (e) {
+			throw new Error(text || ('HTTP ' + res.status));
+		}
+		if (!res.ok) {
+			throw new Error(data.error || data.message || ('HTTP ' + res.status));
+		}
+		return data;
+	})
+	.then(data => {
+		if (data.success) {
+			clearSelectionAndReload();
+		} else {
+			alert('Error: ' + (data.error || data.message || 'Unknown error'));
+		}
+	})
+	.catch(err => alert('Network error: ' + err.message));
 }
 
 function deleteCustomer(id, name) {
-    if (!confirm('Delete customer "' + name + '"?')) return;
+	if (!confirm('Delete customer "' + name + '"?')) return;
 
-    fetch('/customer/' + id + '/delete/', {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json',
-        },
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.success) {
-            clearSelectionAndReload();
-        } else {
-            alert('Error: ' + (data.error || 'Unknown error'));
-        }
-    })
-    .catch(err => alert('Network error: ' + err.message));
+	fetch('/customer/' + id + '/delete/', {
+		method: 'POST',
+		headers: {
+			'X-CSRFToken': '{{ csrf_token }}',
+			'Content-Type': 'application/json',
+		},
+	})
+	.then(res => res.json())
+	.then(data => {
+		if (data.success) {
+			clearSelectionAndReload();
+		} else {
+			alert('Error: ' + (data.error || 'Unknown error'));
+		}
+	})
+	.catch(err => alert('Network error: ' + err.message));
 }
 
 function toggleSelectAll(el) {
-    document.querySelectorAll('.row-select').forEach(cb => cb.checked = el.checked);
-    updateSelection();
+	document.querySelectorAll('.row-select').forEach(cb => cb.checked = el.checked);
+	updateSelection();
 }
 
 function updateSelection() {
-    const checked = document.querySelectorAll('.row-select:checked');
-    const inline = document.getElementById('bulk-actions-inline');
-    const countEl = document.getElementById('bulk-count');
-    const selectAll = document.getElementById('select-all');
-    const allBoxes = document.querySelectorAll('.row-select');
+	const checked = document.querySelectorAll('.row-select:checked');
+	const inline = document.getElementById('bulk-actions-inline');
+	const countEl = document.getElementById('bulk-count');
+	const selectAll = document.getElementById('select-all');
+	const allBoxes = document.querySelectorAll('.row-select');
 
-    if (checked.length > 0) {
-        inline.classList.add('visible');
-        countEl.textContent = checked.length;
-    } else {
-        inline.classList.remove('visible');
-    }
-    if (selectAll) {
-        selectAll.checked = allBoxes.length > 0 && checked.length === allBoxes.length;
-        selectAll.indeterminate = checked.length > 0 && checked.length < allBoxes.length;
-    }
-    checkMergeEligibility();
+	if (checked.length > 0) {
+		inline.classList.add('visible');
+		countEl.textContent = checked.length;
+	} else {
+		inline.classList.remove('visible');
+	}
+	if (selectAll) {
+		selectAll.checked = allBoxes.length > 0 && checked.length === allBoxes.length;
+		selectAll.indeterminate = checked.length > 0 && checked.length < allBoxes.length;
+	}
+	checkMergeEligibility();
 }
 
 function bulkDelete() {
-    const ids = Array.from(document.querySelectorAll('.row-select:checked')).map(cb => parseInt(cb.value));
-    if (ids.length === 0) return;
-    if (!confirm('Delete ' + ids.length + ' customer(s)? This cannot be undone.')) return;
+	const ids = Array.from(document.querySelectorAll('.row-select:checked')).map(cb => parseInt(cb.value));
+	if (ids.length === 0) return;
+	if (!confirm('Delete ' + ids.length + ' customer(s)? This cannot be undone.')) return;
 
-    fetch('{% url "customers_bulk_delete" %}', {
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': '{{ csrf_token }}',
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ids: ids}),
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.success) {
-            clearSelectionAndReload();
-        } else {
-            alert('Error: ' + (data.error || 'Unknown error'));
-        }
-    })
-    .catch(err => alert('Network error: ' + err.message));
+	fetch('{% url "customers_bulk_delete" %}', {
+		method: 'POST',
+		headers: {
+			'X-CSRFToken': '{{ csrf_token }}',
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ids: ids}),
+	})
+	.then(res => res.json())
+	.then(data => {
+		if (data.success) {
+			clearSelectionAndReload();
+		} else {
+			alert('Error: ' + (data.error || 'Unknown error'));
+		}
+	})
+	.catch(err => alert('Network error: ' + err.message));
 }
+
+// ════════════════════════════ Contacts (Leads) ════════════════════════════
+var pendingDeleteLeadId = null;
+
+function clearLeadSelectionAndReload() {
+	document.querySelectorAll('.lead-select').forEach(cb => cb.checked = false);
+	const sa = document.getElementById('select-all-leads');
+	if (sa) { sa.checked = false; sa.indeterminate = false; }
+	location.reload();
+}
+
+function toggleSelectAllLeads(el) {
+	document.querySelectorAll('.lead-select').forEach(cb => cb.checked = el.checked);
+	updateLeadSelection();
+}
+
+function updateLeadSelection() {
+	const checked = document.querySelectorAll('.lead-select:checked');
+	const inline = document.getElementById('bulk-actions-inline');
+	const countEl = document.getElementById('bulk-count');
+	const selectAll = document.getElementById('select-all-leads');
+	const allBoxes = document.querySelectorAll('.lead-select');
+	if (checked.length > 0) {
+		inline.classList.add('visible');
+		countEl.textContent = checked.length;
+	} else {
+		inline.classList.remove('visible');
+	}
+	if (selectAll) {
+		selectAll.checked = allBoxes.length > 0 && checked.length === allBoxes.length;
+		selectAll.indeterminate = checked.length > 0 && checked.length < allBoxes.length;
+	}
+	const mergeBtn = document.getElementById('merge-btn');
+	if (mergeBtn) {
+		if (checked.length === 2) mergeBtn.classList.add('visible');
+		else mergeBtn.classList.remove('visible');
+	}
+}
+
+function mergeLeads() {
+	const checked = document.querySelectorAll('.lead-select:checked');
+	if (checked.length !== 2) return;
+	const rows = Array.from(checked).map(cb => cb.closest('tr'));
+	const name0 = rows[0].querySelector('td:nth-child(2)').textContent.trim();
+	const name1 = rows[1].querySelector('td:nth-child(2)').textContent.trim();
+	const id0 = parseInt(rows[0].getAttribute('data-id'));
+	const id1 = parseInt(rows[1].getAttribute('data-id'));
+	document.getElementById('lead-merge-option-0-name').textContent = name0;
+	document.getElementById('lead-merge-option-1-name').textContent = name1;
+	document.getElementById('lead-merge-option-0').value = id0;
+	document.getElementById('lead-merge-option-1').value = id1;
+	document.getElementById('lead-merge-option-0-remove').textContent = name1;
+	document.getElementById('lead-merge-option-1-remove').textContent = name0;
+	document.getElementById('lead-merge-option-0').checked = true;
+	document.getElementById('merge-lead-modal').style.display = 'flex';
+}
+
+function executeLeadMerge() {
+	const selected = document.querySelector('input[name="lead-merge-keep"]:checked');
+	if (!selected) return;
+	const keepId = parseInt(selected.value);
+	const opt0 = parseInt(document.getElementById('lead-merge-option-0').value);
+	const opt1 = parseInt(document.getElementById('lead-merge-option-1').value);
+	const otherId = keepId === opt0 ? opt1 : opt0;
+	document.getElementById('merge-lead-modal').style.display = 'none';
+	fetch('{% url "lead_merge" %}', {
+		method: 'POST',
+		headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+		body: JSON.stringify({ keep_id: keepId, remove_id: otherId }),
+	})
+	.then(res => res.json())
+	.then(data => {
+		if (data.success) clearLeadSelectionAndReload();
+		else alert('Error: ' + (data.error || data.message || 'Unknown error'));
+	})
+	.catch(err => alert('Network error: ' + err.message));
+}
+
+function deleteLeadRow(id, name) {
+	pendingDeleteLeadId = id;
+	document.getElementById('delete-lead-name').textContent = '"' + name + '"';
+	document.getElementById('delete-lead-modal').style.display = 'flex';
+}
+
+function bulkDeleteLeads() {
+	const ids = Array.from(document.querySelectorAll('.lead-select:checked')).map(cb => parseInt(cb.value));
+	if (ids.length === 0) return;
+	if (!confirm('Delete ' + ids.length + ' contact(s)? This cannot be undone.')) return;
+	fetch('{% url "leads_bulk_delete" %}', {
+		method: 'POST',
+		headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+		body: JSON.stringify({ ids: ids }),
+	})
+	.then(res => res.json())
+	.then(data => {
+		if (data.success) clearLeadSelectionAndReload();
+		else alert('Error: ' + (data.error || 'Unknown error'));
+	})
+	.catch(err => alert('Network error: ' + err.message));
+}
+
+// Confirm-delete button lives inside the swapped body, so bind by delegation.
+document.addEventListener('click', function (e) {
+	if (!e.target.closest) return;
+	if (!e.target.closest('#confirm-delete-lead-btn')) return;
+	if (!pendingDeleteLeadId) return;
+	fetch('/lead/' + pendingDeleteLeadId + '/delete/', {
+		method: 'POST',
+		headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+	})
+	.then(res => res.json())
+	.then(data => {
+		if (data.success) clearLeadSelectionAndReload();
+		else alert('Error: ' + (data.error || 'Unknown error'));
+	})
+	.catch(err => alert('Network error: ' + err.message));
+});
 </script>
-{% endif %}{# end view_mode == customers #}
 {% endblock %}

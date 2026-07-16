@@ -2,15 +2,18 @@ import json
 import logging
 import re
 import ast
+from collections import Counter
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import WebsiteEnquiry, log_activity
 from .permissions import page_permission_required
+from .services.enquiry_matching import find_customer_matches
 
 logger = logging.getLogger(__name__)
 
@@ -263,17 +266,36 @@ def website_enquiries_list(request):
 
     counts = {
         'all': WebsiteEnquiry.objects.count(),
-        'new': WebsiteEnquiry.objects.filter(status='new').count(),
-        'contacted': WebsiteEnquiry.objects.filter(status='contacted').count(),
         'converted': WebsiteEnquiry.objects.filter(status='converted').count(),
-        'closed': WebsiteEnquiry.objects.filter(status='closed').count(),
     }
+
+    # Distribution of enquiries by source, for the chart modal. Blank/None
+    # sources are grouped under a single "Unknown" bucket.
+    source_counter = Counter()
+    for src in WebsiteEnquiry.objects.values_list('source', flat=True):
+        label = (src or '').strip() or 'Unknown'
+        source_counter[label] += 1
+    source_distribution = [{'label': label, 'count': n} for label, n in source_counter.most_common()]
+
+    # Paginate to 100 per page (queryset is ordered by -received_at via Meta).
+    paginator = Paginator(enquiries, 100)
+    page_obj = paginator.get_page(request.GET.get('page', 1))
+
+    # Enrich the visible page with a match against existing Atlas customers so
+    # the list can flag known/repeat customers instead of treating all as cold
+    # leads. Only the current page is matched, not the whole table.
+    enquiries = list(page_obj)
+    matches = find_customer_matches(enquiries)
+    for enq in enquiries:
+        enq.match = matches.get(enq.pk)
 
     return render(request, 'stock_take/website_enquiries.html', {
         'enquiries': enquiries,
+        'page_obj': page_obj,
         'status_filter': status_filter,
         'search_query': search_query,
         'counts': counts,
+        'source_distribution_json': json.dumps(source_distribution),
     })
 
 

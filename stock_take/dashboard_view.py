@@ -1,6 +1,6 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Sum, DecimalField, Value, OuterRef, Subquery, F, ExpressionWrapper
+from django.db.models import Count, Sum, DecimalField, Value, OuterRef, Subquery, F, ExpressionWrapper, Q
 from django.db.models.functions import TruncWeek, TruncMonth, Coalesce
 from django.http import HttpResponse, JsonResponse
 from datetime import datetime, timedelta
@@ -28,6 +28,37 @@ def _contract_prefix_for_location(location: str) -> str:
     return _LOCATION_CONTRACT_PREFIX.get(location.strip().lower(), '')
 
 
+def _contract_prefixes_for_locations(locations):
+    """Contract-number prefixes for the given location names (de-duplicated, order-preserving).
+
+    Each entry may itself be a comma-separated list (e.g. a raw ``selected_location``
+    value or a single querystring param), so entries are split on commas first.
+    """
+    prefixes = []
+    for entry in locations or []:
+        for loc in str(entry).split(','):
+            p = _LOCATION_CONTRACT_PREFIX.get(loc.strip().lower(), '')
+            if p and p not in prefixes:
+                prefixes.append(p)
+    return prefixes
+
+
+def _prefix_filter_q(prefixes, field='contract_number'):
+    """Q matching ``field`` against ANY of ``prefixes`` (istartswith); None if empty."""
+    if not prefixes:
+        return None
+    q = Q()
+    for p in prefixes:
+        q |= Q(**{f'{field}__istartswith': p})
+    return q
+
+
+def _apply_prefixes(qs, prefixes, field='contract_number'):
+    """Filter ``qs`` to rows whose ``field`` starts with any selected prefix (no-op if none)."""
+    q = _prefix_filter_q(prefixes, field)
+    return qs.filter(q) if q else qs
+
+
 # ── Sales targets ──────────────────────────────────────────────────────────
 # Fixed company objectives. Actuals are measured off the fit calendar
 # (FitAppointment → one job per Order) with money from _orders_financials —
@@ -43,7 +74,7 @@ MONTHLY_FIT_DAYS_TARGET = 40
 YEARLY_FIT_DAYS_TARGET = 520
 
 
-def _compute_sales_targets(today, contract_prefix=''):
+def _compute_sales_targets(today, prefixes=None):
 	"""Build the dashboard sales-target breakdowns for the periods around ``today``.
 
 	Returns a list of period dicts (last/this/next week, this month, this year),
@@ -103,11 +134,11 @@ def _compute_sales_targets(today, contract_prefix=''):
 			cn = row['contract_number'] or ''
 			if row['anthill_activity_id'] not in contract_by_sale or cn:
 				contract_by_sale[row['anthill_activity_id']] = cn
-	if contract_prefix:
-		pref = contract_prefix.upper()
+	if prefixes:
+		prefs = tuple(p.upper() for p in prefixes)
 		jobs_by_order = {
 			oid: rec for oid, rec in jobs_by_order.items()
-			if (contract_by_sale.get(rec['order'].sale_number, '') or '').upper().startswith(pref)
+			if (contract_by_sale.get(rec['order'].sale_number, '') or '').upper().startswith(prefs)
 		}
 
 	# Per-job financials — identical to the calendar / weekly report.
@@ -171,7 +202,7 @@ def _compute_sales_targets(today, contract_prefix=''):
 	return periods
 
 
-def _get_monthly_sales_data(year, month, contract_prefix=''):
+def _get_monthly_sales_data(year, month, prefixes=None):
     """Calculate monthly sales stats for a given year/month using fit_date."""
     from calendar import monthrange
     first_day = datetime(year, month, 1).date()
@@ -182,8 +213,7 @@ def _get_monthly_sales_data(year, month, contract_prefix=''):
         fit_date__lte=last_day,
         sale_value__gt=0,
     ).exclude(status__in=['cancelled', 'dead'])
-    if contract_prefix:
-        sales_qs = sales_qs.filter(contract_number__istartswith=contract_prefix)
+    sales_qs = _apply_prefixes(sales_qs, prefixes)
     agg = sales_qs.aggregate(
         total=Sum('sale_value'),
         count=Count('id'),
@@ -305,15 +335,15 @@ def dashboard_monthly_sales(request):
         return JsonResponse({'error': 'Invalid year/month'}, status=400)
 
     profile = getattr(request.user, 'profile', None)
-    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
-    data = _get_monthly_sales_data(year, month, contract_prefix)
+    prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
+    data = _get_monthly_sales_data(year, month, prefixes)
 
     # Previous month for delta
     if month == 1:
         prev_year, prev_month = year - 1, 12
     else:
         prev_year, prev_month = year, month - 1
-    prev_data = _get_monthly_sales_data(prev_year, prev_month, contract_prefix)
+    prev_data = _get_monthly_sales_data(prev_year, prev_month, prefixes)
     delta = data['total'] - prev_data['total']
 
     return JsonResponse({
@@ -336,8 +366,21 @@ def dashboard(request):
     if profile and profile.role and profile.role.name == 'franchise':
         return redirect('claim_service')
 
-    selected_location = profile.selected_location if profile else ''
-    contract_prefix = _contract_prefix_for_location(selected_location)
+    selected_locations = profile.selected_location_list if profile else []
+    # Branch tabs — when 2+ branches are in scope, let the user drill into one at a
+    # time. "Combined" (no ?branch=) uses the whole selection; a branch tab scopes to
+    # just that branch. With nothing selected (All Locations) every known branch is a
+    # tab, so you can see the company total and each branch on its own.
+    from .location_view import _available_locations
+    branch_tabs = [
+        loc for loc in (selected_locations or _available_locations())
+        if _contract_prefix_for_location(loc)
+    ]
+    active_branch = request.GET.get('branch', '')
+    if active_branch not in branch_tabs:
+        active_branch = ''
+    scope_locations = [active_branch] if active_branch else selected_locations
+    prefixes = _contract_prefixes_for_locations(scope_locations)
 
     # Get fits per week data (past 52 weeks + future 12 weeks to show scheduled fits)
     today = datetime.now().date()
@@ -350,8 +393,7 @@ def dashboard(request):
         fit_date__lte=future_date,
         sale_value__gt=0,
     ).exclude(status__in=['cancelled', 'dead'])
-    if contract_prefix:
-        sales_in_range = sales_in_range.filter(contract_number__istartswith=contract_prefix)
+    sales_in_range = _apply_prefixes(sales_in_range, prefixes)
     sales_in_range = sales_in_range.values('fit_date', 'sale_value')
     
     # Create a dictionary of all weeks with default data
@@ -404,8 +446,7 @@ def dashboard(request):
         fit_date__lte=this_week_end,
         sale_value__gt=0,
     ).exclude(status__in=['cancelled', 'dead'])
-    if contract_prefix:
-        this_week_sales_qs = this_week_sales_qs.filter(contract_number__istartswith=contract_prefix)
+    this_week_sales_qs = _apply_prefixes(this_week_sales_qs, prefixes)
     this_week_sales = this_week_sales_qs.aggregate(total=Sum('sale_value'))['total'] or Decimal('0.00')
 
     # Last week for week-on-week comparison
@@ -416,8 +457,7 @@ def dashboard(request):
         fit_date__lte=last_week_end,
         sale_value__gt=0,
     ).exclude(status__in=['cancelled', 'dead'])
-    if contract_prefix:
-        last_week_sales_qs = last_week_sales_qs.filter(contract_number__istartswith=contract_prefix)
+    last_week_sales_qs = _apply_prefixes(last_week_sales_qs, prefixes)
     last_week_sales = last_week_sales_qs.aggregate(total=Sum('sale_value'))['total'] or Decimal('0.00')
     week_delta = this_week_sales - last_week_sales
     
@@ -426,8 +466,7 @@ def dashboard(request):
         fit_date__gte=today,
         sale_value__gt=0,
     ).exclude(status__in=['cancelled', 'dead'])
-    if contract_prefix:
-        sales_after_qs = sales_after_qs.filter(contract_number__istartswith=contract_prefix)
+    sales_after_qs = _apply_prefixes(sales_after_qs, prefixes)
     sales_after = sales_after_qs.aggregate(
         total=Sum('sale_value'),
         count=Count('id'),
@@ -624,8 +663,7 @@ def dashboard(request):
         fit_date__lte=three_months_ahead,
         sale_value__gt=0,
     ).exclude(status__in=['cancelled', 'dead'])
-    if contract_prefix:
-        monthly_sales_qs = monthly_sales_qs.filter(contract_number__istartswith=contract_prefix)
+    monthly_sales_qs = _apply_prefixes(monthly_sales_qs, prefixes)
     monthly_sales_data = (
         monthly_sales_qs
         .annotate(month=TruncMonth('fit_date'))
@@ -664,12 +702,12 @@ def dashboard(request):
             break
 
     # Current month sales data (by fit_date)
-    current_month_sales = _get_monthly_sales_data(today.year, today.month, contract_prefix)
+    current_month_sales = _get_monthly_sales_data(today.year, today.month, prefixes)
 
     # Previous month for initial month-on-month delta
     prev_month_num = today.month - 1 if today.month > 1 else 12
     prev_month_year = today.year if today.month > 1 else today.year - 1
-    prev_month_sales = _get_monthly_sales_data(prev_month_year, prev_month_num, contract_prefix)
+    prev_month_sales = _get_monthly_sales_data(prev_month_year, prev_month_num, prefixes)
     month_delta = Decimal(str(current_month_sales['total'])) - Decimal(str(prev_month_sales['total']))
 
     # Average daily sale value — last 365 days total / 365
@@ -679,8 +717,7 @@ def dashboard(request):
         fit_date__lte=today,
         sale_value__gt=0,
     ).exclude(status__in=['cancelled', 'dead'])
-    if contract_prefix:
-        avg_12m_qs = avg_12m_qs.filter(contract_number__istartswith=contract_prefix)
+    avg_12m_qs = _apply_prefixes(avg_12m_qs, prefixes)
     avg_12m_total = avg_12m_qs.aggregate(total=Sum('sale_value'))['total'] or Decimal('0')
     avg_daily_sale = avg_12m_total / 365
 
@@ -703,8 +740,7 @@ def dashboard(request):
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
         .values('sale_value', 'discount', 'total_paid', 'customer_id', 'customer_name')
     )
-    if contract_prefix:
-        outstanding_qs = outstanding_qs.filter(contract_number__istartswith=contract_prefix)
+    outstanding_qs = _apply_prefixes(outstanding_qs, prefixes)
 
     outstanding_rows = list(outstanding_qs)
     total_outstanding_balance = sum(
@@ -726,8 +762,7 @@ def dashboard(request):
         .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
         .values('sale_value', 'discount', 'total_paid')
     )
-    if contract_prefix:
-        this_week_qs = this_week_qs.filter(contract_number__istartswith=contract_prefix)
+    this_week_qs = _apply_prefixes(this_week_qs, prefixes)
     expected_this_week = sum(
         max((row['sale_value'] or Decimal('0')) - 2 * (row['discount'] or Decimal('0')) - (row['total_paid'] or Decimal('0')), Decimal('0'))
         for row in this_week_qs
@@ -761,8 +796,7 @@ def dashboard(request):
         .exclude(status__in=['cancelled', 'dead'])
         .order_by('fit_date')
     )
-    if contract_prefix:
-        sales_after_preview_qs = sales_after_preview_qs.filter(contract_number__istartswith=contract_prefix)
+    sales_after_preview_qs = _apply_prefixes(sales_after_preview_qs, prefixes)
     sales_after_preview = [
         {'customer': s['customer_name'] or '-',
          'fit_date': s['fit_date'].strftime('%d/%m') if s['fit_date'] else '',
@@ -784,8 +818,7 @@ def dashboard(request):
         .exclude(status__in=['cancelled', 'dead'])
         .order_by('fit_date')
     )
-    if contract_prefix:
-        week_preview_qs = week_preview_qs.filter(contract_number__istartswith=contract_prefix)
+    week_preview_qs = _apply_prefixes(week_preview_qs, prefixes)
     week_preview = [
         {'customer': s['customer_name'] or '-',
          'fit_date': s['fit_date'].strftime('%a %d') if s['fit_date'] else '',
@@ -803,8 +836,7 @@ def dashboard(request):
         .exclude(status__in=['cancelled', 'dead'])
         .order_by('fit_date')
     )
-    if contract_prefix:
-        monthly_preview_qs = monthly_preview_qs.filter(contract_number__istartswith=contract_prefix)
+    monthly_preview_qs = _apply_prefixes(monthly_preview_qs, prefixes)
     monthly_preview = [
         {'customer': s['customer_name'] or '-',
          'fit_date': s['fit_date'].strftime('%d/%m') if s['fit_date'] else '',
@@ -817,8 +849,7 @@ def dashboard(request):
     avg_preview_qs = AnthillSale.objects.filter(
         fit_date__gte=today - timedelta(days=180), fit_date__lte=today, sale_value__gt=0,
     ).exclude(status__in=['cancelled', 'dead'])
-    if contract_prefix:
-        avg_preview_qs = avg_preview_qs.filter(contract_number__istartswith=contract_prefix)
+    avg_preview_qs = _apply_prefixes(avg_preview_qs, prefixes)
     avg_monthly = (
         avg_preview_qs.annotate(month=_TruncMonth('fit_date'))
         .values('month')
@@ -900,9 +931,11 @@ def dashboard(request):
     # Weekly pies for last / this / next week, plus this month (with fit-days) and
     # this year. Sourced from the fit calendar via _compute_sales_targets so the
     # figures match the calendar and weekly operations report exactly.
-    targets_data = _compute_sales_targets(today, contract_prefix)
+    targets_data = _compute_sales_targets(today, prefixes)
 
     context = {
+        'branch_tabs': branch_tabs,
+        'active_branch': active_branch,
         'targets_json': json.dumps(targets_data),
         'fits_chart_data': json.dumps({
             'labels': labels,
@@ -1400,7 +1433,7 @@ def dashboard_weekly_summary(request):
     from .models import Remedial, BoardsPO as _BoardsPO
 
     profile = getattr(request.user, 'profile', None)
-    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
     today = datetime.now().date()
 
     # ── Week boundaries ──────────────────────────────────────────────────────
@@ -1471,11 +1504,11 @@ def dashboard_weekly_summary(request):
 
     # Location scoping: keep only jobs whose linked Anthill contract matches the
     # selected location's prefix (when one is configured).
-    if contract_prefix:
-        _pref = contract_prefix.upper()
+    if prefixes:
+        _prefs = tuple(p.upper() for p in prefixes)
         jobs_by_order = {
             oid: rec for oid, rec in jobs_by_order.items()
-            if (contract_by_sale.get(rec['order'].sale_number, '') or '').upper().startswith(_pref)
+            if (contract_by_sale.get(rec['order'].sale_number, '') or '').upper().startswith(_prefs)
         }
 
     # ── Xero sync for the visible jobs ───────────────────────────────────────
@@ -1606,8 +1639,7 @@ def dashboard_weekly_summary(request):
     outstanding_qs = (AnthillSale.objects
                       .filter(sale_value__gt=0)
                       .exclude(status='cancelled'))
-    if contract_prefix:
-        outstanding_qs = outstanding_qs.filter(contract_number__istartswith=contract_prefix)
+    outstanding_qs = _apply_prefixes(outstanding_qs, prefixes)
     total_outstanding = Decimal('0')
     outstanding_count = 0
     top_debtors_all = []
@@ -2195,8 +2227,8 @@ def dashboard_monthly_stock_history(request):
 @login_required
 def dashboard_outstanding_report(request):
     profile = getattr(request.user, 'profile', None)
-    raw_location = request.GET.get('location') or (profile.selected_location if profile else '')
-    contract_prefix = _contract_prefix_for_location(raw_location)
+    raw_locations = request.GET.getlist('location') or (profile.selected_location_list if profile else [])
+    prefixes = _contract_prefixes_for_locations(raw_locations)
     time_filter = request.GET.get('period', 'all')  # all, monthly, weekly
 
     payments_subquery = Subquery(
@@ -2216,8 +2248,7 @@ def dashboard_outstanding_report(request):
                 'sale_value', 'discount', 'activity_date', 'location', 'total_paid', 'fit_date',
                 'customer_id', 'customer__name')
     )
-    if contract_prefix:
-        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    qs = _apply_prefixes(qs, prefixes)
 
     # Apply time period filter based on fit_date
     if time_filter == 'weekly':
@@ -2369,8 +2400,8 @@ def dashboard_outstanding_xero_check(request):
     from .services import xero_api
 
     profile = getattr(request.user, 'profile', None)
-    raw_location = request.GET.get('location') or (profile.selected_location if profile else '')
-    contract_prefix = _contract_prefix_for_location(raw_location)
+    raw_locations = request.GET.getlist('location') or (profile.selected_location_list if profile else [])
+    prefixes = _contract_prefixes_for_locations(raw_locations)
     time_filter = request.GET.get('period', 'all')
 
     # Check Xero connection first
@@ -2394,8 +2425,7 @@ def dashboard_outstanding_xero_check(request):
         .values('pk', 'anthill_activity_id', 'customer_name', 'contract_number',
                 'sale_value', 'discount', 'total_paid', 'fit_date')
     )
-    if contract_prefix:
-        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    qs = _apply_prefixes(qs, prefixes)
 
     if time_filter == 'weekly':
         from datetime import date
@@ -2892,9 +2922,9 @@ def dashboard_outstanding_pdf(request):
     from .pdf_generator import generate_outstanding_report_pdf
 
     profile = getattr(request.user, 'profile', None)
-    raw_location = request.GET.get('location') or (profile.selected_location if profile else '')
-    contract_prefix = _contract_prefix_for_location(raw_location)
-    location_label = raw_location.title() if raw_location else 'All Locations'
+    raw_locations = request.GET.getlist('location') or (profile.selected_location_list if profile else [])
+    prefixes = _contract_prefixes_for_locations(raw_locations)
+    location_label = ', '.join(l.title() for l in raw_locations) if raw_locations else 'All Locations'
 
     payments_subquery = Subquery(
         AnthillPayment.objects.filter(sale=OuterRef('pk'), ignored=False)
@@ -2913,8 +2943,7 @@ def dashboard_outstanding_pdf(request):
                 'sale_value', 'discount', 'activity_date', 'total_paid',
                 'customer_id', 'customer__name')
     )
-    if contract_prefix:
-        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    qs = _apply_prefixes(qs, prefixes)
 
     # Build customer-grouped structure
     customers = {}
@@ -2985,7 +3014,7 @@ def _build_fit_sales_rows(qs):
 def dashboard_week_report(request):
     """JSON endpoint — sales with fit_date in the current Mon–Sun week."""
     profile = getattr(request.user, 'profile', None)
-    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
     today = datetime.now().date()
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=6)
@@ -2995,8 +3024,7 @@ def dashboard_week_report(request):
         .exclude(status__in=['cancelled', 'dead'])
         .order_by('fit_date')
     )
-    if contract_prefix:
-        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    qs = _apply_prefixes(qs, prefixes)
     rows = _build_fit_sales_rows(qs)
     total = sum(r['sale_value'] for r in rows)
     return JsonResponse({
@@ -3015,7 +3043,7 @@ def dashboard_week_pdf(request):
     from .pdf_generator import generate_fit_sales_pdf
     from datetime import date as date_type
     profile = getattr(request.user, 'profile', None)
-    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
     today = datetime.now().date()
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=6)
@@ -3025,8 +3053,7 @@ def dashboard_week_pdf(request):
         .exclude(status__in=['cancelled', 'dead'])
         .order_by('fit_date')
     )
-    if contract_prefix:
-        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    qs = _apply_prefixes(qs, prefixes)
     rows = _build_fit_sales_rows(qs)
     title = f"This Week\u2019s Fits  {week_start.strftime('%d %b')} \u2013 {week_end.strftime('%d %b %Y')}"
     buffer = generate_fit_sales_pdf(rows, title=title)
@@ -3041,7 +3068,7 @@ def dashboard_monthly_report(request):
     """JSON endpoint — sales with fit_date in the selected month/year."""
     from calendar import monthrange
     profile = getattr(request.user, 'profile', None)
-    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
     try:
         year = int(request.GET.get('year', datetime.now().year))
         month = int(request.GET.get('month', datetime.now().month))
@@ -3055,8 +3082,7 @@ def dashboard_monthly_report(request):
         .exclude(status__in=['cancelled', 'dead'])
         .order_by('fit_date')
     )
-    if contract_prefix:
-        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    qs = _apply_prefixes(qs, prefixes)
     rows = _build_fit_sales_rows(qs)
     total = sum(r['sale_value'] for r in rows)
     return JsonResponse({
@@ -3075,7 +3101,7 @@ def dashboard_monthly_pdf(request):
     from calendar import monthrange
     from datetime import date as date_type
     profile = getattr(request.user, 'profile', None)
-    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
     try:
         year = int(request.GET.get('year', datetime.now().year))
         month = int(request.GET.get('month', datetime.now().month))
@@ -3089,8 +3115,7 @@ def dashboard_monthly_pdf(request):
         .exclude(status__in=['cancelled', 'dead'])
         .order_by('fit_date')
     )
-    if contract_prefix:
-        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    qs = _apply_prefixes(qs, prefixes)
     rows = _build_fit_sales_rows(qs)
     title = f'Monthly Fits \u2014 {first_day.strftime("%B %Y")}'
     buffer = generate_fit_sales_pdf(rows, title=title)
@@ -3105,7 +3130,7 @@ def dashboard_avg_report(request):
     """JSON endpoint — last 365-day monthly breakdown for the average sale value card."""
     from django.db.models.functions import TruncMonth
     profile = getattr(request.user, 'profile', None)
-    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
     today = datetime.now().date()
     one_year_ago = today - timedelta(days=365)
     qs = (
@@ -3113,8 +3138,7 @@ def dashboard_avg_report(request):
         .filter(fit_date__gte=one_year_ago, fit_date__lte=today, sale_value__gt=0)
         .exclude(status__in=['cancelled', 'dead'])
     )
-    if contract_prefix:
-        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    qs = _apply_prefixes(qs, prefixes)
     monthly = (
         qs.annotate(month=TruncMonth('fit_date'))
         .values('month')
@@ -3153,7 +3177,7 @@ def dashboard_avg_pdf(request):
     from django.db.models.functions import TruncMonth
     from datetime import date as date_type
     profile = getattr(request.user, 'profile', None)
-    contract_prefix = _contract_prefix_for_location(profile.selected_location if profile else '')
+    prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
     today = datetime.now().date()
     one_year_ago = today - timedelta(days=365)
     qs = (
@@ -3161,8 +3185,7 @@ def dashboard_avg_pdf(request):
         .filter(fit_date__gte=one_year_ago, fit_date__lte=today, sale_value__gt=0)
         .exclude(status__in=['cancelled', 'dead'])
     )
-    if contract_prefix:
-        qs = qs.filter(contract_number__istartswith=contract_prefix)
+    qs = _apply_prefixes(qs, prefixes)
     monthly = (
         qs.annotate(month=TruncMonth('fit_date'))
         .values('month')

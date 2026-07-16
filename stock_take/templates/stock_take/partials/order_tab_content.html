@@ -208,9 +208,16 @@
                                     </td>
                                     <td class="matname-cell">
                                         {% if item.colour_image_url %}
-                                        <img src="{{ item.colour_image_url }}" class="matname-swatch" alt="" loading="lazy">
+                                        <img src="{{ item.colour_image_url }}" class="matname-swatch matname-swatch-btn" alt="" loading="lazy"
+                                             data-swatch-pnx-id="{{ item.id }}"
+                                             title="Pick Egger colour"
+                                             onclick="openRowEggerModal('{{ item.id }}', '{{ bpo_data.po.id }}')">
                                         {% else %}
-                                        <span class="matname-swatch matname-swatch-empty"></span>
+                                        <span class="matname-swatch matname-swatch-empty matname-swatch-btn"
+                                              data-swatch-pnx-id="{{ item.id }}"
+                                              role="button"
+                                              title="Pick Egger colour"
+                                              onclick="openRowEggerModal('{{ item.id }}', '{{ bpo_data.po.id }}')"></span>
                                         {% endif %}
                                         <input type="text"
                                                class="quantity-input pnx-mat-part"
@@ -1506,9 +1513,9 @@
                 {% csrf_token %}
                 <div class="modal-header">
                     <h3>Add OS Door</h3>
-                    <div class="osd-modal-tabs">
-                        <button type="button" class="osd-modal-tab active" id="osd-tab-new-btn" onclick="switchOSDModalTab('new')"><i class="bi bi-pencil"></i> New</button>
-                        <button type="button" class="osd-modal-tab" id="osd-tab-paste-btn" onclick="switchOSDModalTab('paste')"><i class="bi bi-clipboard"></i> Paste</button>
+                    <div class="tab-nav-pills" data-pill-slider>
+                        <button type="button" class="tab-button active" id="osd-tab-new-btn" onclick="switchOSDModalTab('new')"><i class="bi bi-pencil"></i> New</button>
+                        <button type="button" class="tab-button" id="osd-tab-paste-btn" onclick="switchOSDModalTab('paste')"><i class="bi bi-clipboard"></i> Paste</button>
                     </div>
                     <button type="button" class="modal-close" onclick="closeModal('addOSDoorModal')">✕</button>
                 </div>
@@ -5959,10 +5966,18 @@ function rebuildMatnameChange(pnxId, boardsPoId) {
     const code = codeInput.value.trim();
     const thickness = thickInput ? thickInput.value.trim() : '';
 
-    // Reattach the prefix, and the thickness only for prefixed (Egger) boards.
-    let full = prefix + code;
-    if (prefix && thickness !== '') {
-        full += `_${thickness}_`;
+    // The code field normally holds just the colour code and we reattach the
+    // prefix + thickness to keep the full SKU. But if the user types/pastes a
+    // value that already carries the prefix, treat it as the whole matname so
+    // we don't double-prepend and mangle their input.
+    let full;
+    if (prefix && code.startsWith(prefix)) {
+        full = code;
+    } else {
+        full = prefix + code;
+        if (prefix && thickness !== '') {
+            full += `_${thickness}_`;
+        }
     }
 
     const origCode = codeInput.getAttribute('data-original-value') || '';
@@ -7650,6 +7665,85 @@ function selectEggerColour(code) {
     const matname = `SHT_MFC_EGG_${code}_${selectedThickness}_`;
     document.getElementById('add-board-matname').value = matname;
     closeModal('boardEggerColoursModal');
+}
+
+/* ── Egger Colour Picker for existing board rows ─────────
+   Clicking a row's colour swatch opens the same Egger modal, but the choice
+   is written back into that specific row (code input + swatch + thickness)
+   and registered as a pending change so "Save Changes" picks it up. */
+let rowEggerTarget = null;
+
+function openRowEggerModal(pnxId, boardsPoId) {
+    rowEggerTarget = { pnxId: pnxId, boardsPoId: boardsPoId };
+    openModal('boardEggerColoursModal');
+    const grid = document.getElementById('boardEggerColoursGrid');
+    grid.innerHTML = '<div class="text-center loading-state-text">Loading...</div>';
+
+    fetch("{% url 'egger_colours' %}", {
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.colours || data.colours.length === 0) {
+            grid.innerHTML = '<div class="text-center loading-state-text">No Egger colours with images found</div>';
+            return;
+        }
+        grid.innerHTML = data.colours.map(c => `
+            <div class="egger-tile" onclick="selectRowEggerColour('${c.code}', '${c.image_url}')">
+                <img src="${c.image_url}" alt="${c.code}" loading="lazy">
+                <div class="egger-tile-code">${c.code}</div>
+            </div>
+        `).join('');
+    })
+    .catch(() => {
+        grid.innerHTML = '<div class="text-center loading-state-text">Failed to load colours</div>';
+    });
+}
+
+function selectRowEggerColour(code, imageUrl) {
+    if (!rowEggerTarget) return;
+    const pnxId = rowEggerTarget.pnxId;
+    const boardsPoId = rowEggerTarget.boardsPoId;
+
+    const codeInput = document.querySelector(`.pnx-mat-part[data-part="code"][data-pnx-id="${pnxId}"]`);
+    if (codeInput) {
+        // Picking an Egger colour turns this into an Egger board — lock the prefix
+        // and set the bare colour code, then rebuild handles the full SKU.
+        codeInput.setAttribute('data-matname-prefix', 'SHT_MFC_EGG_');
+        codeInput.value = code;
+    }
+
+    // Egger boards carry a thickness — enable the field and default to 18mm if empty.
+    const thickInput = document.querySelector(`.pnx-mat-part[data-part="thickness"][data-pnx-id="${pnxId}"]`);
+    if (thickInput) {
+        thickInput.disabled = false;
+        thickInput.removeAttribute('title');
+        if (!thickInput.value.trim()) thickInput.value = '18';
+    }
+
+    updateRowSwatch(pnxId, boardsPoId, imageUrl);
+    rebuildMatnameChange(pnxId, boardsPoId);
+    closeModal('boardEggerColoursModal');
+}
+
+// Update the row's colour swatch preview. The empty state is a placeholder
+// <span>, so swap it for an <img> (keeping the click handler) when needed.
+function updateRowSwatch(pnxId, boardsPoId, imageUrl) {
+    const swatch = document.querySelector(`.matname-swatch-btn[data-swatch-pnx-id="${pnxId}"]`);
+    if (!swatch) return;
+    if (swatch.tagName === 'IMG') {
+        swatch.src = imageUrl;
+        return;
+    }
+    const img = document.createElement('img');
+    img.src = imageUrl;
+    img.className = 'matname-swatch matname-swatch-btn';
+    img.alt = '';
+    img.loading = 'lazy';
+    img.title = 'Pick Egger colour';
+    img.setAttribute('data-swatch-pnx-id', pnxId);
+    img.setAttribute('onclick', `openRowEggerModal('${pnxId}', '${boardsPoId}')`);
+    swatch.replaceWith(img);
 }
 
 function updateEggerMaterialName() {

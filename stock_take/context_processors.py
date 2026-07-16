@@ -20,6 +20,7 @@ def user_permissions(request):
             'is_role_admin': False,
             'nav_sections': [],
             'current_location': '',
+            'current_locations': [],
             'available_locations': [],
             'linked_fitter': None,
         }
@@ -49,8 +50,10 @@ def user_permissions(request):
                 'pages': visible_pages,
             })
 
-    # Location: current selection from profile, available from DB
+    # Location: current selection from profile, available from DB.
+    # selected_location holds a comma-separated list (blank = all locations).
     current_location = profile.selected_location if profile else ''
+    current_locations = profile.selected_location_list if profile else []
     try:
         available_locations = cache.get('nav_available_locations')
         if available_locations is None:
@@ -96,6 +99,7 @@ def user_permissions(request):
         'is_role_admin': is_admin,
         'nav_sections': nav_sections,
         'current_location': current_location,
+        'current_locations': current_locations,
         'available_locations': available_locations,
         'linked_fitter': linked_fitter,
         # Ticket counts for nav badges

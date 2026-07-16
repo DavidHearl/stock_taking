@@ -127,7 +127,9 @@ def admin_users(request):
                 target_user.save(update_fields=['first_name', 'last_name', 'email'])
                 profile = target_user.profile
                 profile.phone = request.POST.get('phone', '').strip()
-                profile.selected_location = request.POST.get('location', '').strip()
+                # Location is a multi-select — store as a comma-separated list.
+                selected_locations = [loc.strip() for loc in request.POST.getlist('location') if loc.strip()]
+                profile.selected_location = ','.join(selected_locations)
                 profile.save(update_fields=['phone', 'selected_location'])
                 messages.success(request, f"Details updated for {target_user.username}.")
             except User.DoesNotExist:
@@ -188,11 +190,15 @@ def admin_users(request):
     from collections import OrderedDict
     location_groups = OrderedDict()
     for u in users:
-        loc = ''
+        locs = []
         if hasattr(u, 'profile') and u.profile:
-            loc = (u.profile.selected_location or '').strip()
-        key = loc or 'No Location'
-        location_groups.setdefault(key, []).append(u)
+            locs = u.profile.selected_location_list
+        if locs:
+            # A user assigned to several branches shows under each of them.
+            for loc in locs:
+                location_groups.setdefault(loc, []).append(u)
+        else:
+            location_groups.setdefault('No Location', []).append(u)
     # Sort: named locations alphabetically, "No Location" last
     sorted_groups = []
     for key in sorted(location_groups.keys(), key=lambda k: (k == 'No Location', k.lower())):

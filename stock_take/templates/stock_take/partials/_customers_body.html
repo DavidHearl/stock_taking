@@ -1,0 +1,512 @@
+{% comment %}
+Per-view body (table + pagination + modals) for the customers/contacts/events
+tabs. Rendered inline on first load and swapped in on AJAX tab switch — see
+customers_list.html and _customers_fragment.html. All JS lives in the parent
+template so the handlers survive a swap; keep this partial script-free.
+{% endcomment %}
+{% if view_mode == 'events' %}
+<!-- ═══════════════════════════════════════ EVENTS TAB ════════════════════════════════════════ -->
+
+{% if events %}
+<div class="customers-table-container">
+    <table class="customers-table">
+        <thead>
+            <tr>
+                <th>Activity ID</th>
+                <th>Customer</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Assigned To</th>
+                <th>Value</th>
+                <th>Contract</th>
+                <th>Date</th>
+                <th>Location</th>
+                <th>Order</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in events %}
+            <tr>
+                <td><a href="{% url 'sale_detail' event.pk %}" class="customer-name-link">{{ event.anthill_activity_id }}</a></td>
+                <td>
+                    {% if event.customer %}
+                    <a href="{% url 'customer_detail' event.customer.pk %}" class="customer-name-link">{{ event.customer.name|default:event.customer_name }}</a>
+                    {% else %}{{ event.customer_name|default:"-" }}{% endif %}
+                </td>
+                <td>{{ event.activity_type|default:"-" }}</td>
+                <td>
+                    <span class="badge customer-active-badge {% if event.status == 'won' %}active{% elif event.status == 'dead' %}danger{% else %}inactive{% endif %}">
+                        {{ event.status|default:"-" }}
+                    </span>
+                </td>
+                <td>{{ event.assigned_to_name|default:"-" }}</td>
+                <td class="text-right">{% if event.sale_value %}£{{ event.sale_value|floatformat:0 }}{% else %}-{% endif %}</td>
+                <td><span>{{ event.contract_number|default:"-" }}</span></td>
+                <td>{{ event.activity_date|date:"d/m/Y"|default:"-" }}</td>
+                <td>{{ event.location|default:"-" }}</td>
+                <td>
+                    {% if event.order %}
+                    <a href="{% url 'order_details' event.order.id %}" class="customer-order-badge">{{ event.order.sale_number }}</a>
+                    {% else %}<span class="text-muted">-</span>{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="customers-empty-state">
+    <i class="bi bi-calendar-event"></i>
+    <p>No events found.</p>
+</div>
+{% endif %}
+
+<!-- Pagination -->
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="customers-pagination">
+    <div class="pagination-info">
+        Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} events
+    </div>
+    <div class="pagination-controls">
+        {% if page_obj.has_previous %}
+        <a href="?view=events&page=1{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+        <a href="?view=events&page={{ page_obj.previous_page_number }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+        {% endif %}
+        {% for num in page_obj.paginator.page_range %}
+            {% if page_obj.number == num %}<span class="page-btn active">{{ num }}</span>
+            {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}<a href="?view=events&page={{ num }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+            {% elif num == 1 or num == page_obj.paginator.num_pages %}<a href="?view=events&page={{ num }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+            {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}<span class="page-ellipsis">&hellip;</span>
+            {% endif %}
+        {% endfor %}
+        {% if page_obj.has_next %}
+        <a href="?view=events&page={{ page_obj.next_page_number }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+        <a href="?view=events&page={{ page_obj.paginator.num_pages }}{% if category_filter %}&cat={{ category_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% elif view_mode == 'contacts' %}
+<!-- ═══════════════════════════════════════ CONTACTS TAB ═══════════════════════════════════════ -->
+
+{% if leads %}
+<div class="customers-table-container">
+    <table class="customers-table">
+        <thead>
+            <tr>
+                <th class="checkbox-col cust-w-40px"><input type="checkbox" id="select-all-leads" onclick="toggleSelectAllLeads(this)"></th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>City</th>
+                <th>Source</th>
+                <th>Status</th>
+                <th class="text-right cust-w-100px">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for lead in leads %}
+            <tr data-id="{{ lead.pk }}" data-search="{{ lead.name|lower }} {{ lead.email|lower }} {{ lead.phone|lower }} {{ lead.city|lower }} {{ lead.postcode|lower }} {{ lead.source|lower }}">
+                <td class="checkbox-col"><input type="checkbox" class="lead-select" value="{{ lead.pk }}" onclick="updateLeadSelection()"></td>
+                <td><a href="{% url 'lead_detail' lead.pk %}" class="customer-name-link">{{ lead.name|default:"-" }}</a></td>
+                <td>
+                    {% if lead.email %}
+                    <a href="mailto:{{ lead.email }}" class="customer-email">{{ lead.email }}</a>
+                    {% else %}-{% endif %}
+                </td>
+                <td class="phone-cell">{{ lead.phone|default:"-" }}</td>
+                <td>{{ lead.city|default:"-" }}</td>
+                <td>
+                    {% if lead.source %}
+                    <span class="source-badge {{ lead.source }}">{{ lead.get_source_display }}</span>
+                    {% else %}-{% endif %}
+                </td>
+                <td><span class="badge customer-active-badge {{ lead.status }}">{{ lead.get_status_display }}</span></td>
+                <td class="text-right">
+                    <button class="customer-delete-btn" onclick="deleteLeadRow({{ lead.pk }}, '{{ lead.name|escapejs }}')" title="Delete">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<!-- Pagination -->
+{% if page_obj.has_other_pages %}
+<div class="customers-pagination">
+    <div class="pagination-info">
+        Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ filtered_count|default:page_obj.paginator.count }} results
+    </div>
+    <div class="pagination-controls">
+        {% if page_obj.has_previous %}
+        <a href="?view=contacts&page=1{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+        <a href="?view=contacts&page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+        {% endif %}
+        {% for num in page_obj.paginator.page_range %}
+            {% if num == page_obj.number %}
+                <span class="page-btn active">{{ num }}</span>
+            {% elif num > page_obj.number|add:"-3" and num < page_obj.number|add:"4" %}
+                <a href="?view=contacts&page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn">{{ num }}</a>
+            {% elif num == 1 or num == page_obj.paginator.num_pages %}
+                <a href="?view=contacts&page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn">{{ num }}</a>
+            {% elif num == page_obj.number|add:"-4" or num == page_obj.number|add:"4" %}
+                <span class="page-ellipsis">&hellip;</span>
+            {% endif %}
+        {% endfor %}
+        {% if page_obj.has_next %}
+        <a href="?view=contacts&page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+        <a href="?view=contacts&page={{ page_obj.paginator.num_pages }}{% if search_query %}&q={{ search_query }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+{% else %}
+<div class="customers-empty-state">
+    <i class="bi bi-funnel"></i>
+    <p>No contacts found.</p>
+</div>
+{% endif %}
+
+<!-- Add Contact Modal -->
+<div class="modal-overlay" id="add-lead-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h2><i class="bi bi-person-plus"></i> Add New Contact</h2>
+            <button class="modal-close" onclick="document.getElementById('add-lead-modal').style.display='none'">&times;</button>
+        </div>
+        <form method="POST" action="{% url 'lead_create' %}">
+            {% csrf_token %}
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="lead-name">Name <span class="required">*</span></label>
+                    <input type="text" id="lead-name" name="name" required placeholder="Contact name">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="lead-email">Email</label>
+                        <input type="email" id="lead-email" name="email" placeholder="email@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="lead-phone">Phone</label>
+                        <input type="text" id="lead-phone" name="phone" placeholder="Phone number">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="lead-source">Source</label>
+                        <select id="lead-source" name="source" class="cust-form-select">
+                            <option value="">-- Select source --</option>
+                            {% for value, label in source_choices %}
+                            <option value="{{ value }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="lead-website">Website</label>
+                        <input type="url" id="lead-website" name="website" placeholder="https://...">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="lead-address">Address</label>
+                    <input type="text" id="lead-address" name="address_1" placeholder="Street address">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="lead-city">City</label>
+                        <input type="text" id="lead-city" name="city" placeholder="City">
+                    </div>
+                    <div class="form-group">
+                        <label for="lead-postcode">Postcode</label>
+                        <input type="text" id="lead-postcode" name="postcode" placeholder="Postcode">
+                    </div>
+                    <div class="form-group">
+                        <label for="lead-country">Country</label>
+                        <input type="text" id="lead-country" name="country" placeholder="Country">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="document.getElementById('add-lead-modal').style.display='none'">Cancel</button>
+                <button type="submit" class="btn-save">Create Contact</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Merge Contact Modal -->
+<div class="modal-overlay" id="merge-lead-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h2><i class="bi bi-arrow-left-right"></i> Merge Contacts</h2>
+            <button class="modal-close" onclick="document.getElementById('merge-lead-modal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="cust-mb-16">Choose which contact to <strong>keep</strong>. The other contact's data will be transferred into the kept contact, then the other will be deleted.</p>
+            <div class="cust-col-10">
+                <label class="cust-merge-option">
+                    <input type="radio" name="lead-merge-keep" id="lead-merge-option-0" value="" onchange="this.closest('.modal-body').querySelectorAll('label').forEach(l=>l.style.borderColor='var(--border-color)');this.closest('label').style.borderColor='var(--primary-color)';">
+                    <div><strong>Keep: <span id="lead-merge-option-0-name"></span></strong>
+                    <div class="cust-merge-sub">Delete &amp; merge in: <span id="lead-merge-option-0-remove"></span></div></div>
+                </label>
+                <label class="cust-merge-option">
+                    <input type="radio" name="lead-merge-keep" id="lead-merge-option-1" value="" onchange="this.closest('.modal-body').querySelectorAll('label').forEach(l=>l.style.borderColor='var(--border-color)');this.closest('label').style.borderColor='var(--primary-color)';">
+                    <div><strong>Keep: <span id="lead-merge-option-1-name"></span></strong>
+                    <div class="cust-merge-sub">Delete &amp; merge in: <span id="lead-merge-option-1-remove"></span></div></div>
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="document.getElementById('merge-lead-modal').style.display='none'">Cancel</button>
+            <button type="button" class="btn-save" onclick="executeLeadMerge()">Merge</button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Contact Modal -->
+<div class="modal-overlay" id="delete-lead-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h2><i class="bi bi-exclamation-triangle"></i> Delete Contact</h2>
+            <button class="modal-close" onclick="document.getElementById('delete-lead-modal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body cust-delete-body">
+            <div class="delete-modal-icon"><i class="bi bi-trash"></i></div>
+            <p>Are you sure you want to delete <span class="delete-modal-name" id="delete-lead-name"></span>?</p>
+            <p class="cust-hint">This action cannot be undone.</p>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="document.getElementById('delete-lead-modal').style.display='none'">Cancel</button>
+            <button type="button" class="btn-cancel cust-btn-danger" id="confirm-delete-lead-btn">Delete</button>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<!-- ═══════════════════════════════════════ CUSTOMERS TAB ══════════════════════════════════════ -->
+
+    {% if customers %}
+    <div class="customers-table-container">
+        <table class="customers-table">
+            <thead>
+                <tr>
+                    <th class="checkbox-col"><input type="checkbox" id="select-all" onclick="toggleSelectAll(this)"></th>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>City</th>
+                    <th>Postcode</th>
+                    <th class="text-center">Orders</th>
+                    <th>Active</th>
+                    <th class="text-center">Xero</th>
+                    <th class="text-right">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for customer in customers %}
+                <tr data-id="{{ customer.pk }}" data-search="{{ customer.name|lower }} {{ customer.email|lower }} {{ customer.phone|lower }} {{ customer.city|lower }} {{ customer.postcode|lower }}">
+                    <td class="checkbox-col"><input type="checkbox" class="row-select" value="{{ customer.pk }}" onclick="updateSelection()"></td>
+                    <td>
+                        <a href="{% url 'customer_detail' customer.pk %}" class="customer-name-link">
+                            {{ customer.name|default:customer|default:"-" }}
+                        </a>
+                    </td>
+                    <td>
+                        {% if customer.email %}
+                        <a href="mailto:{{ customer.email }}" class="customer-email">{{ customer.email }}</a>
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>{{ customer.phone|default:"-" }}</td>
+                    <td>{{ customer.city|default:"-" }}</td>
+                    <td>{{ customer.postcode|default:"-" }}</td>
+                    <td class="customer-orders-cell text-center">
+                        {% with orders=customer.orders.all %}
+                        {% if orders %}
+                        <div class="kebab-menu cust-inline-center">
+                            <button class="kebab-trigger" onclick="toggleKebab(this, event)" title="{{ orders|length }} order{{ orders|length|pluralize }}">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <span class="orders-kebab-badge">{{ orders|length }}</span>
+                            <div class="kebab-dropdown">
+                                {% for order in orders %}
+                                <a href="{% url 'order_details' order.id %}" class="kebab-item">
+                                    <i class="bi bi-box-seam"></i>
+                                    {{ order.sale_number|default:order.id }}{% if order.get_order_type_display %} &mdash; {{ order.get_order_type_display }}{% endif %}
+                                </a>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        {% else %}-{% endif %}
+                        {% endwith %}
+                    </td>
+                    <td>
+                        {% if customer.is_active %}
+                        <span class="badge customer-active-badge active">Active</span>
+                        {% else %}
+                        <span class="badge customer-active-badge inactive">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-center xero-status-cell">
+                        {% if customer.xero_id %}
+                        <i class="bi bi-check-circle-fill xero-linked" title="Linked to Xero"></i>
+                        {% else %}
+                        <i class="bi bi-x-circle xero-unlinked" title="Not in Xero"></i>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        <button class="customer-delete-btn" onclick="deleteCustomer({{ customer.pk }}, '{{ customer.name|escapejs }}')" title="Delete">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="customers-empty-state">
+        <i class="bi bi-people"></i>
+        <p>No customers found.</p>
+    </div>
+    {% endif %}
+
+    <!-- Pagination -->
+    {% if page_obj and page_obj.paginator.num_pages > 1 %}
+    <div class="customers-pagination">
+        <div class="pagination-info">
+            Showing {{ page_obj.start_index }}-{{ page_obj.end_index }} of {{ page_obj.paginator.count }} customers
+        </div>
+        <div class="pagination-controls">
+            {% if page_obj.has_previous %}
+            <a href="?page=1{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+            <a href="?page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+            {% endif %}
+
+            {% for num in page_obj.paginator.page_range %}
+                {% if page_obj.number == num %}
+                    <span class="page-btn active">{{ num }}</span>
+                {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}
+                    <a href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                {% elif num == 1 or num == page_obj.paginator.num_pages %}
+                    <a href="?page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+                {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}
+                    <span class="page-ellipsis">&hellip;</span>
+                {% endif %}
+            {% endfor %}
+
+            {% if page_obj.has_next %}
+            <a href="?page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+            <a href="?page={{ page_obj.paginator.num_pages }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+<!-- Add Customer Modal -->
+<div class="modal-overlay" id="add-customer-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h2><i class="bi bi-person-plus"></i> Add New Customer</h2>
+            <button class="modal-close" onclick="document.getElementById('add-customer-modal').style.display='none'">&times;</button>
+        </div>
+        <form method="POST" action="{% url 'customer_create' %}">
+            {% csrf_token %}
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group cust-flex-100">
+                        <label for="cust-title">Title</label>
+                        <select id="cust-title" name="title">
+                            <option value="">—</option>
+                            <option value="Mr">Mr</option>
+                            <option value="Mrs">Mrs</option>
+                            <option value="Ms">Ms</option>
+                            <option value="Miss">Miss</option>
+                            <option value="Dr">Dr</option>
+                            <option value="Prof">Prof</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="cust-first-name">First Name <span class="required">*</span></label>
+                        <input type="text" id="cust-first-name" name="first_name" required placeholder="First name">
+                    </div>
+                    <div class="form-group">
+                        <label for="cust-last-name">Last Name <span class="required">*</span></label>
+                        <input type="text" id="cust-last-name" name="last_name" required placeholder="Last name">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="cust-email">Email</label>
+                        <input type="email" id="cust-email" name="email" placeholder="email@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="cust-phone">Phone</label>
+                        <input type="text" id="cust-phone" name="phone" placeholder="Phone number">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="cust-website">Website</label>
+                    <input type="url" id="cust-website" name="website" placeholder="https://...">
+                </div>
+                <div class="form-group">
+                    <label for="cust-address">Address</label>
+                    <input type="text" id="cust-address" name="address_1" placeholder="Street address">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="cust-city">City</label>
+                        <input type="text" id="cust-city" name="city" placeholder="City">
+                    </div>
+                    <div class="form-group">
+                        <label for="cust-postcode">Postcode</label>
+                        <input type="text" id="cust-postcode" name="postcode" placeholder="Postcode">
+                    </div>
+                    <div class="form-group">
+                        <label for="cust-country">Country</label>
+                        <input type="text" id="cust-country" name="country" placeholder="Country">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="document.getElementById('add-customer-modal').style.display='none'">Cancel</button>
+                <button type="submit" class="btn-save">Create Customer</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Merge Customer Modal -->
+<div class="modal-overlay" id="merge-modal" style="display:none;" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-box">
+        <div class="modal-header">
+            <h2><i class="bi bi-arrow-left-right"></i> Merge Customers</h2>
+            <button class="modal-close" onclick="document.getElementById('merge-modal').style.display='none'">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="cust-mb-16">Choose which customer to <strong>keep</strong>. The other customer's orders and data will be transferred into the kept customer, then the other will be deleted.</p>
+            <div class="cust-col-10">
+                <label class="cust-merge-option">
+                    <input type="radio" name="merge-keep" id="merge-option-0" value="" onchange="this.closest('.modal-body').querySelectorAll('label').forEach(l=>l.style.borderColor='var(--border-color)'); this.closest('label').style.borderColor='var(--primary-color)';">
+                    <div>
+                        <strong>Keep: <span id="merge-option-0-name"></span></strong>
+                        <div class="cust-merge-sub">Delete &amp; merge in: <span id="merge-option-0-remove"></span></div>
+                    </div>
+                </label>
+                <label class="cust-merge-option">
+                    <input type="radio" name="merge-keep" id="merge-option-1" value="" onchange="this.closest('.modal-body').querySelectorAll('label').forEach(l=>l.style.borderColor='var(--border-color)'); this.closest('label').style.borderColor='var(--primary-color)';">
+                    <div>
+                        <strong>Keep: <span id="merge-option-1-name"></span></strong>
+                        <div class="cust-merge-sub">Delete &amp; merge in: <span id="merge-option-1-remove"></span></div>
+                    </div>
+                </label>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn-cancel" onclick="document.getElementById('merge-modal').style.display='none'">Cancel</button>
+            <button type="button" class="btn-save" onclick="executeMerge()">Merge</button>
+        </div>
+    </div>
+</div>
+
+{% endif %}{# end view_mode #}

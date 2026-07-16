@@ -57,7 +57,7 @@
         <nav class="sidebar-nav">
 
             <!-- General -->
-            {% if role_perms.dashboard.can_view or role_perms.fit_board.can_view or is_role_admin %}
+            {% if role_perms.dashboard.can_view or role_perms.fit_board.can_view or role_perms.website_enquiries.can_view or is_role_admin %}
             <div class="nav-section">
                 <div class="nav-section-header">General</div>
                 <div class="nav-section-content">
@@ -69,6 +69,11 @@
                     {% if role_perms.fit_board.can_view or is_role_admin %}
                     <a href="{% url 'calendar_weekly' %}" class="nav-link {% block nav_fit_board_active %}{% endblock %}" title="Calendar">
                         <i class="bi bi-calendar3"></i><span class="nav-text">Calendar</span>
+                    </a>
+                    {% endif %}
+                    {% if role_perms.website_enquiries.can_view or is_role_admin %}
+                    <a href="{% url 'website_enquiries_list' %}" class="nav-link {% block nav_enquiries_active %}{% endblock %}" title="Website Enquiries">
+                        <i class="bi bi-globe"></i><span class="nav-text">Website Enquiries</span>
                     </a>
                     {% endif %}
                     {% if role_perms.material_report.can_view or role_perms.costing_report.can_view or role_perms.remedial_report.can_view or is_role_admin %}
@@ -281,11 +286,6 @@
             <div class="nav-section">
                 <div class="nav-section-header">More</div>
                 <div class="nav-section-content">
-                    {% if role_perms.website_enquiries.can_view or is_role_admin %}
-                    <a href="{% url 'website_enquiries_list' %}" class="nav-link {% block nav_enquiries_active %}{% endblock %}" title="Website Enquiries">
-                        <i class="bi bi-globe"></i><span class="nav-text">Website Enquiries</span>
-                    </a>
-                    {% endif %}
                     {% if role_perms.claim_service.can_view or is_role_admin %}
                     <a href="{% url 'claim_service' %}" class="nav-link {% block nav_claim_service_active %}{% endblock %}" title="Claim Service">
                         <i class="bi bi-file-earmark-pdf"></i><span class="nav-text">Claim Service</span>
@@ -330,12 +330,31 @@
         </div>
         <div class="top-navbar-right">
             {% block page_actions %}{% endblock %}
-            <select class="top-location-select" id="topLocationSelect" title="Location" onchange="setLocation(this.value)">
-                <option value=""{% if not current_location %} selected{% endif %}>All Locations</option>
-                {% for loc in available_locations %}
-                <option value="{{ loc }}"{% if current_location == loc %} selected{% endif %}>{{ loc }}</option>
-                {% endfor %}
-            </select>
+			<div class="kebab-menu top-location-menu">
+				<button class="kebab-trigger kebab-trigger-labeled" onclick="toggleKebab(this, event)" title="Location" aria-label="Set location">
+					<i class="bi bi-geo-alt"></i>
+					<span class="top-location-current">{% if not current_locations %}All Locations{% elif current_locations|length == 1 %}{{ current_locations.0 }}{% else %}{{ current_locations|length }} branches{% endif %}</span>
+					<i class="bi bi-chevron-down top-location-caret"></i>
+				</button>
+				<div class="kebab-dropdown top-location-dropdown" data-keep-open>
+					<span class="kebab-label">Filter by location</span>
+					<label class="kebab-item kebab-item-toggle">
+						<span><i class="bi bi-globe"></i> All Locations</span>
+						<input type="checkbox" id="topLocationAll"{% if not current_locations %} checked{% endif %} onchange="onAllLocationsToggle(this)">
+					</label>
+					<div class="kebab-divider"></div>
+					{% for loc in available_locations %}
+					<label class="kebab-item kebab-item-toggle">
+						<span>{{ loc }}</span>
+						<input type="checkbox" class="top-location-checkbox" value="{{ loc }}"{% if loc in current_locations %} checked{% endif %} onchange="onLocationToggle()">
+					</label>
+					{% endfor %}
+					<div class="kebab-divider"></div>
+					<div class="top-location-actions">
+						<button type="button" class="btn btn-sm btn-primary" onclick="applyLocations()">Apply</button>
+					</div>
+				</div>
+			</div>
             <button class="theme-switch" id="themeToggle" onclick="toggleDarkMode()" title="Toggle theme" aria-label="Toggle light or dark theme">
                 <span class="theme-switch-track">
                     <span class="theme-switch-label theme-switch-label-dark">Dark</span>
@@ -618,15 +637,38 @@
             });
         });
 
-        // Location selector
-        function setLocation(location) {
+        // Location filter — multi-select. Users tick one or more branches (or
+        // "All Locations" to clear) then Apply to commit + reload.
+        function topLocationBranchBoxes() {
+            return Array.from(document.querySelectorAll('.top-location-checkbox'));
+        }
+        function anyBranchChecked() {
+            return topLocationBranchBoxes().some(function(c) { return c.checked; });
+        }
+        function onAllLocationsToggle(cb) {
+            if (cb.checked) {
+                // "All Locations" clears every specific branch.
+                topLocationBranchBoxes().forEach(function(c) { c.checked = false; });
+            } else if (!anyBranchChecked()) {
+                // Can't have nothing selected — re-tick "All".
+                cb.checked = true;
+            }
+        }
+        function onLocationToggle() {
+            const all = document.getElementById('topLocationAll');
+            if (all) all.checked = !anyBranchChecked();
+        }
+        function applyLocations() {
+            const locations = topLocationBranchBoxes()
+                .filter(function(c) { return c.checked; })
+                .map(function(c) { return c.value; });
             fetch("{% url 'set_location' %}", {
                 method: 'POST',
                 headers: {
                     'X-CSRFToken': '{{ csrf_token }}',
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ location: location }),
+                body: JSON.stringify({ locations: locations }),
             })
             .then(response => response.json())
             .then(data => {

@@ -2922,12 +2922,21 @@ class UserProfile(models.Model):
     """User profile to store user preferences and role assignment"""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     dark_mode = models.BooleanField(default=True, help_text='Enable dark mode theme')
-    selected_location = models.CharField(max_length=100, blank=True, default='', help_text='Currently selected site location')
+    selected_location = models.CharField(max_length=255, blank=True, default='', help_text='Selected site location filter — comma-separated list of one or more locations; blank means all locations')
     role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, related_name='users')
     phone = models.CharField(max_length=100, blank=True, default='', help_text='Contact phone number')
     dashboard_layout = models.JSONField(blank=True, null=True, help_text='Per-user dashboard widget layout config')
 
     calendar_order = models.IntegerField(default=0, help_text='Sort position in the employee calendar list')
+
+    @property
+    def selected_location_list(self):
+        """The selected_location filter parsed into a list of location names.
+
+        selected_location holds a comma-separated list (one or more locations).
+        An empty value means "all locations" and yields an empty list.
+        """
+        return [part.strip() for part in (self.selected_location or '').split(',') if part.strip()]
 
     def __str__(self):
         role_display = self.role.get_name_display() if self.role else 'No Role'

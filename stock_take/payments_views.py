@@ -13,6 +13,7 @@ from django.shortcuts import render
 
 from .models import AnthillPayment
 from .permissions import page_permission_required
+from .services.location_filter import profile_locations, location_q
 
 _PAY_PER_PAGE = 100
 
@@ -32,17 +33,14 @@ def payments_list(request):
         .select_related('sale', 'sale__customer')
     )
 
-    # Location filter — match the user's selected showroom (same behaviour as
+    # Location filter — match the user's selected showroom(s) (same behaviour as
     # the Invoices list). Falls back to showing all when no location is set.
-    location_filter = ''
     profile = getattr(request.user, 'profile', None)
-    if profile:
-        location_filter = (profile.selected_location or '').strip()
-    if location_filter:
-        qs = qs.filter(
-            Q(sale__location__icontains=location_filter)
-            | Q(location__icontains=location_filter)
-        )
+    loc_filter = location_q(
+        profile_locations(profile), 'sale__location', 'location', lookup='icontains'
+    )
+    if loc_filter:
+        qs = qs.filter(loc_filter)
 
     if source_filter == 'xero':
         qs = qs.filter(source='xero')

@@ -137,24 +137,56 @@
 	function renderAll() { renderNav(); renderRacks(); renderSummary(); renderDetail(); }
 
 	// ── Location nav ──
+	// Standard .tab-nav-pills-vertical[data-pill-slider] / .tab-button layout.
+	// Buttons are built once and then refreshed in place so the sliding pill
+	// thumb (and the observers initPillSliders wires onto them) survive
+	// re-renders; a tab click toggles .active in place, which the thumb follows.
+	function navBtnHtml(loc) {
+		var racks = racksIn(loc);
+		var devices = racks.reduce(function (s, r) { return s + r.devices.length; }, 0);
+		return '<span class="infra-loc-tab-name"><i class="bi bi-geo-alt"></i> ' + esc(loc) + '</span>' +
+			'<span class="infra-loc-tab-sub">' + racks.length + ' rack' + (racks.length === 1 ? '' : 's') +
+				' · ' + devices + ' device' + (devices === 1 ? '' : 's') + '</span>';
+	}
+
 	function renderNav() {
-		navEl.innerHTML = '';
-		LOCATIONS.forEach(function (loc) {
-			var racks = racksIn(loc);
-			var devices = racks.reduce(function (s, r) { return s + r.devices.length; }, 0);
-			var btn = document.createElement('button');
-			btn.className = 'infra-loc-tab' + (loc === activeLocation ? ' active' : '');
-			btn.innerHTML =
-				'<span class="infra-loc-tab-name"><i class="bi bi-geo-alt"></i> ' + esc(loc) + '</span>' +
-				'<span class="infra-loc-tab-sub">' + racks.length + ' rack' + (racks.length === 1 ? '' : 's') +
-					' · ' + devices + ' device' + (devices === 1 ? '' : 's') + '</span>';
-			btn.addEventListener('click', function () {
-				activeLocation = loc;
-				renderNav(); renderRacks();
+		var buttons = navEl.querySelectorAll('.tab-button');
+		var sameSet = buttons.length === LOCATIONS.length &&
+			LOCATIONS.every(function (loc, i) { return buttons[i].dataset.location === loc; });
+
+		if (sameSet) {
+			// Refresh counts + active state in place — keep the thumb + observers.
+			LOCATIONS.forEach(function (loc, i) {
+				buttons[i].innerHTML = navBtnHtml(loc);
+				buttons[i].classList.toggle('active', loc === activeLocation);
 			});
+			locTitleEl.textContent = activeLocation;
+			return;
+		}
+
+		// Location set changed — rebuild, then (re)init the pill slider.
+		navEl.innerHTML = '';
+		navEl._pillThumb = null;
+		LOCATIONS.forEach(function (loc) {
+			var btn = document.createElement('button');
+			btn.type = 'button';
+			btn.className = 'tab-button infra-loc-tab' + (loc === activeLocation ? ' active' : '');
+			btn.dataset.location = loc;
+			btn.innerHTML = navBtnHtml(loc);
+			btn.addEventListener('click', function () { selectLocation(loc); });
 			navEl.appendChild(btn);
 		});
 		locTitleEl.textContent = activeLocation;
+		if (window.initPillSliders) window.initPillSliders(navEl);
+	}
+
+	function selectLocation(loc) {
+		activeLocation = loc;
+		navEl.querySelectorAll('.tab-button').forEach(function (b) {
+			b.classList.toggle('active', b.dataset.location === loc);
+		});
+		locTitleEl.textContent = activeLocation;
+		renderRacks();
 	}
 
 	// ── Racks ──

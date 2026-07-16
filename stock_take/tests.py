@@ -18,8 +18,9 @@ from .models import (
     PurchaseOrder, Role, StockHistory, StockItem, Timesheet, UserProfile,
 )
 from .forms import BoardsPOForm, OrderForm
-from .dashboard_view import _contract_prefix_for_location, _get_monthly_sales_data
+from .dashboard_view import _contract_prefix_for_location, _get_monthly_sales_data, _contract_prefixes_for_locations
 from .permissions import get_user_permissions
+from .services.location_filter import profile_locations, location_q
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -559,9 +560,88 @@ class MonthlySalesDataTests(TestCase):
             anthill_activity_id='S5', sale_value=Decimal('2000'),
             fit_date=date(2025, 6, 10), contract_number='DUB-001',
         )
-        data = _get_monthly_sales_data(2025, 6, contract_prefix='BFS')
+        data = _get_monthly_sales_data(2025, 6, prefixes=['BFS'])
         self.assertEqual(data['count'], 1)
         self.assertEqual(data['total'], 1000.0)
+
+    def test_filtered_by_multiple_prefixes(self):
+        AnthillSale.objects.create(
+            anthill_activity_id='S6', sale_value=Decimal('1000'),
+            fit_date=date(2025, 6, 10), contract_number='BFS-001',
+        )
+        AnthillSale.objects.create(
+            anthill_activity_id='S7', sale_value=Decimal('2000'),
+            fit_date=date(2025, 6, 10), contract_number='DUB-001',
+        )
+        AnthillSale.objects.create(
+            anthill_activity_id='S8', sale_value=Decimal('4000'),
+            fit_date=date(2025, 6, 10), contract_number='NTG-001',
+        )
+        # Selecting Belfast + Dublin should combine both branches, excluding NTG.
+        data = _get_monthly_sales_data(2025, 6, prefixes=['BFS', 'DUB'])
+        self.assertEqual(data['count'], 2)
+        self.assertEqual(data['total'], 3000.0)
+
+
+class MultiLocationFilterTests(TestCase):
+    """The site-wide location filter supports one or more branches."""
+
+    def test_profile_parses_comma_list(self):
+        user = _create_user()
+        user.profile.selected_location = 'Belfast,Dublin'
+        user.profile.save()
+        self.assertEqual(user.profile.selected_location_list, ['Belfast', 'Dublin'])
+
+    def test_profile_blank_is_all(self):
+        user = _create_user()
+        self.assertEqual(user.profile.selected_location_list, [])
+
+    def test_profile_strips_and_drops_blanks(self):
+        user = _create_user()
+        user.profile.selected_location = ' Belfast , , Dublin '
+        user.profile.save()
+        self.assertEqual(user.profile.selected_location_list, ['Belfast', 'Dublin'])
+
+    def test_location_q_none_when_empty(self):
+        self.assertIsNone(location_q([], 'location'))
+
+    def test_location_q_matches_any(self):
+        _create_customer(name='A', location='Belfast')
+        _create_customer(name='B', location='Dublin')
+        _create_customer(name='C', location='Nottingham')
+        q = location_q(['Belfast', 'Dublin'], 'location')
+        names = set(Customer.objects.filter(q).values_list('name', flat=True))
+        self.assertEqual(names, {'A', 'B'})
+
+    def test_prefixes_for_multiple_locations(self):
+        self.assertEqual(_contract_prefixes_for_locations(['Belfast', 'Dublin']), ['BFS', 'DUB'])
+
+    def test_prefixes_splits_comma_entry(self):
+        # A single comma-joined entry (e.g. a raw querystring param) is split.
+        self.assertEqual(_contract_prefixes_for_locations(['Belfast,Dublin']), ['BFS', 'DUB'])
+
+    def test_prefixes_dedup_and_skip_unknown(self):
+        self.assertEqual(
+            _contract_prefixes_for_locations(['Belfast', 'belfast', 'nowhere']), ['BFS']
+        )
+
+    def test_set_location_stores_multiple(self):
+        # Only known locations (from Customer records) are accepted.
+        _create_customer(name='A', location='Belfast')
+        _create_customer(name='B', location='Dublin')
+        from django.core.cache import cache
+        cache.delete('nav_available_locations')
+        user = _create_user()
+        self.client.force_login(user)
+        resp = self.client.post(
+            reverse('set_location'),
+            data=json.dumps({'locations': ['Belfast', 'Dublin', 'Bogus']}),
+            content_type='application/json',
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(set(resp.json()['locations']), {'Belfast', 'Dublin'})
+        user.profile.refresh_from_db()
+        self.assertEqual(set(user.profile.selected_location_list), {'Belfast', 'Dublin'})
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -617,6 +697,28 @@ class DashboardViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data['success'])
+
+    def test_branch_tabs_for_multiple_selected(self):
+        self.user.profile.selected_location = 'Belfast,Dublin'
+        self.user.profile.save()
+        self.client.login(username='testuser', password='testpass123')
+        response = self.client.get(reverse('dashboard'))
+        self.assertEqual(response.context['branch_tabs'], ['Belfast', 'Dublin'])
+        self.assertEqual(response.context['active_branch'], '')
+
+    def test_branch_tab_scopes_to_one_branch(self):
+        self.user.profile.selected_location = 'Belfast,Dublin'
+        self.user.profile.save()
+        self.client.login(username='testuser', password='testpass123')
+        response = self.client.get(reverse('dashboard'), {'branch': 'Belfast'})
+        self.assertEqual(response.context['active_branch'], 'Belfast')
+
+    def test_invalid_branch_falls_back_to_combined(self):
+        self.user.profile.selected_location = 'Belfast,Dublin'
+        self.user.profile.save()
+        self.client.login(username='testuser', password='testpass123')
+        response = self.client.get(reverse('dashboard'), {'branch': 'Bogus'})
+        self.assertEqual(response.context['active_branch'], '')
 
     def test_sales_after_ajax(self):
         self.client.login(username='testuser', password='testpass123')
@@ -936,3 +1038,72 @@ class DesktopMachineViewTests(TestCase):
         }
         response = self._json_post(reverse('desktop_machine_create'), payload)
         self.assertEqual(response.status_code, 403)
+
+
+class EnquiryCustomerMatchingTests(TestCase):
+    """Matching website enquiries against existing Atlas customers."""
+
+    def _enquiry(self, **kwargs):
+        from .models import WebsiteEnquiry
+        defaults = dict(name='Jane Smith')
+        defaults.update(kwargs)
+        return WebsiteEnquiry.objects.create(**defaults)
+
+    def _match(self, enquiry):
+        from .services.enquiry_matching import find_customer_matches
+        return find_customer_matches([enquiry]).get(enquiry.pk)
+
+    def test_matches_on_email_case_insensitive(self):
+        cust = _create_customer(name='Jane Smith', email='jane@example.com')
+        enq = self._enquiry(email='JANE@example.com')
+        match = self._match(enq)
+        self.assertIsNotNone(match)
+        self.assertEqual(match['tier'], 'email')
+        self.assertEqual(match['confidence'], 'high')
+        self.assertEqual(match['customer_id'], cust.pk)
+
+    def test_matches_on_normalised_phone(self):
+        cust = _create_customer(name='Jane Smith', email='', phone='07700 900000')
+        enq = self._enquiry(email='nomatch@example.com', phone='+44 7700 900000')
+        match = self._match(enq)
+        self.assertIsNotNone(match)
+        self.assertEqual(match['tier'], 'phone')
+        self.assertEqual(match['customer_id'], cust.pk)
+
+    def test_matches_on_last_name_and_postcode_from_address(self):
+        cust = _create_customer(name='Jane Smith', email='', last_name='Smith', postcode='BT1 1AA')
+        enq = self._enquiry(name='Jane Smith', last_name='Smith', address='12 Some Road, Belfast BT1 1AA')
+        match = self._match(enq)
+        self.assertIsNotNone(match)
+        self.assertEqual(match['tier'], 'name_postcode')
+        self.assertEqual(match['customer_id'], cust.pk)
+
+    def test_no_match_returns_none(self):
+        _create_customer(name='Jane Smith', email='jane@example.com')
+        enq = self._enquiry(name='Nobody Here', email='stranger@example.com', phone='0000')
+        self.assertIsNone(self._match(enq))
+
+    def test_email_takes_priority_over_phone(self):
+        by_email = _create_customer(name='Email Match', email='jane@example.com', phone='999')
+        _create_customer(name='Phone Match', email='other@example.com', phone='07700 900000')
+        enq = self._enquiry(email='jane@example.com', phone='07700 900000')
+        match = self._match(enq)
+        self.assertEqual(match['tier'], 'email')
+        self.assertEqual(match['customer_id'], by_email.pk)
+
+    def test_order_count_included(self):
+        cust = _create_customer(name='Jane Smith', email='jane@example.com')
+        _create_order(sale_number='100001', customer=cust)
+        _create_order(sale_number='100002', customer=cust)
+        match = self._match(self._enquiry(email='jane@example.com'))
+        self.assertEqual(match['order_count'], 2)
+
+    def test_ambiguous_flag_when_multiple_customers_share_email(self):
+        _create_customer(name='First Dup', email='dup@example.com')
+        _create_customer(name='Second Dup', email='dup@example.com')
+        match = self._match(self._enquiry(email='dup@example.com'))
+        self.assertTrue(match['ambiguous'])
+
+    def test_inactive_customers_are_ignored(self):
+        _create_customer(name='Gone', email='jane@example.com', is_active=False)
+        self.assertIsNone(self._match(self._enquiry(email='jane@example.com')))

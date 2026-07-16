@@ -16,6 +16,18 @@
 {% block content %}
 <div class="dashboard-page">
 
+    {% if branch_tabs|length > 1 %}
+    <!-- Branch breakdown tabs: Combined (all selected) + one per branch -->
+    <div class="branch-tabs tab-nav-pills" data-pill-slider role="tablist" aria-label="Branch breakdown">
+        <a href="{% url 'dashboard' %}" role="tab" aria-selected="{% if not active_branch %}true{% else %}false{% endif %}" class="tab-button{% if not active_branch %} active{% endif %}">
+            <i class="bi bi-diagram-3"></i> Combined
+        </a>
+        {% for b in branch_tabs %}
+        <a href="{% url 'dashboard' %}?branch={{ b|urlencode }}" role="tab" aria-selected="{% if active_branch == b %}true{% else %}false{% endif %}" class="tab-button{% if active_branch == b %} active{% endif %}">{{ b }}</a>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     <!-- Stock Take Alert (only for ryandodson when pending) -->
     {% if request.user.username == 'ryandodson' and not hide_stock_take_widget and not stock_take_done_today %}
     <div class="db-stock-take-alert">
@@ -2342,9 +2354,11 @@ function openSalesAfterReport() {
 <!-- Stock Report Modal -->
 <dialog id="stockReportModal" class="dash-report-modal">
     <div class="dash-stock-tabs">
-        <button id="stockTabBtnReport" onclick="switchStockTab('report')" class="dash-stock-tab active"><i class="bi bi-box-seam"></i> Stock Report</button>
-        <button id="stockTabBtnChanges" onclick="switchStockTab('changes')" class="dash-stock-tab"><i class="bi bi-arrow-left-right"></i> Recent Changes</button>
-        <button id="stockTabBtnHistory" onclick="switchStockTab('history')" class="dash-stock-tab"><i class="bi bi-graph-up"></i> Monthly History</button>
+        <div class="tab-nav-pills" data-pill-slider>
+            <button id="stockTabBtnReport" onclick="switchStockTab('report')" class="tab-button active"><i class="bi bi-box-seam"></i> Stock Report</button>
+            <button id="stockTabBtnChanges" onclick="switchStockTab('changes')" class="tab-button"><i class="bi bi-arrow-left-right"></i> Recent Changes</button>
+            <button id="stockTabBtnHistory" onclick="switchStockTab('history')" class="tab-button"><i class="bi bi-graph-up"></i> Monthly History</button>
+        </div>
         <span id="stockReportMeta" class="dash-report-meta dash-stock-tab-meta"></span>
         <a href="{% url 'report_stock_page' %}" target="_blank" class="dash-report-pdf-btn dash-flex-shrink-0" title="Open as full page">
             <i class="bi bi-box-arrow-up-right"></i> Full Page
@@ -2388,23 +2402,20 @@ function switchStockTab(tab) {
     const meta = document.getElementById('stockReportMeta');
 
     [reportBody, changesBody, historyBody].forEach(b => b.style.display = 'none');
-    [tabReport, tabChanges, tabHistory].forEach(b => { b.style.color = 'var(--text-secondary)'; b.style.borderBottomColor = 'transparent'; });
+    [tabReport, tabChanges, tabHistory].forEach(b => b.classList.remove('active'));
     pdfBtn.style.display = 'none';
 
     if (tab === 'report') {
         reportBody.style.display = '';
-        tabReport.style.color = 'var(--text-primary)';
-        tabReport.style.borderBottomColor = '#2f6bf6';
+        tabReport.classList.add('active');
         pdfBtn.style.display = '';
     } else if (tab === 'changes') {
         changesBody.style.display = '';
-        tabChanges.style.color = 'var(--text-primary)';
-        tabChanges.style.borderBottomColor = '#2f6bf6';
+        tabChanges.classList.add('active');
         meta.textContent = '';
     } else {
         historyBody.style.display = '';
-        tabHistory.style.color = 'var(--text-primary)';
-        tabHistory.style.borderBottomColor = '#2f6bf6';
+        tabHistory.classList.add('active');
         meta.textContent = '';
         if (!_stockHistoryLoaded) loadStockHistory();
     }

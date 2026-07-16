@@ -23,6 +23,7 @@ from django.utils import timezone
 
 
 from .models import Invoice, OverheadPurchaseOrder, PurchaseInvoice, PurchaseOrder, PurchaseOrderProduct, AnthillSale, Customer, Order, EnabledGLCode, Supplier
+from .services.location_filter import profile_locations, location_q
 
 logger = logging.getLogger(__name__)
 
@@ -206,12 +207,11 @@ def _sales_invoices_context(request, status_filter, search_query, page_num):
     """Build context for the Sales Invoices tab."""
     qs = Invoice.objects.all()
 
-    # Location filter — match Anthill sync behaviour
-    location_filter = ''
-    if hasattr(request.user, 'profile'):
-        location_filter = (request.user.profile.selected_location or '').strip()
-    if location_filter:
-        qs = qs.filter(showroom__icontains=location_filter)
+    # Location filter — match Anthill sync behaviour (any selected branch)
+    profile = getattr(request.user, 'profile', None)
+    loc_filter = location_q(profile_locations(profile), 'showroom', lookup='icontains')
+    if loc_filter:
+        qs = qs.filter(loc_filter)
 
     # Status / payment filters
     if status_filter == 'unpaid':
@@ -907,6 +907,9 @@ def scrape_anthill_payments(period='last_28_days', location_filter='', emit=None
         raise RuntimeError('Playwright is not installed on the server.')
 
     filtered_out = 0
+    # location_filter may hold one or more comma-separated branches; a row is kept
+    # when its showroom matches ANY of them.
+    loc_filters = [x.strip().lower() for x in (location_filter or '').split(',') if x.strip()]
     loc_label = location_filter or 'All Locations'
     scraped_rows = []   # collect raw payment dicts here
 
@@ -983,10 +986,10 @@ def scrape_anthill_payments(period='last_28_days', location_filter='', emit=None
                 if not pay:
                     continue
 
-                # Filter by selected location
-                if location_filter:
+                # Filter by selected location(s) — keep the row if it matches any
+                if loc_filters:
                     row_showroom = (pay['showroom'] or '').strip().lower()
-                    if location_filter.lower() not in row_showroom:
+                    if not any(lf in row_showroom for lf in loc_filters):
                         filtered_out += 1
                         continue
 

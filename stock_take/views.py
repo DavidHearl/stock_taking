@@ -12075,16 +12075,19 @@ def calendar_view(request):
     # ── Employee calendar data ────────────────────────────────────────────────
     from .models import EmployeeCalendarEntry, EmployeeCalendarRule
     from django.contrib.auth.models import User
-    # Filter employees for the employee calendar by the user's selected location.
-    _emp_location = ''
+    # Filter employees for the employee calendar by the user's selected location(s).
+    # Show colleagues whose own selected_location overlaps ANY of the current
+    # selection (selected_location holds a comma-separated list of branches).
+    from .services.location_filter import profile_locations, location_q
+    _emp_locs = []
     try:
-        _emp_location = (request.user.profile.selected_location or '').strip()
+        _emp_locs = profile_locations(request.user.profile)
     except Exception:
         pass
-    if _emp_location:
-        emp_user_qs = User.objects.filter(
-            is_active=True, profile__selected_location__iexact=_emp_location
-        ).order_by('profile__calendar_order', 'first_name', 'last_name', 'username')
+    _emp_loc_q = location_q(_emp_locs, 'profile__selected_location', lookup='icontains')
+    if _emp_loc_q:
+        emp_user_qs = User.objects.filter(is_active=True).filter(_emp_loc_q).order_by(
+            'profile__calendar_order', 'first_name', 'last_name', 'username')
     else:
         emp_user_qs = User.objects.filter(is_active=True).order_by('profile__calendar_order', 'first_name', 'last_name', 'username')
 

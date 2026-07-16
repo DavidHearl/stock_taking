@@ -5,6 +5,7 @@ from django.db.models import Count, Max, Sum, Q, Exists, OuterRef, F
 from django.db import ProgrammingError, DatabaseError, transaction
 from django.contrib import messages
 from .models import Customer, Order, PurchaseOrder, AnthillSale, AnthillPayment, Invoice, SyncLog, Lead, SaleCoverSheet, SaleCoverSheetHistory, ClaimDocument, Designer
+from .services.location_filter import profile_locations, location_q
 import logging
 import json
 import time
@@ -14,6 +15,18 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 logger = logging.getLogger(__name__)
+
+
+def _render_customers(request, context):
+	"""Render the customers page, or just the tab fragment for an AJAX tab switch.
+
+	The Customers / Contacts / Events pills fetch this view with an
+	X-Requested-With header and swap in only the toolbar + body fragment (see
+	switchCustomerTab in customers_list.html); a normal load returns the full page.
+	"""
+	if request.headers.get('x-requested-with') == 'XMLHttpRequest':
+		return render(request, 'stock_take/partials/_customers_fragment.html', context)
+	return render(request, 'stock_take/customers_list.html', context)
 
 
 @login_required
@@ -38,12 +51,13 @@ def customers_list(request):
         category_filter = request.GET.get('cat', '').strip()
 
         profile = getattr(request.user, 'profile', None)
-        location_filter = profile.selected_location if profile else ''
+        loc_filter = location_q(profile_locations(profile), 'location')
+        location_filter = profile.selected_location if profile else ''  # display label for the toolbar badge
 
         events_base = AnthillSale.objects.select_related('customer', 'order').order_by('-activity_date')
 
-        if location_filter and not search_query:
-            events_base = events_base.filter(location__iexact=location_filter)
+        if loc_filter and not search_query:
+            events_base = events_base.filter(loc_filter)
 
         if category_filter:
             events_base = events_base.filter(category=category_filter)
@@ -84,7 +98,7 @@ def customers_list(request):
             'source_choices': Lead.SOURCE_CHOICES,
             'status_choices': Lead.STATUS_CHOICES,
         }
-        return render(request, 'stock_take/customers_list.html', context)
+        return _render_customers(request, context)
 
     # ── Contacts (Leads) view ────────────────────────────────────────────
     if view_mode == 'contacts':
@@ -144,14 +158,15 @@ def customers_list(request):
             'status_choices': Lead.STATUS_CHOICES,
             'source_choices': Lead.SOURCE_CHOICES,
         }
-        return render(request, 'stock_take/customers_list.html', context)
+        return _render_customers(request, context)
 
     # ── Customers view (default) ─────────────────────────────────────────
     search_query = request.GET.get('q', '').strip()
 
     # Location comes from the user's profile (site-wide setting)
     profile = getattr(request.user, 'profile', None)
-    location_filter = profile.selected_location if profile else ''
+    loc_filter = location_q(profile_locations(profile), 'location')
+    location_filter = profile.selected_location if profile else ''  # display label for the toolbar badge
 
     from django.db.models import Prefetch
     customers_base = Customer.objects.prefetch_related(
@@ -160,8 +175,8 @@ def customers_list(request):
 
     # Apply location filter from profile (skip when searching so results
     # include customers whose record has no location set)
-    if location_filter and not search_query:
-        customers_base = customers_base.filter(location__iexact=location_filter)
+    if loc_filter and not search_query:
+        customers_base = customers_base.filter(loc_filter)
 
     # Build search Q filter
     if search_query:
@@ -206,7 +221,7 @@ def customers_list(request):
         'status_choices': Lead.STATUS_CHOICES,
     }
 
-    return render(request, 'stock_take/customers_list.html', context)
+    return _render_customers(request, context)
 
 
 @login_required
@@ -560,119 +575,6 @@ def customer_create(request):
 # Events / Sales views
 # ════════════════════════════════════════════════════════════════════════
 
-@login_required
-def events_list(request):
-    """Display list of ALL Anthill events (all categories) with search, category filter, and date-bracket filters."""
-    from django.utils import timezone
-    from django.core.paginator import Paginator
-    from datetime import timedelta
-
-    search_query = request.GET.get('q', '').strip()
-    age_filter = request.GET.get('age', '1y')
-    category_filter = request.GET.get('cat', '').strip()
-
-    # Location from user profile
-    profile = getattr(request.user, 'profile', None)
-    location_filter = profile.selected_location if profile else ''
-
-    now = timezone.now()
-    cutoff_1y = now - timedelta(days=365)
-    cutoff_2y = now - timedelta(days=730)
-
-    # All events
-    events_base = AnthillSale.objects.select_related('customer', 'order').order_by('-activity_date')
-
-    if location_filter and not search_query:
-        events_base = events_base.filter(location__iexact=location_filter)
-
-    # Category filter
-    if category_filter:
-        events_base = events_base.filter(category=category_filter)
-
-    # Search — split into individual terms so multi-word searches work
-    search_q = None
-    if search_query:
-        terms = search_query.split()
-        per_term_qs = []
-        for term in terms:
-            per_term_qs.append(
-                Q(customer_name__icontains=term) |
-                Q(anthill_activity_id__icontains=term) |
-                Q(activity_type__icontains=term) |
-                Q(status__icontains=term) |
-                Q(assigned_to_name__icontains=term) |
-                Q(contract_number__icontains=term) |
-                Q(source__icontains=term) |
-                Q(customer__name__icontains=term) |
-                Q(customer__first_name__icontains=term) |
-                Q(customer__last_name__icontains=term)
-            )
-        search_q = per_term_qs[0]
-        for extra in per_term_qs[1:]:
-            search_q &= extra
-
-    # Date bracket filters
-    def bracket_filter(qs, bracket):
-        if bracket == '1y':
-            return qs.exclude(activity_type__istartswith='Historic').filter(activity_date__gte=cutoff_1y)
-        elif bracket == '1_2y':
-            return qs.exclude(activity_type__istartswith='Historic').filter(activity_date__gte=cutoff_2y, activity_date__lt=cutoff_1y)
-        elif bracket == '2_10y':
-            return qs.exclude(activity_type__istartswith='Historic').filter(activity_date__lt=cutoff_2y).exclude(activity_date__isnull=True)
-        elif bracket == 'historic':
-            return qs.filter(activity_type__istartswith='Historic')
-        return qs
-
-    count_1y = bracket_filter(events_base, '1y').count()
-    count_1_2y = bracket_filter(events_base, '1_2y').count()
-    count_2_10y = bracket_filter(events_base, '2_10y').count()
-    count_historic = bracket_filter(events_base, 'historic').count()
-
-    events = bracket_filter(events_base, age_filter)
-
-    search_expanded_from = None
-    if search_q:
-        filtered = events.filter(search_q)
-        if filtered.exists():
-            events = filtered
-        else:
-            bracket_order = ['1y', '1_2y', '2_10y', 'historic']
-            try:
-                start_idx = bracket_order.index(age_filter) + 1
-            except ValueError:
-                start_idx = 0
-            remaining = bracket_order[start_idx:] + bracket_order[:bracket_order.index(age_filter)]
-            for bracket in remaining:
-                expanded_qs = bracket_filter(events_base, bracket).filter(search_q)
-                if expanded_qs.exists():
-                    events = expanded_qs
-                    search_expanded_from = bracket
-                    break
-            else:
-                events = filtered
-
-    page_number = request.GET.get('page', 1)
-    paginator = Paginator(events, 100)
-    page_obj = paginator.get_page(page_number)
-
-    context = {
-        'events': page_obj,
-        'page_obj': page_obj,
-        'filtered_count': paginator.count,
-        'search_query': search_query,
-        'age_filter': age_filter,
-        'category_filter': category_filter,
-        'location_filter': location_filter,
-        'count_1y': count_1y,
-        'count_1_2y': count_1_2y,
-        'count_2_10y': count_2_10y,
-        'count_historic': count_historic,
-        'search_expanded_from': search_expanded_from,
-    }
-
-    return render(request, 'stock_take/events_list.html', context)
-
-
 def _duplicate_sale_pks_to_drop(sales_qs):
     """Return the set of AnthillSale PKs to hide so each sale appears only once.
 
@@ -737,9 +639,10 @@ def sales_list(request):
     search_query = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', 'open')
 
-    # Location from user profile
+    # Location from user profile (one or more selected branches)
     profile = getattr(request.user, 'profile', None)
-    location_filter = profile.selected_location if profile else ''
+    locs = profile_locations(profile)
+    location_filter = profile.selected_location if profile else ''  # display label for the toolbar badge
 
     # Only Category 3 = actual sales (Room Sale + Historic Sale), exclude Cancelled
     sales_base = AnthillSale.objects.select_related('customer', 'order', 'order__designer').filter(
@@ -756,26 +659,27 @@ def sales_list(request):
     if duplicate_pks:
         sales_base = sales_base.exclude(pk__in=duplicate_pks)
 
-    if location_filter:
+    if locs:
         # The location field on AnthillSale holds dirty/incorrect data for many
         # historical records, so the contract number prefix is the authoritative branch
-        # signal (e.g. "BFS-..." = Belfast, "DUB-..." = Dublin). Keep a sale when either:
-        #   * its contract number starts with this branch's prefix, or
+        # signal (e.g. "BFS-..." = Belfast, "DUB-..." = Dublin). Keep a sale when it
+        # matches ANY selected branch, where a branch matches when either:
+        #   * its contract number starts with that branch's prefix, or
         #   * it has no recognisable branch prefix (bare number / non-standard ref) AND
         #     its location field matches the selected branch.
-        # Sales with a *different* branch prefix, or prefix-less sales whose location
-        # points elsewhere, are excluded. This is applied even while searching so the
-        # selected showroom always scopes the results.
+        # Sales whose prefix/location points only at unselected branches are excluded.
+        # This is applied even while searching so the selected showrooms always scope
+        # the results.
         from .dashboard_view import _contract_prefix_for_location
-        prefix = _contract_prefix_for_location(location_filter)
-        if prefix:
-            no_branch_prefix = ~Q(contract_number__iregex=r'^[A-Za-z]{3}-')
-            sales_base = sales_base.filter(
-                Q(contract_number__istartswith=prefix)
-                | (no_branch_prefix & Q(location__iexact=location_filter))
-            )
-        else:
-            sales_base = sales_base.filter(location__iexact=location_filter)
+        no_branch_prefix = ~Q(contract_number__iregex=r'^[A-Za-z]{3}-')
+        branch_q = Q()
+        for loc in locs:
+            prefix = _contract_prefix_for_location(loc)
+            if prefix:
+                branch_q |= Q(contract_number__istartswith=prefix) | (no_branch_prefix & Q(location__iexact=loc))
+            else:
+                branch_q |= Q(location__iexact=loc)
+        sales_base = sales_base.filter(branch_q)
 
     # Search — split into individual terms so multi-word searches work
     search_q = None

@@ -13,28 +13,23 @@
 
 {% block content %}
 <div class="enq-toolbar">
+    <div class="tab-nav-pills" data-pill-slider>
+        <a href="?status=all{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'all' %}active{% endif %}">
+            All Enquiries <span class="enq-tab-count">{{ counts.all }}</span>
+        </a>
+        <a href="?status=converted{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if status_filter == 'converted' %}active{% endif %}">
+            Converted <span class="enq-tab-count">{{ counts.converted }}</span>
+        </a>
+    </div>
+
     <div class="search-input-wrapper enq-search-wrap">
         <i class="bi bi-search"></i>
         <input type="text" id="enq-search" placeholder="Search by name, email, subject…" value="{{ search_query }}" autocomplete="off">
     </div>
 
-    <div class="enq-tabs">
-        <a href="?status=all{% if search_query %}&q={{ search_query }}{% endif %}" class="enq-tab {% if status_filter == 'all' %}active{% endif %}">
-            All <span class="enq-count">{{ counts.all }}</span>
-        </a>
-        <a href="?status=new{% if search_query %}&q={{ search_query }}{% endif %}" class="enq-tab {% if status_filter == 'new' %}active{% endif %}">
-            New <span class="enq-count">{{ counts.new }}</span>
-        </a>
-        <a href="?status=contacted{% if search_query %}&q={{ search_query }}{% endif %}" class="enq-tab {% if status_filter == 'contacted' %}active{% endif %}">
-            Contacted <span class="enq-count">{{ counts.contacted }}</span>
-        </a>
-        <a href="?status=converted{% if search_query %}&q={{ search_query }}{% endif %}" class="enq-tab {% if status_filter == 'converted' %}active{% endif %}">
-            Converted <span class="enq-count">{{ counts.converted }}</span>
-        </a>
-        <a href="?status=closed{% if search_query %}&q={{ search_query }}{% endif %}" class="enq-tab {% if status_filter == 'closed' %}active{% endif %}">
-            Closed <span class="enq-count">{{ counts.closed }}</span>
-        </a>
-    </div>
+    <button type="button" class="enq-chart-btn" onclick="openSourceModal()" title="Source distribution">
+        <i class="bi bi-bar-chart-line"></i><span>Source Chart</span>
+    </button>
 </div>
 
 <div class="enq-table-wrap">
@@ -43,8 +38,10 @@
         <thead>
             <tr>
                 <th>Name</th>
-                <th>Contact</th>
-                <th>Subject / Message</th>
+                <th>Atlas Customer</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th class="enq-msg-col">Msg</th>
                 <th>Source</th>
                 <th>Received</th>
                 <th>Status</th>
@@ -68,19 +65,47 @@
                 data-source="{{ enq.source|escapejs }}"
                 data-status="{{ enq.status }}"
                 data-notes="{{ enq.notes|escapejs }}"
+                {% if enq.match %}
+                data-match-basis="{{ enq.match.basis }}"
+                data-match-label="{{ enq.match.label|escapejs }}"
+                data-match-confidence="{{ enq.match.confidence }}"
+                data-match-customer-id="{{ enq.match.customer_id }}"
+                data-match-customer-name="{{ enq.match.customer_name|escapejs }}"
+                data-match-order-count="{{ enq.match.order_count }}"
+                data-match-ambiguous="{{ enq.match.ambiguous|yesno:'true,false' }}"
+                {% endif %}
                 data-received="{{ enq.received_at|date:'d/m/Y H:i' }}">
                 <td>
                     <div class="enq-name">{{ enq.name|default:"—" }}</div>
                 </td>
                 <td>
-                    <div class="enq-contact">
-                        {% if enq.email %}<a href="mailto:{{ enq.email }}">{{ enq.email }}</a>{% else %}<span class="enq-contact-phone">—</span>{% endif %}
-                        {% if enq.phone %}<div class="enq-contact-phone">{{ enq.phone }}</div>{% endif %}
-                    </div>
+                    {% if enq.match %}
+                    <a class="enq-match {{ enq.match.confidence }}" href="{% url 'customer_detail' enq.match.customer_id %}" title="Matched by {{ enq.match.basis }} — {{ enq.match.customer_name }}">
+                        <i class="bi bi-person-check"></i>
+                        <span class="enq-match-label">{{ enq.match.label }}</span>
+                        {% if enq.match.order_count %}<span class="enq-match-orders">{{ enq.match.order_count }} order{{ enq.match.order_count|pluralize }}</span>{% endif %}
+                    </a>
+                    {% else %}
+                    <span class="enq-match new" title="No matching customer found in Atlas">
+                        <i class="bi bi-star"></i>
+                        <span class="enq-match-label">New lead</span>
+                    </span>
+                    {% endif %}
                 </td>
                 <td>
-                    {% if enq.subject %}<div class="enq-subject">{{ enq.subject }}</div>{% endif %}
-                    {% if enq.message %}<div class="enq-message-preview">{{ enq.message|truncatechars:100 }}</div>{% endif %}
+                    {% if enq.email %}<a class="enq-email" href="mailto:{{ enq.email }}">{{ enq.email }}</a>{% else %}<span class="enq-cell-empty">—</span>{% endif %}
+                </td>
+                <td>
+                    {% if enq.phone %}<span class="enq-phone">{{ enq.phone }}</span>{% else %}<span class="enq-cell-empty">—</span>{% endif %}
+                </td>
+                <td class="enq-msg-col">
+                    {% if enq.subject or enq.message %}
+                    <button class="enq-btn-icon enq-msg-btn" type="button" title="View message" onclick="showMessagePopover(event, this)">
+                        <i class="bi bi-chat-left-text"></i>
+                    </button>
+                    {% else %}
+                    <span class="enq-cell-empty">—</span>
+                    {% endif %}
                 </td>
                 <td><span class="enq-source">{{ enq.source|default:"—" }}</span></td>
                 <td><span class="enq-date">{{ enq.received_at|date:"d/m/Y H:i" }}</span></td>
@@ -111,6 +136,31 @@
     {% endif %}
 </div>
 
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="enq-pagination">
+    <div class="pagination-info">
+        Showing {{ page_obj.start_index }}–{{ page_obj.end_index }} of {{ page_obj.paginator.count }} enquiries
+    </div>
+    <div class="pagination-controls">
+        {% if page_obj.has_previous %}
+        <a href="?status={{ status_filter }}&page=1{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="First">&laquo;</a>
+        <a href="?status={{ status_filter }}&page={{ page_obj.previous_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Previous">&lsaquo;</a>
+        {% endif %}
+        {% for num in page_obj.paginator.page_range %}
+            {% if page_obj.number == num %}<span class="page-btn active">{{ num }}</span>
+            {% elif num > page_obj.number|add:'-4' and num < page_obj.number|add:'4' %}<a href="?status={{ status_filter }}&page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+            {% elif num == 1 or num == page_obj.paginator.num_pages %}<a href="?status={{ status_filter }}&page={{ num }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn">{{ num }}</a>
+            {% elif num == page_obj.number|add:'-4' or num == page_obj.number|add:'4' %}<span class="page-ellipsis">&hellip;</span>
+            {% endif %}
+        {% endfor %}
+        {% if page_obj.has_next %}
+        <a href="?status={{ status_filter }}&page={{ page_obj.next_page_number }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Next">&rsaquo;</a>
+        <a href="?status={{ status_filter }}&page={{ page_obj.paginator.num_pages }}{% if search_query %}&q={{ search_query }}{% endif %}" class="page-btn" title="Last">&raquo;</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
 <!-- Detail drawer -->
 <div class="enq-drawer-backdrop" id="enq-drawer-backdrop" onclick="closeDrawer(event)">
     <div class="enq-drawer" id="enq-drawer" onclick="event.stopPropagation()">
@@ -122,6 +172,10 @@
             <div class="enq-drawer-field">
                 <div class="enq-drawer-label">Name</div>
                 <div class="enq-drawer-value" id="drawer-name"></div>
+            </div>
+            <div class="enq-drawer-field" id="drawer-match-field">
+                <div class="enq-drawer-label">Atlas Customer</div>
+                <div class="enq-drawer-value" id="drawer-match"></div>
             </div>
             <div class="enq-drawer-field" id="drawer-first-name-field">
                 <div class="enq-drawer-label">First Name</div>
@@ -199,9 +253,35 @@
     </div>
 </div>
 
+<!-- Message popover -->
+<div class="enq-msg-popover" id="enq-msg-popover"></div>
+
+<!-- Source distribution chart modal (standard modal) -->
+<div class="modal" id="sourceChartModal">
+    <div class="modal-overlay" onclick="closeModal('sourceChartModal')"></div>
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Enquiries by Source</h3>
+                <button type="button" class="modal-close" onclick="closeModal('sourceChartModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="enq-modal-chart-wrap">
+                    <canvas id="sourceChart"></canvas>
+                </div>
+                <div class="enq-modal-empty" id="enq-source-empty" style="display:none;">
+                    <i class="bi bi-bar-chart-line"></i>
+                    <p>No enquiries to chart yet.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 const CSRF_TOKEN = '{{ csrf_token }}';
 let currentEnquiryId = null;
@@ -264,6 +344,7 @@ document.getElementById('enq-search').addEventListener('keydown', function(e) {
         } else {
             url.searchParams.delete('q');
         }
+        url.searchParams.delete('page'); // new search resets to the first page
         window.location.href = url.toString();
     }
 });
@@ -290,6 +371,20 @@ function openDrawer(row) {
     currentEnquiryId = parseInt(row.dataset.id);
     document.getElementById('drawer-title').textContent = row.dataset.name || 'Enquiry';
     document.getElementById('drawer-name').textContent = row.dataset.name || '—';
+
+    const matchEl = document.getElementById('drawer-match');
+    if (row.dataset.matchCustomerId) {
+        const orders = parseInt(row.dataset.matchOrderCount || '0');
+        const ordersText = orders ? ` · ${orders} order${orders === 1 ? '' : 's'}` : '';
+        const ambiguous = row.dataset.matchAmbiguous === 'true'
+            ? ' <span class="enq-match-note">(multiple possible matches)</span>' : '';
+        matchEl.innerHTML =
+            `<a href="/customer/${row.dataset.matchCustomerId}/" class="enq-match-link ${row.dataset.matchConfidence}">`
+            + `<i class="bi bi-person-check"></i> ${escapeHtml(row.dataset.matchCustomerName || 'Customer')}</a>`
+            + `<div class="enq-match-meta">${escapeHtml(row.dataset.matchLabel || '')} · matched by ${escapeHtml(row.dataset.matchBasis || '')}${ordersText}${ambiguous}</div>`;
+    } else {
+        matchEl.innerHTML = '<span class="enq-match-note">No matching customer in Atlas — new lead.</span>';
+    }
 
     const firstNameField = document.getElementById('drawer-first-name-field');
     const firstNameEl = document.getElementById('drawer-first-name');
@@ -472,6 +567,93 @@ function deleteEnquiry(id, name) {
         }
     })
     .catch(() => alert('Network error — please try again.'));
+}
+
+// ── Message popover ────────────────────────────────────────────────────────
+function showMessagePopover(event, btn) {
+    event.stopPropagation();
+    const row = btn.closest('tr');
+    const pop = document.getElementById('enq-msg-popover');
+    const subject = row.dataset.subject || '';
+    const message = row.dataset.message || '';
+
+    let html = '';
+    if (subject) html += `<div class="enq-msg-pop-subject">${escapeHtml(subject)}</div>`;
+    if (message) html += `<div class="enq-msg-pop-body">${escapeHtml(message)}</div>`;
+    if (!html) html = '<div class="enq-msg-pop-body enq-match-note">No message.</div>';
+    pop.innerHTML = html;
+
+    // position: fixed — use viewport coordinates directly
+    const rect = btn.getBoundingClientRect();
+    const popWidth = 320;
+    let left = rect.left;
+    if (left + popWidth > window.innerWidth - 12) {
+        left = Math.max(12, window.innerWidth - popWidth - 12);
+    }
+    pop.style.left = left + 'px';
+    pop.style.top = (rect.bottom + 6) + 'px';
+    pop.classList.add('open');
+
+    setTimeout(() => document.addEventListener('click', closeMsgPopoverOnce), 0);
+}
+
+function closeMsgPopoverOnce(e) {
+    const pop = document.getElementById('enq-msg-popover');
+    if (!pop.contains(e.target)) {
+        pop.classList.remove('open');
+        document.removeEventListener('click', closeMsgPopoverOnce);
+    }
+}
+
+// ── Source distribution chart modal ────────────────────────────────────────
+const SOURCE_DIST = {{ source_distribution_json|safe }};
+let sourceChartInstance = null;
+
+function openSourceModal() {
+    openModal('sourceChartModal');
+    // Render once the modal is visible so the canvas can measure its box.
+    if (!sourceChartInstance) renderSourceChart();
+}
+
+function renderSourceChart() {
+    const emptyEl = document.getElementById('enq-source-empty');
+    const canvas = document.getElementById('sourceChart');
+    if (!SOURCE_DIST.length || typeof Chart === 'undefined') {
+        canvas.style.display = 'none';
+        emptyEl.style.display = '';
+        return;
+    }
+
+    const styles = getComputedStyle(document.body);
+    const primary = (styles.getPropertyValue('--primary-color') || '#4f46e5').trim();
+    const grid = (styles.getPropertyValue('--border-color') || 'rgba(255,255,255,0.1)').trim();
+    const text = (styles.getPropertyValue('--text-secondary') || '#888').trim();
+
+    sourceChartInstance = new Chart(canvas.getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: SOURCE_DIST.map(d => d.label),
+            datasets: [{
+                data: SOURCE_DIST.map(d => d.count),
+                backgroundColor: primary,
+                borderRadius: 4,
+                maxBarThickness: 34,
+            }],
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: { label: ctx => ` ${ctx.parsed.x} enquir${ctx.parsed.x === 1 ? 'y' : 'ies'}` } },
+            },
+            scales: {
+                x: { beginAtZero: true, ticks: { precision: 0, color: text }, grid: { color: grid } },
+                y: { ticks: { color: text }, grid: { display: false } },
+            },
+        },
+    });
 }
 </script>
 {% endblock %}

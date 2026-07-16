@@ -2020,7 +2020,6 @@
                     <table class="table po-sub-table">
                         <thead>
                             <tr>
-                                <th class="po-col-badge"></th>
                                 <th>PO Number</th>
                                 <th>Supplier</th>
                                 <th>Status</th>
@@ -2031,7 +2030,6 @@
                         <tbody>
                         {% for bpd in boards_po_list %}
                         <tr>
-                            <td class="po-col-badge"><span class="po-role-badge {% if bpd.is_primary %}primary{% else %}additional{% endif %}">{% if bpd.is_primary %}P{% else %}A{% endif %}</span></td>
                             <td>
                                 {% if bpd.purchase_order %}<a href="{% url 'purchase_order_detail' bpd.purchase_order.workguru_id %}">{{ bpd.po.po_number }}</a>{% else %}{{ bpd.po.po_number }}{% endif %}
                             </td>
@@ -2068,6 +2066,38 @@
                     </div>
                 </div>
 
+                <!-- OS DOORS POs section -->
+                <div class="po-type-section">
+                    <div class="po-type-section-header">
+                        <span class="po-type-section-title">OS Doors POs</span>
+                    </div>
+                    <table class="table po-sub-table" id="os-doors-pos-table" style="display:none;">
+                        <thead>
+                            <tr>
+                                <th>PO Number</th>
+                                <th>Supplier</th>
+                                <th>Status</th>
+                                <th class="po-col-num">Total</th>
+                                <th class="po-col-actions">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for item in sale_purchase_orders %}
+                        {% if item.type == 'OS Doors' %}
+                        <tr>
+                            <td><a href="{% url 'purchase_order_detail' item.po.workguru_id %}">{{ item.po.display_number|default:item.po.number }}</a></td>
+                            <td class="po-col-supplier">{{ item.po.supplier_name|default:"-" }}</td>
+                            <td><span class="badge customer-active-badge {% if item.po.status == 'Approved' or item.po.status == 'Received' %}active{% elif item.po.status == 'Cancelled' %}danger{% else %}inactive{% endif %}">{{ item.po.status|default:"-" }}</span></td>
+                            <td class="po-col-num">{% if item.po.total %}£{{ item.po.total|floatformat:2 }}{% else %}—{% endif %}</td>
+                            <td class="po-col-actions"><a href="{% url 'purchase_order_detail' item.po.workguru_id %}" class="btn btn-sm btn-view-po"><i class="bi bi-eye"></i></a></td>
+                        </tr>
+                        {% endif %}
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                    <div id="os-doors-pos-empty" class="po-empty-section">No OS Doors POs linked</div>
+                </div>
+
                 <!-- PROJECT POs section -->
                 {% with has_project_pos=False %}
                 {% for item in sale_purchase_orders %}{% if item.type == 'Project' %}{% with has_project_pos=True %}{% endwith %}{% endif %}{% endfor %}
@@ -2079,7 +2109,6 @@
                     <table class="table po-sub-table" id="project-pos-table" style="display:none;">
                         <thead>
                             <tr>
-                                <th class="po-col-badge"></th>
                                 <th>PO Number</th>
                                 <th>Supplier</th>
                                 <th>Status</th>
@@ -2091,7 +2120,6 @@
                         {% for item in sale_purchase_orders %}
                         {% if item.type == 'Project' %}
                         <tr>
-                            <td class="po-col-badge"><span class="po-role-badge additional">P</span></td>
                             <td><a href="{% url 'purchase_order_detail' item.po.workguru_id %}">{{ item.po.display_number|default:item.po.number }}</a></td>
                             <td class="po-col-supplier">{{ item.po.supplier_name|default:"-" }}</td>
                             <td><span class="badge customer-active-badge {% if item.po.status == 'Approved' or item.po.status == 'Received' %}active{% elif item.po.status == 'Cancelled' %}danger{% else %}inactive{% endif %}">{{ item.po.status|default:"-" }}</span></td>
@@ -3049,13 +3077,15 @@ document.addEventListener('click', function(e) {
     });
 });
 
-// Show/hide project POs table based on whether any rows exist
+// Show/hide project & OS doors POs tables based on whether any rows exist
 (function() {
-    const table = document.getElementById('project-pos-table');
-    const empty = document.getElementById('project-pos-empty');
-    if (table && empty) {
-        if (table.querySelector('tbody tr')) { table.style.display = ''; empty.style.display = 'none'; }
-    }
+    ['project-pos', 'os-doors-pos'].forEach(function(prefix) {
+        const table = document.getElementById(prefix + '-table');
+        const empty = document.getElementById(prefix + '-empty');
+        if (table && empty) {
+            if (table.querySelector('tbody tr')) { table.style.display = ''; empty.style.display = 'none'; }
+        }
+    });
 })();
 
 function searchLinkBoardsPO(query) {

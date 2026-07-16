@@ -249,9 +249,8 @@
                             <input type="text" name="phone" id="edit_phone" class="form-control">
                         </div>
                         <div>
-                            <label class="manage-label">Location</label>
-                            <select name="location" id="edit_location" class="form-control">
-                                <option value="">— No Location —</option>
+                            <label class="manage-label">Location <span class="manage-hint">(select one or more; none = all)</span></label>
+                            <select name="location" id="edit_location" class="form-control" multiple size="5">
                                 {% for s in available_locations %}
                                 <option value="{{ s }}">{{ s }}</option>
                                 {% endfor %}
@@ -320,7 +319,11 @@ function openManageUser(userId, username, firstName, lastName, email, phone, loc
     document.getElementById('edit_last_name').value = lastName;
     document.getElementById('edit_email').value = email;
     document.getElementById('edit_phone').value = phone;
-    document.getElementById('edit_location').value = location;
+    // Location is a comma-separated list of one or more branches — select each.
+    const selectedLocs = (location || '').split(',').map(function (s) { return s.trim(); });
+    Array.from(document.getElementById('edit_location').options).forEach(function (opt) {
+        opt.selected = selectedLocs.indexOf(opt.value) !== -1;
+    });
     document.getElementById('toggle_user_id').value = userId;
     document.getElementById('delete_user_id').value = userId;
     document.getElementById('manageUserSubtitle').textContent = 'Managing: ' + username;
