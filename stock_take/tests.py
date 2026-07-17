@@ -1107,3 +1107,77 @@ class EnquiryCustomerMatchingTests(TestCase):
     def test_inactive_customers_are_ignored(self):
         _create_customer(name='Gone', email='jane@example.com', is_active=False)
         self.assertIsNone(self._match(self._enquiry(email='jane@example.com')))
+
+
+class ReconcileGallerySalePhotosTests(TestCase):
+    """Phase A gallery-image linking in reconcile_gallery_sale_photos.
+
+    Photos live in GalleryImage; a sale shows only those with order == sale.order.
+    The command fills blank order/customer where the match is unambiguous and
+    leaves genuinely ambiguous rows alone.
+    """
+
+    def _image(self, **kwargs):
+        from .models import GalleryImage
+        # ImageField only stores a name here — Phase A never opens the file.
+        defaults = dict(image='gallery/x.jpg')
+        defaults.update(kwargs)
+        return GalleryImage.objects.create(**defaults)
+
+    def _run(self, **opts):
+        from io import StringIO
+        from django.core.management import call_command
+        call_command('reconcile_gallery_sale_photos', fix=True, stdout=StringIO(), **opts)
+
+    def test_mirrors_customer_from_order(self):
+        cust = _create_customer(name='Alice')
+        order = _create_order(sale_number='500001', customer=cust)
+        img = self._image(order=order)
+        self._run()
+        img.refresh_from_db()
+        self.assertEqual(img.customer_id, cust.id)
+
+    def test_links_order_when_customer_has_single_order(self):
+        cust = _create_customer(name='Bob')
+        order = _create_order(sale_number='500002', customer=cust)
+        img = self._image(customer=cust)
+        self._run()
+        img.refresh_from_db()
+        self.assertEqual(img.order_id, order.id)
+
+    def test_links_order_via_sale_number_in_caption(self):
+        cust = _create_customer(name='Carol')
+        target = _create_order(sale_number='500003', customer=cust)
+        _create_order(sale_number='500004', customer_number='999999', customer=cust)
+        img = self._image(customer=cust, caption='Fit photos for 500003')
+        self._run()
+        img.refresh_from_db()
+        self.assertEqual(img.order_id, target.id)
+
+    def test_ambiguous_multiple_orders_left_unlinked(self):
+        cust = _create_customer(name='Dave')
+        _create_order(sale_number='500005', customer=cust)
+        _create_order(sale_number='500006', customer_number='999998', customer=cust)
+        img = self._image(customer=cust)
+        self._run()
+        img.refresh_from_db()
+        self.assertIsNone(img.order_id)
+
+    def test_existing_order_is_never_overwritten(self):
+        cust = _create_customer(name='Erin')
+        keep = _create_order(sale_number='500007', customer=cust)
+        _create_order(sale_number='500008', customer_number='999997', customer=cust)
+        img = self._image(order=keep, customer=cust)
+        self._run()
+        img.refresh_from_db()
+        self.assertEqual(img.order_id, keep.id)
+
+    def test_dry_run_writes_nothing(self):
+        cust = _create_customer(name='Frank')
+        _create_order(sale_number='500009', customer=cust)
+        img = self._image(customer=cust)
+        from io import StringIO
+        from django.core.management import call_command
+        call_command('reconcile_gallery_sale_photos', stdout=StringIO())  # dry-run default
+        img.refresh_from_db()
+        self.assertIsNone(img.order_id)

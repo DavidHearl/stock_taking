@@ -430,6 +430,7 @@ urlpatterns = [
     path('stock-take/update-pnx-batch/', views.update_pnx_batch, name='update_pnx_batch'),
     path('stock-take/update-os-doors-batch/', views.update_os_doors_batch, name='update_os_doors_batch'),
     path('stock-take/delete-os-doors-batch/', views.delete_os_doors_batch, name='delete_os_doors_batch'),
+    path('stock-take/copy-os-door-to-po/', views.copy_os_door_to_po, name='copy_os_door_to_po'),
     path('stock-take/delete-accessories-batch/', views.delete_accessories_batch, name='delete_accessories_batch'),
     path('stock-take/add-accessories-to-po/', views.add_accessories_to_po, name='add_accessories_to_po'),
     path('stock-take/boards-po/<int:boards_po_id>/replace-pnx/', views.replace_pnx_file, name='replace_pnx_file'),

@@ -420,9 +420,9 @@ class WorkflowStageDateAdmin(admin.ModelAdmin):
 
 @admin.register(Supplier)
 class SupplierAdmin(admin.ModelAdmin):
-    list_display = ['name', 'email', 'phone', 'city', 'country', 'vat_rate', 'is_active']
+    list_display = ['name', 'email', 'phone', 'city', 'country', 'payment_method', 'vat_rate', 'is_active']
     search_fields = ['name', 'email', 'phone', 'city']
-    list_filter = ['is_active', 'country']
+    list_filter = ['is_active', 'payment_method', 'country']
 
 
 @admin.register(SupplierContact)

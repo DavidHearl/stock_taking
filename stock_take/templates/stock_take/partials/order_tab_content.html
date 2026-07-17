@@ -670,9 +670,19 @@
                                 </td>
                                 <td class="text-right">
                                     <div class="os-door-view-actions">
-                                        <button type="button" class="btn btn-ghost" title="Edit" onclick="startOsDoorEdit({{ os_door.id }})">
-                                            <i class="bi bi-pencil"></i>
-                                        </button>
+                                        <div class="kebab-menu" onclick="event.stopPropagation()">
+                                            <button type="button" class="kebab-trigger" title="More actions" onclick="toggleKebab(this, event)">
+                                                <i class="bi bi-three-dots-vertical"></i>
+                                            </button>
+                                            <div class="kebab-dropdown">
+                                                <button type="button" class="kebab-item" onclick="startOsDoorEdit({{ os_door.id }}); closeAllKebabs()">
+                                                    <i class="bi bi-pencil"></i> Edit
+                                                </button>
+                                                <button type="button" class="kebab-item" onclick="openCopyOsDoorModal({{ os_door.id }}, ''); closeAllKebabs()">
+                                                    <i class="bi bi-files"></i> Copy to Another PO
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                     <div class="os-door-edit-actions">
                                         <button type="button" class="btn btn-ghost-success" title="Save" onclick="saveOsDoorInlineEdit({{ os_door.id }})">
@@ -838,9 +848,19 @@
                                 </td>
                                 <td class="text-right">
                                     <div class="os-door-view-actions">
-                                        <button type="button" class="btn btn-ghost" title="Edit" onclick="startOsDoorEdit({{ os_door.id }})">
-                                            <i class="bi bi-pencil"></i>
-                                        </button>
+                                        <div class="kebab-menu" onclick="event.stopPropagation()">
+                                            <button type="button" class="kebab-trigger" title="More actions" onclick="toggleKebab(this, event)">
+                                                <i class="bi bi-three-dots-vertical"></i>
+                                            </button>
+                                            <div class="kebab-dropdown">
+                                                <button type="button" class="kebab-item" onclick="startOsDoorEdit({{ os_door.id }}); closeAllKebabs()">
+                                                    <i class="bi bi-pencil"></i> Edit
+                                                </button>
+                                                <button type="button" class="kebab-item" onclick="openCopyOsDoorModal({{ os_door.id }}, '{{ apo.display_number|escapejs }}'); closeAllKebabs()">
+                                                    <i class="bi bi-files"></i> Copy to Another PO
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                     <div class="os-door-edit-actions">
                                         <button type="button" class="btn btn-ghost-success" title="Save" onclick="saveOsDoorInlineEdit({{ os_door.id }})">
@@ -1896,6 +1916,30 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('swapItemModal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Copy OS Door to Another PO Modal -->
+<div class="modal" id="copyOsDoorModal">
+    <div class="modal-overlay" onclick="closeModal('copyOsDoorModal')"></div>
+    <div class="modal-dialog modal-dialog-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Copy Door to Another PO</h3>
+                <button type="button" class="modal-close" onclick="closeModal('copyOsDoorModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted">Duplicate this door onto another OS Doors PO — useful when an item is damaged and needs re-ordering. The original line stays where it is.</p>
+                <div class="form-group">
+                    <label for="copyOsDoorTargetPo">Destination PO</label>
+                    <select class="form-input" id="copyOsDoorTargetPo"></select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('copyOsDoorModal')">Cancel</button>
+                <button type="button" class="btn btn-primary" id="copyOsDoorConfirmBtn" onclick="confirmCopyOsDoor()">Copy Door</button>
             </div>
         </div>
     </div>
@@ -6978,6 +7022,62 @@ function saveOsDoorInlineEdit(osDoorId) {
         }
     })
     .catch(() => showAlert('Error saving changes', 'danger'));
+}
+
+
+// ─── Copy OS Door to another PO ──────────────────────────────────────────────
+const OS_DOORS_POS = [
+{% for apo in all_os_doors_pos_list %}    { display: '{{ apo.display_number|escapejs }}' },
+{% endfor %}];
+let _copyOsDoorId = null;
+
+function openCopyOsDoorModal(osDoorId, currentPo) {
+    _copyOsDoorId = osDoorId;
+    const select = document.getElementById('copyOsDoorTargetPo');
+    if (!select) return;
+    select.innerHTML = '';
+    const targets = OS_DOORS_POS.filter(po => po.display && po.display !== currentPo);
+    if (targets.length === 0) {
+        showAlert('No other OS Doors PO to copy to — create or link another PO first.', 'warning');
+        return;
+    }
+    targets.forEach(po => {
+        const opt = document.createElement('option');
+        opt.value = po.display;
+        opt.textContent = po.display + ': OS Doors';
+        select.appendChild(opt);
+    });
+    openModal('copyOsDoorModal');
+}
+
+function confirmCopyOsDoor() {
+    const select = document.getElementById('copyOsDoorTargetPo');
+    const targetPo = select ? select.value : '';
+    if (!_copyOsDoorId || !targetPo) return;
+    const btn = document.getElementById('copyOsDoorConfirmBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Copying…'; }
+    fetch('/stock-take/copy-os-door-to-po/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        },
+        body: JSON.stringify({ os_door_id: _copyOsDoorId, target_po: targetPo })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            showAlert('Door copied to ' + targetPo, 'success');
+            setTimeout(() => location.reload(), 700);
+        } else {
+            showAlert('Error: ' + (result.error || 'Could not copy door'), 'danger');
+            if (btn) { btn.disabled = false; btn.textContent = 'Copy Door'; }
+        }
+    })
+    .catch(() => {
+        showAlert('Error copying door', 'danger');
+        if (btn) { btn.disabled = false; btn.textContent = 'Copy Door'; }
+    });
 }
 
 

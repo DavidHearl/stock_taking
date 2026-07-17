@@ -1160,6 +1160,15 @@ class PriceHistory(models.Model):
 
 class Supplier(models.Model):
     """Supplier records, extracted from purchase order details."""
+    PAYMENT_METHOD_CHOICES = [
+        ('account', 'On Account'),
+        ('card', 'Card / Website'),
+        ('direct_debit', 'Direct Debit'),
+        ('bank_transfer', 'Bank Transfer'),
+        ('proforma', 'Proforma / Prepaid'),
+        ('other', 'Other'),
+    ]
+
     workguru_id = models.IntegerField(unique=True, help_text='WorkGuru Supplier ID')
     name = models.CharField(max_length=255)
     
@@ -1188,6 +1197,10 @@ class Supplier(models.Model):
     price_tier = models.CharField(max_length=100, blank=True, null=True)
     supplier_tax_rate = models.CharField(max_length=100, blank=True, null=True)
     estimate_lead_time = models.IntegerField(null=True, blank=True, help_text='Estimated lead time in days')
+    payment_method = models.CharField(
+        max_length=20, choices=PAYMENT_METHOD_CHOICES, blank=True, default='',
+        help_text='How we pay this supplier — e.g. on a credit account, or by card via their website. Blank = unknown.',
+    )
     
     # Xero
     xero_default_account_code = models.CharField(

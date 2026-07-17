@@ -2794,7 +2794,7 @@ def supplier_save(request, supplier_id):
         'address_1', 'address_2', 'city', 'state', 'postcode', 'country',
         'currency', 'credit_limit', 'credit_days', 'credit_terms_type',
         'price_tier', 'supplier_tax_rate', 'estimate_lead_time', 'vat_rate',
-        'xero_default_account_code',
+        'xero_default_account_code', 'payment_method',
     ]
 
     update_fields = []
@@ -2819,6 +2819,9 @@ def supplier_save(request, supplier_id):
             elif field == 'xero_default_account_code':
                 # DB column is NOT NULL; clear to empty string rather than None.
                 val = (str(val).strip() if val not in (None, '') else '')
+            elif field == 'payment_method':
+                # DB column is NOT NULL; clear to empty string rather than None.
+                val = (str(val).strip() if val not in (None, '') else '')
             elif field == 'email':
                 val = val if val and '@' in val else None
             elif field == 'website':
@@ -2838,7 +2841,12 @@ def supplier_save(request, supplier_id):
     if update_fields:
         supplier.save(update_fields=update_fields)
 
-    return JsonResponse({'success': True})
+    # Return the normalised saved values so inline editors (e.g. the payment /
+    # website quick-cards) can reflect server-side changes without a reload.
+    saved = {f: getattr(supplier, f) for f in update_fields}
+    if 'payment_method' in saved:
+        saved['payment_method_display'] = supplier.get_payment_method_display()
+    return JsonResponse({'success': True, 'saved': saved})
 
 
 @login_required

@@ -5968,6 +5968,43 @@ def delete_os_doors_batch(request):
 
 
 @login_required
+@require_POST
+def copy_os_door_to_po(request):
+	"""Duplicate an OS Door line onto another already-created OS Doors PO.
+
+	The original line is left untouched; a fresh copy is created against the
+	target PO (identified by its display number) with the ordered/received state
+	reset so it reads as a new line to be ordered. Used when a door needs to be
+	re-ordered (e.g. damaged) on a different PO.
+	"""
+	import json
+	try:
+		data = json.loads(request.body)
+		os_door_id = data.get('os_door_id')
+		target_po = (data.get('target_po') or '').strip()
+		if not os_door_id or not target_po:
+			return JsonResponse({'error': 'Missing os_door_id or target_po'}, status=400)
+		try:
+			source = OSDoor.objects.get(id=int(os_door_id))
+		except OSDoor.DoesNotExist:
+			return JsonResponse({'error': 'OS Door not found'}, status=404)
+		if (source.po_number or '') == target_po:
+			return JsonResponse({'error': 'Door is already on that PO'}, status=400)
+
+		copy = OSDoor.objects.get(id=source.id)
+		copy.pk = None
+		copy.po_number = target_po
+		copy.ordered = False
+		copy.received = False
+		copy.received_quantity = 0
+		copy.save()
+		return JsonResponse({'success': True, 'new_id': copy.id})
+	except Exception as e:
+		logger.error(f"Error copying OS door {request.body!r} to PO: {e}")
+		return JsonResponse({'error': str(e)}, status=500)
+
+
+@login_required
 def delete_accessories_batch(request):
     """Delete multiple Accessory items by ID"""
     if request.method == 'POST':
@@ -7947,12 +7984,16 @@ def order_details(request, order_id):
     from django.urls import reverse
     order = get_object_or_404(Order, id=order_id)
 
-    # Resolve the linked AnthillSale (FK first, sale_number fallback) — this is where
-    # the user should land.
-    linked_sale = order.anthill_sale.first()
-    if not linked_sale and order.sale_number:
-        from .models import AnthillSale as _AnthillSale
+    # Resolve the linked AnthillSale. Match on sale_number first — that's the canonical
+    # value shown to (and clicked by) the user; a stale/mislinked anthill_sale FK could
+    # otherwise redirect to a different sale. Fall back to the FK only when there's no
+    # sale_number to match on.
+    from .models import AnthillSale as _AnthillSale
+    linked_sale = None
+    if order.sale_number:
         linked_sale = _AnthillSale.objects.filter(anthill_activity_id=order.sale_number).first()
+    if not linked_sale:
+        linked_sale = order.anthill_sale.first()
 
     sale_target = (
         reverse('sale_detail', args=[linked_sale.pk]) + '?tab=order'

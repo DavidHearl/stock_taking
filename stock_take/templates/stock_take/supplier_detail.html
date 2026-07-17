@@ -19,7 +19,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="content-card">
+<div class="content-card supplier-header-card">
     <div class="supplier-detail-header">
         <div class="supplier-detail-title">
             <h1>{{ supplier.name }}</h1>
@@ -28,6 +28,9 @@
             {% else %}
             <span class="supplier-active-badge inactive">Inactive</span>
             {% endif %}
+            <span id="summary-payment-badge">
+                {% if supplier.payment_method %}<span class="supplier-payment-badge {{ supplier.payment_method }}">{{ supplier.get_payment_method_display }}</span>{% endif %}
+            </span>
         </div>
         <div class="supplier-detail-actions">
             <button class="btn btn-primary" id="btn-edit" onclick="toggleEditMode()"><i class="bi bi-pencil"></i> Edit</button>
@@ -38,6 +41,54 @@
 
     <div id="save-notification" class="customer-save-notification" style="display:none;"></div>
 
+    <!-- At-a-glance summary: 6 cards. Payment + Website edit via the Edit button. -->
+    <div class="supplier-summary">
+        <div class="supplier-stat-tile">
+            <span class="supplier-stat-label">Total Spend</span>
+            <span class="supplier-stat-value supplier-total-spend">£{{ total_spend|floatformat:2 }}</span>
+        </div>
+        <div class="supplier-stat-tile">
+            <span class="supplier-stat-label">Purchase Orders</span>
+            <span class="supplier-stat-value">{{ po_count }}</span>
+        </div>
+        <div class="supplier-stat-tile">
+            <span class="supplier-stat-label">Lead Time</span>
+            <span class="supplier-stat-value" id="summary-lead-value">{% if supplier.estimate_lead_time %}{{ supplier.estimate_lead_time }} days{% else %}—{% endif %}</span>
+        </div>
+        <div class="supplier-stat-tile">
+            <span class="supplier-stat-label">Currency</span>
+            <span class="supplier-stat-value" id="summary-currency-value">{{ supplier.currency|default:"GBP" }}</span>
+        </div>
+        <div class="supplier-stat-tile">
+            <span class="supplier-stat-label">Payment Method</span>
+            <span class="supplier-stat-value view-val">
+                {% if supplier.payment_method %}<span class="supplier-payment-badge {{ supplier.payment_method }}">{{ supplier.get_payment_method_display }}</span>{% else %}<span class="po-payment-unset">Not set</span>{% endif %}
+            </span>
+            <select class="supplier-quick-select edit-val" data-field="payment_method" style="display:none;">
+                <option value="" {% if not supplier.payment_method %}selected{% endif %}>Not set</option>
+                {% for value, label in supplier.PAYMENT_METHOD_CHOICES %}
+                <option value="{{ value }}" {% if supplier.payment_method == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="supplier-stat-tile">
+            <span class="supplier-stat-label">Website</span>
+            <span class="supplier-stat-value view-val">
+                {% if supplier.website %}<a href="{{ supplier.website }}" target="_blank" rel="noopener" class="supplier-quick-link"><i class="bi bi-box-arrow-up-right"></i> Visit site</a>{% else %}<span class="po-payment-unset">Not set</span>{% endif %}
+            </span>
+            <input type="text" class="supplier-quick-input edit-val" data-field="website" value="{{ supplier.website|default:'' }}" placeholder="https://…" style="display:none;">
+        </div>
+    </div>
+</div>
+
+<!-- Tabs -->
+<div class="tab-nav tab-nav-pills supplier-tabs" data-pill-slider>
+    <button class="tab-button active" data-tab="sup-overview">Overview</button>
+    <button class="tab-button" data-tab="sup-contacts">Contacts <span class="tab-count">({{ contacts|length }})</span></button>
+    <button class="tab-button" data-tab="sup-pos">Purchase Orders <span class="tab-count">({{ po_count }})</span></button>
+</div>
+
+<div class="tab-content" id="sup-overview">
     <!-- Supplier Info Grid -->
     <div class="supplier-info-grid" id="supplier-info">
         <div class="supplier-info-section">
@@ -65,15 +116,6 @@
                 <span class="supplier-info-label">Fax</span>
                 <span class="supplier-info-value view-val">{{ supplier.fax|default:"-" }}</span>
                 <input class="customer-edit-input edit-val" data-field="fax" value="{{ supplier.fax|default:'' }}" style="display:none;">
-            </div>
-            <div class="supplier-info-row">
-                <span class="supplier-info-label">Website</span>
-                <span class="supplier-info-value view-val">
-                    {% if supplier.website %}
-                    <a href="{{ supplier.website }}" target="_blank">{{ supplier.website }}</a>
-                    {% else %}-{% endif %}
-                </span>
-                <input class="customer-edit-input edit-val" data-field="website" value="{{ supplier.website|default:'' }}" style="display:none;">
             </div>
             <div class="supplier-info-row">
                 <span class="supplier-info-label">Tax / VAT</span>
@@ -169,17 +211,12 @@
                     </button>
                 </div>
             </div>
-            <div class="supplier-info-row">
-                <span class="supplier-info-label">Total Spend</span>
-                <span class="supplier-info-value supplier-total-spend">£{{ total_spend|floatformat:2 }}</span>
-            </div>
-            <div class="supplier-info-row">
-                <span class="supplier-info-label">Purchase Orders</span>
-                <span class="supplier-info-value">{{ po_count }}</span>
-            </div>
         </div>
     </div>
+</div><!-- /#sup-overview -->
 
+<!-- Contacts Tab -->
+<div class="tab-content" id="sup-contacts" style="display:none;">
     <!-- Contacts Section -->
     <div class="supplier-po-section">
         <div class="contacts-section-header">
@@ -280,7 +317,10 @@
             </div>
         </div>
     </div>
+</div><!-- /#sup-contacts -->
 
+<!-- Purchase Orders Tab -->
+<div class="tab-content" id="sup-pos" style="display:none;">
     <!-- Purchase Orders for this supplier -->
     <div class="supplier-po-section">
         <h2><i class="bi bi-clipboard-check"></i> Purchase Orders ({{ po_count }})</h2>
@@ -328,7 +368,7 @@
         </div>
         {% endif %}
     </div>
-</div>
+</div><!-- /#sup-pos -->
 
 <script>
 function formatMoney(value) {
@@ -339,7 +379,7 @@ function formatMoney(value) {
 
 // Format monetary values on page load
 document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('.supplier-info-value').forEach(function(el) {
+    document.querySelectorAll('.supplier-info-value, .supplier-stat-value').forEach(function(el) {
         var text = el.textContent.trim();
         if (text.startsWith('£')) {
             var num = parseFloat(text.replace('£', '').replace(/,/g, ''));
@@ -348,7 +388,24 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
+// ── Tab switching ──────────────────────────────────────────────────────────────
+function activateSupplierTab(tabId) {
+    document.querySelectorAll('.supplier-tabs .tab-button').forEach(b => b.classList.remove('active'));
+    document.querySelector(`.supplier-tabs .tab-button[data-tab="${tabId}"]`)?.classList.add('active');
+    document.querySelectorAll('.tab-content').forEach(c => { c.style.display = 'none'; });
+    const target = document.getElementById(tabId);
+    if (target) target.style.display = 'block';
+}
+
+document.querySelectorAll('.supplier-tabs .tab-button').forEach(btn => {
+    btn.addEventListener('click', function() {
+        activateSupplierTab(this.dataset.tab);
+    });
+});
+
 function toggleEditMode() {
+    // Editing lives on the Overview tab — jump there so the fields are visible.
+    activateSupplierTab('sup-overview');
     document.querySelectorAll('.view-val').forEach(el => el.style.display = 'none');
     document.querySelectorAll('.edit-val').forEach(el => el.style.display = 'block');
     document.getElementById('gl-code-edit-row').style.display = 'flex';
@@ -366,7 +423,11 @@ function cancelEdit() {
     document.getElementById('btn-cancel').style.display = 'none';
     // Reset inputs to original values
     document.querySelectorAll('.edit-val').forEach(input => {
-        input.value = input.defaultValue;
+        if (input.tagName === 'SELECT') {
+            Array.from(input.options).forEach(o => { o.selected = o.defaultSelected; });
+        } else {
+            input.value = input.defaultValue;
+        }
     });
     hideNotification();
 }
@@ -394,26 +455,58 @@ function saveSupplier() {
             // Update view values from saved data
             document.querySelectorAll('.edit-val[data-field]').forEach(input => {
                 const field = input.dataset.field;
-                const row = input.closest('.supplier-info-row');
-                const viewVal = row.querySelector('.view-val');
+                const container = input.closest('.supplier-info-row, .supplier-stat-tile');
+                const viewVal = container ? container.querySelector('.view-val') : null;
                 if (viewVal) {
                     const val = input.value || '-';
                     if (field === 'email' && input.value) {
                         viewVal.innerHTML = '<a href="mailto:' + input.value + '">' + input.value + '</a>';
-                    } else if (field === 'website' && input.value) {
-                        viewVal.innerHTML = '<a href="' + input.value + '" target="_blank">' + input.value + '</a>';
                     } else if (field === 'credit_limit') {
                         viewVal.textContent = '£' + formatMoney(input.value || 0);
+                    } else if (field === 'payment_method') {
+                        const label = (result.saved && result.saved.payment_method_display) ? result.saved.payment_method_display : '';
+                        viewVal.innerHTML = input.value
+                            ? '<span class="supplier-payment-badge ' + input.value + '">' + label + '</span>'
+                            : '<span class="po-payment-unset">Not set</span>';
+                        // Keep the header badge (next to the name) in sync too.
+                        const badgeWrap = document.getElementById('summary-payment-badge');
+                        if (badgeWrap) {
+                            badgeWrap.innerHTML = input.value
+                                ? '<span class="supplier-payment-badge ' + input.value + '">' + label + '</span>'
+                                : '';
+                        }
+                    } else if (field === 'website') {
+                        const url = (result.saved && 'website' in result.saved) ? (result.saved.website || '') : input.value;
+                        input.value = url;  // reflect server-normalised URL (e.g. https:// prepended)
+                        viewVal.innerHTML = url
+                            ? '<a href="' + url + '" target="_blank" rel="noopener" class="supplier-quick-link"><i class="bi bi-box-arrow-up-right"></i> Visit site</a>'
+                            : '<span class="po-payment-unset">Not set</span>';
                     } else {
                         viewVal.textContent = val;
                     }
                 }
-                input.defaultValue = input.value;
+                // Persist the just-saved value as the new "cancel" baseline.
+                if (input.tagName === 'SELECT') {
+                    Array.from(input.options).forEach(o => { o.defaultSelected = o.selected; });
+                } else {
+                    input.defaultValue = input.value;
+                }
             });
             // Update page title if name changed
             const nameInput = document.querySelector('.edit-val[data-field="name"]');
             if (nameInput) {
                 document.querySelector('.supplier-detail-title h1').textContent = nameInput.value;
+            }
+            // Keep the Lead Time + Currency summary tiles in sync
+            const leadInput = document.querySelector('.edit-val[data-field="estimate_lead_time"]');
+            const leadTile = document.getElementById('summary-lead-value');
+            if (leadInput && leadTile) {
+                leadTile.textContent = leadInput.value ? leadInput.value + ' days' : '—';
+            }
+            const currInput = document.querySelector('.edit-val[data-field="currency"]');
+            const currTile = document.getElementById('summary-currency-value');
+            if (currInput && currTile) {
+                currTile.textContent = currInput.value || 'GBP';
             }
             // Update GL code view
             const glCode = document.getElementById('gl-code-select').value;
