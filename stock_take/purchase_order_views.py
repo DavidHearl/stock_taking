@@ -519,7 +519,7 @@ def purchase_orders_list(request):
     from .overhead_po_views import build_overhead_list_context
     context.update(build_overhead_list_context(request))
 
-    return render(request, 'stock_take/purchase_orders_list.html', context)
+    return render(request, 'stock_take/purchase_orders.html', context)
 
 
 @login_required
@@ -2489,7 +2489,7 @@ def suppliers_list(request):
         'total_count': len(suppliers),
     }
     
-    return render(request, 'stock_take/suppliers_list.html', context)
+    return render(request, 'stock_take/suppliers.html', context)
 
 
 @login_required

@@ -78,7 +78,7 @@ def leads_list(request):
         'source_choices': Lead.SOURCE_CHOICES,
     }
 
-    return render(request, 'stock_take/leads_list.html', context)
+    return render(request, 'stock_take/leads.html', context)
 
 
 @login_required

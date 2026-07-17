@@ -22,11 +22,11 @@ def _render_customers(request, context):
 
 	The Customers / Contacts / Events pills fetch this view with an
 	X-Requested-With header and swap in only the toolbar + body fragment (see
-	switchCustomerTab in customers_list.html); a normal load returns the full page.
+	switchCustomerTab in customers.html); a normal load returns the full page.
 	"""
 	if request.headers.get('x-requested-with') == 'XMLHttpRequest':
 		return render(request, 'stock_take/partials/_customers_fragment.html', context)
-	return render(request, 'stock_take/customers_list.html', context)
+	return render(request, 'stock_take/customers.html', context)
 
 
 @login_required
@@ -973,7 +973,7 @@ def sales_list(request):
         'anthill_sale_pk_map': anthill_sale_pk_map,
     }
 
-    return render(request, 'stock_take/sales_list.html', context)
+    return render(request, 'stock_take/sales.html', context)
 
 
 @login_required
