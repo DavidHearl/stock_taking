@@ -1,0 +1,1500 @@
+{% comment %}
+All Accounts Payable inbox behaviour: email row actions, the create-invoice
+flow (from an email attachment or a manual upload), the link/split modals,
+bulk actions and the background PDF PO-scan.
+
+Bare JS - the including page supplies the <script> wrapper, and must also
+include apay_inbox_modals.html and define apayReloadInbox().
+{% endcomment %}
+const CSRF_TOKEN = '{{ csrf_token }}';
+let currentEmailId = null;
+let currentAttachmentId = null;
+let currentEmailSenderEmail = '';
+let currentManualAttachmentFile = null;
+let linkEmailId = null;
+let selectedInvoiceId = null;
+let linkSearchTimer = null;
+let splitEmailId = null;
+let splitEmailCount = 0;
+
+// -- Sync from mailbox -------------------------------------------------------
+function _doSync(force) {
+    // Only the standalone inbox page renders this button — the Accounts Payable
+    // page drives syncing from its own control bar (apSyncMailbox).
+    const btn = document.getElementById('sync-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.innerHTML = force
+        ? '<i class="bi bi-hourglass-split"></i> Full Resync...'
+        : '<i class="bi bi-hourglass-split"></i> Syncing...';
+
+    fetch('{% url "sync_mailbox" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ force: !!force }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const msg = data.new > 0
+                ? `${data.new} new email(s). Reloading...`
+                : `Up to date (${data.total} checked).`;
+            btn.innerHTML = `<i class="bi bi-check-circle"></i> ${msg}`;
+            if (data.new > 0) {
+                setTimeout(() => apayReloadInbox(), 1200);
+            } else {
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync Mailbox';
+                }, 2500);
+            }
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync Mailbox';
+            alert('Sync failed: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Sync Mailbox';
+        alert('Network error during sync');
+    });
+}
+function syncMailbox() { _doSync(false); }
+function fullResync() { _doSync(true); }
+
+// -- Ignore / Unignore ------------------------------------------------------
+// Decrement the active entity tab's count badge when a row leaves the list.
+function decrementActiveTabCount() {
+    const activeTab = document.querySelector('.tab-button.active .tab-count');
+    if (!activeTab) return;
+    const current = parseInt((activeTab.textContent || '').replace(/[^0-9]/g, ''), 10);
+    if (!isNaN(current) && current > 0) {
+        activeTab.textContent = (current - 1).toLocaleString();
+    }
+}
+
+function ignoreEmail(btn) {
+    const emailId = btn.dataset.emailId;
+    btn.disabled = true;
+    fetch(`/accounts-payable/${emailId}/ignore/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ignore: true }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = btn.closest('tr');
+            decrementActiveTabCount();
+            row.style.opacity = '0';
+            setTimeout(() => row.remove(), 300);
+        } else {
+            btn.disabled = false;
+        }
+    });
+}
+
+function unignoreEmail(btn) {
+    const emailId = btn.dataset.emailId;
+    btn.disabled = true;
+    fetch(`/accounts-payable/${emailId}/ignore/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ignore: false }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = btn.closest('tr');
+            decrementActiveTabCount();
+            row.style.opacity = '0';
+            setTimeout(() => row.remove(), 300);
+        } else {
+            btn.disabled = false;
+        }
+    });
+}
+
+function markEmailFiled(emailId) {
+    const row = document.getElementById(`email-row-${emailId}`);
+    fetch(`/accounts-payable/${emailId}/file/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && row) {
+            decrementActiveTabCount();
+            row.style.opacity = '0';
+            setTimeout(() => row.remove(), 300);
+        }
+    });
+}
+
+// -- Link Existing Invoice Modal -----------------------------------------------
+function openLinkModal(btn) {
+    linkEmailId = btn.dataset.emailId;
+    selectedInvoiceId = null;
+    document.getElementById('link-modal-sender').textContent = btn.dataset.sender || '';
+    document.getElementById('link-modal-subject').textContent = btn.dataset.subject || '';
+    document.getElementById('link-inv-search').value = '';
+    document.getElementById('link-inv-results').style.display = 'none';
+    document.getElementById('link-inv-results').innerHTML = '';
+    document.getElementById('link-inv-selected').style.display = 'none';
+    document.getElementById('link-inv-confirm-btn').disabled = true;
+    document.getElementById('link-invoice-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('link-inv-search').focus(), 80);
+}
+
+function closeLinkModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('link-invoice-modal').style.display = 'none';
+    document.getElementById('link-inv-results').style.display = 'none';
+    linkEmailId = null;
+    selectedInvoiceId = null;
+}
+
+function positionLinkInvResults() {
+    const input = document.getElementById('link-inv-search');
+    const results = document.getElementById('link-inv-results');
+    const rect = input.getBoundingClientRect();
+    results.style.top   = (rect.bottom + 2) + 'px';
+    results.style.left  = rect.left + 'px';
+    results.style.width = rect.width + 'px';
+}
+
+function searchForLinkInvoice(q) {
+    clearTimeout(linkSearchTimer);
+    const results = document.getElementById('link-inv-results');
+    if (q.trim().length < 2) { results.style.display = 'none'; return; }
+    linkSearchTimer = setTimeout(() => {
+        fetch(`/api/purchase-invoice-search/?q=${encodeURIComponent(q.trim())}`, {
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.results || !data.results.length) {
+                results.innerHTML = '<div class="link-inv-result-empty">No invoices found</div>';
+                positionLinkInvResults();
+                results.style.display = 'block';
+                return;
+            }
+            results.innerHTML = data.results.map(inv => `
+                <div class="link-inv-result-row"
+                     onclick="selectLinkInvoice(${inv.id}, '${escLinkHtml(inv.invoice_number)}', '${escLinkHtml(inv.supplier_name)}', '${inv.date}', '\u00a3${parseFloat(inv.total).toFixed(2)}')">
+                    <div>
+                        <strong>${escLinkHtml(inv.invoice_number)}</strong>
+                        <span class="link-inv-result-supplier">${escLinkHtml(inv.supplier_name)}</span>
+                    </div>
+                    <div class="link-inv-result-meta">
+                        <span class="link-inv-result-date">${inv.date}</span>
+                        <span class="link-inv-result-total">\u00a3${parseFloat(inv.total).toFixed(2)}</span>
+                    </div>
+                </div>`).join('');
+            positionLinkInvResults();
+            results.style.display = 'block';
+        })
+        .catch(() => { results.style.display = 'none'; });
+    }, 280);
+}
+
+function selectLinkInvoice(id, number, supplier, date, total) {
+    selectedInvoiceId = id;
+    document.getElementById('link-inv-results').style.display = 'none';
+    document.getElementById('link-inv-search').value = '';
+    document.getElementById('link-sel-number').textContent = number;
+    document.getElementById('link-sel-supplier').textContent = supplier;
+    document.getElementById('link-sel-date').textContent = date;
+    document.getElementById('link-sel-total').textContent = total;
+    document.getElementById('link-inv-selected').style.display = 'block';
+    document.getElementById('link-inv-confirm-btn').disabled = false;
+}
+
+function clearLinkSelection() {
+    selectedInvoiceId = null;
+    document.getElementById('link-inv-selected').style.display = 'none';
+    document.getElementById('link-inv-confirm-btn').disabled = true;
+}
+
+function submitLinkInvoice() {
+    if (!selectedInvoiceId || !linkEmailId) return;
+    const btn = document.getElementById('link-inv-confirm-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving...';
+    fetch(`/accounts-payable/${linkEmailId}/link-invoice/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invoice_id: selectedInvoiceId }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            window.location.href = data.redirect;
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Mark as Processed';
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-lg"></i> Mark as Processed';
+        alert('Network error');
+    });
+}
+
+function escLinkHtml(str) {
+    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function openAddInvoicePicker() {
+    // Toolbar-only; absent when this module is loaded by the Accounts Payable page.
+    const input = document.getElementById('manual-invoice-input');
+    if (!input) return;
+    input.click();
+}
+
+// -- Add split-button menu (Batch Add) --------------------------------------
+function toggleAddMenu(event) {
+    if (event) event.stopPropagation();
+    const split = document.getElementById('add-invoice-split');
+    const caret = document.getElementById('add-invoice-caret');
+    if (!split) return;
+    const isOpen = split.classList.toggle('open');
+    if (caret) caret.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+}
+
+function closeAddMenu() {
+    const split = document.getElementById('add-invoice-split');
+    const caret = document.getElementById('add-invoice-caret');
+    if (split) split.classList.remove('open');
+    if (caret) caret.setAttribute('aria-expanded', 'false');
+}
+
+function openBatchAddPicker() {
+    closeAddMenu();
+    openAddInvoicePicker();
+}
+
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('#add-invoice-split')) closeAddMenu();
+});
+
+function handleAddButtonDrop(event) {
+    event.preventDefault();
+    const files = event.dataTransfer && event.dataTransfer.files;
+    if (!files || !files.length) return;
+    startManualBatch(Array.from(files));
+}
+
+function handleManualInvoiceAttachment(input) {
+    const files = input && input.files ? Array.from(input.files) : [];
+    if (!files.length) return;
+    startManualBatch(files);
+    input.value = '';
+}
+
+// -- Manual batch upload queue ----------------------------------------------
+let manualBatchFiles = [];
+let manualBatchIndex = 0;
+let manualBatchSupplier = null;   // { name, vatRate } applied to every file in the batch
+let manualBatchQueue = {};        // fileIndex -> gathered invoice data (Add to Queue)
+
+function startManualBatch(files) {
+    // Only keep files we can handle
+    manualBatchFiles = files.filter(f => f && f.size >= 0);
+    manualBatchIndex = 0;
+    manualBatchSupplier = null;
+    manualBatchQueue = {};
+    if (!manualBatchFiles.length) return;
+    openManualCreateModal(manualBatchFiles[0]);
+}
+
+function updateBatchProgress() {
+    const inBatch = manualBatchFiles.length > 1;
+    const badge = document.getElementById('modal-batch-progress');
+    if (badge) {
+        if (inBatch) {
+            const qc = queueCount();
+            badge.textContent = qc
+                ? `Invoice ${manualBatchIndex + 1} of ${manualBatchFiles.length} \u2022 ${qc} queued`
+                : `Invoice ${manualBatchIndex + 1} of ${manualBatchFiles.length}`;
+            badge.style.display = '';
+        } else {
+            badge.style.display = 'none';
+            badge.textContent = '';
+        }
+    }
+    const headerNav = document.getElementById('modal-batch-header-nav');
+    if (headerNav) headerNav.style.display = inBatch ? '' : 'none';
+    const prevBtn = document.getElementById('batch-prev-btn');
+    const nextBtn = document.getElementById('batch-next-btn');
+    if (prevBtn) prevBtn.disabled = manualBatchIndex <= 0;
+    if (nextBtn) nextBtn.disabled = manualBatchIndex >= manualBatchFiles.length - 1;
+
+    // In a batch, swap the single "Create Invoice" action for the queue actions.
+    const queueBtn = document.getElementById('modal-queue-btn');
+    const queueSubmitBtn = document.getElementById('modal-queue-submit-btn');
+    const confirmBtn = document.getElementById('modal-confirm-btn');
+    if (inBatch) {
+        if (confirmBtn) confirmBtn.style.display = 'none';
+        if (queueBtn) {
+            queueBtn.style.display = '';
+            queueBtn.disabled = false;
+            queueBtn.innerHTML = manualBatchQueue[manualBatchIndex]
+                ? '<i class="bi bi-check-square"></i> Update in Queue'
+                : '<i class="bi bi-plus-square"></i> Add to Queue';
+        }
+        if (queueSubmitBtn) {
+            const qc = queueCount();
+            queueSubmitBtn.style.display = qc ? '' : 'none';
+            queueSubmitBtn.disabled = false;
+            queueSubmitBtn.innerHTML = `<i class="bi bi-check2-all"></i> Create Queue (${qc})`;
+        }
+    } else {
+        if (confirmBtn) confirmBtn.style.display = '';
+        if (queueBtn) queueBtn.style.display = 'none';
+        if (queueSubmitBtn) queueSubmitBtn.style.display = 'none';
+    }
+}
+
+function manualBatchPrev() {
+    if (manualBatchIndex > 0) {
+        manualBatchIndex--;
+        openManualCreateModal(manualBatchFiles[manualBatchIndex]);
+    }
+}
+
+function manualBatchNext() {
+    if (manualBatchIndex < manualBatchFiles.length - 1) {
+        manualBatchIndex++;
+        openManualCreateModal(manualBatchFiles[manualBatchIndex]);
+    }
+}
+
+// Open the current file in a new browser tab for previewing.
+let _manualPreviewUrl = null;
+function previewManualAttachment() {
+    if (!currentManualAttachmentFile) return;
+    if (_manualPreviewUrl) { URL.revokeObjectURL(_manualPreviewUrl); _manualPreviewUrl = null; }
+    _manualPreviewUrl = URL.createObjectURL(currentManualAttachmentFile);
+    window.open(_manualPreviewUrl, '_blank');
+}
+
+// Remember the current supplier and apply it to every invoice in the batch.
+function applySupplierToBatch() {
+    const input = document.getElementById('new-pinv-supplier');
+    const name = input ? input.value.trim() : '';
+    if (!name) { alert('Set a supplier on this invoice first.'); return; }
+    const rateEl = document.getElementById('modal-vat-rate');
+    const vatEnabled = document.getElementById('modal-vat-enabled')?.checked;
+    const vatRate = (vatEnabled && rateEl) ? (parseFloat(rateEl.value) || null) : null;
+    manualBatchSupplier = { name, vatRate };
+    showBatchToast(`Supplier "${name}" set for all ${manualBatchFiles.length} invoices`);
+}
+
+function advanceManualBatch() {
+    // Move to the next queued file, if any. Returns true if a next file was opened.
+    if (manualBatchFiles.length && manualBatchIndex < manualBatchFiles.length - 1) {
+        manualBatchIndex++;
+        openManualCreateModal(manualBatchFiles[manualBatchIndex]);
+        return true;
+    }
+    // Batch finished
+    manualBatchFiles = [];
+    manualBatchIndex = 0;
+    manualBatchSupplier = null;
+    return false;
+}
+
+function showBatchToast(message) {
+    let toast = document.getElementById('apay-batch-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'apay-batch-toast';
+        toast.className = 'apay-batch-toast';
+        document.body.appendChild(toast);
+    }
+    toast.innerHTML = `<i class="bi bi-check-circle-fill"></i> ${escLinkHtml(message)}`;
+    toast.classList.add('show');
+    clearTimeout(toast._hideTimer);
+    toast._hideTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+}
+
+function resetCreateModalBase() {
+    modalLineCount = 0;
+    currentAttachmentId = null;
+    currentManualAttachmentFile = null;
+    document.getElementById('modal-lines').innerHTML = '';
+    document.getElementById('modal-total').textContent = '\u00a30.00';
+    document.getElementById('new-pinv-number').value = '';
+    document.getElementById('modal-duplicate-warning').style.display = 'none';
+    document.getElementById('modal-parse-status').textContent = '';
+    clearModalPO();
+    clearModalSupplier();
+    document.getElementById('new-pinv-reference').value = '';
+    document.getElementById('new-pinv-supplier-ref').value = '';
+    document.getElementById('new-pinv-date').value = '';
+    document.getElementById('new-pinv-due-date').value = '';
+    document.getElementById('new-pinv-status').value = 'Draft';
+    document.getElementById('new-pinv-notes').value = '';
+    resetInvoiceNote();
+    setModalCurrency('GBP');
+    const _discEl = document.getElementById('modal-discount');
+    if (_discEl) _discEl.value = '';
+    const _discChk = document.getElementById('modal-discount-pre-vat');
+    if (_discChk) _discChk.checked = true;
+    const _discRow = document.getElementById('modal-discount-row');
+    if (_discRow) _discRow.style.display = 'none';
+    fetch('/api/next-invoice-number/', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(r => r.json())
+        .then(d => {
+            const el = document.getElementById('new-pinv-number');
+            if (el && !el.value) el.value = d.invoice_number || '';
+        })
+        .catch(() => {});
+}
+
+function openManualCreateModal(file) {
+    currentEmailId = null;
+    resetCreateModalBase();
+    currentManualAttachmentFile = file;
+
+    document.getElementById('modal-sender').textContent = 'Manual upload';
+    currentEmailSenderEmail = '';
+
+    const list = document.getElementById('modal-attachment-list');
+    const isPdf = file.name.toLowerCase().endsWith('.pdf');
+    const icon = isPdf ? 'bi-file-earmark-pdf' : 'bi-file-earmark';
+    const inBatch = manualBatchFiles.length > 1;
+    list.innerHTML = `<div class="apay-att-option-row">
+        <label class="apay-att-option">
+            <i class="bi ${icon}"></i>
+            <span class="apay-att-option-name">${escLinkHtml(file.name)}</span>
+            <span class="apay-att-option-size">${formatBytes(file.size)}</span>
+        </label>
+        <button type="button" class="apay-att-preview-btn" onclick="previewManualAttachment()" title="Preview this file">
+            <i class="bi bi-eye"></i> Preview
+        </button>
+    </div>
+    ${inBatch ? `<div class="apay-batch-nav">
+        <button type="button" class="apay-batch-nav-btn" onclick="applySupplierToBatch()" title="Use this supplier for every invoice in the batch">
+            <i class="bi bi-people"></i> Set supplier for all
+        </button>
+    </div>` : ''}`;
+
+    const refEl = document.getElementById('new-pinv-reference');
+    if (refEl && !refEl.value) refEl.value = file.name.replace(/\.[^/.]+$/, '');
+
+    // Apply a batch-wide supplier override (set via "Set supplier for all")
+    if (manualBatchSupplier && manualBatchSupplier.name) {
+        selectModalSupplier(manualBatchSupplier.name, manualBatchSupplier.vatRate);
+    }
+
+    // If this file was already added to the queue, restore the saved data
+    // instead of re-parsing the PDF (so the user's edits aren't lost).
+    if (manualBatchQueue[manualBatchIndex]) {
+        applyQueuedDataToModal(manualBatchQueue[manualBatchIndex]);
+        document.getElementById('create-invoice-modal').classList.add('open');
+        updateBatchProgress();
+        return;
+    }
+
+    if (isPdf) {
+        parseManualAttachment(file);
+    } else {
+        autoPopulateFromFilename(file.name);
+    }
+
+    addModalLine();
+    document.getElementById('create-invoice-modal').classList.add('open');
+    updateBatchProgress();
+}
+
+function parseManualAttachment(file) {
+    const statusEl = document.getElementById('modal-parse-status');
+    if (statusEl) statusEl.textContent = 'Extracting data from PDF...';
+
+    const fd = new FormData();
+    fd.append('file', file);
+
+    fetch('{% url "parse_purchase_invoice_pdf" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN },
+        body: fd,
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (statusEl) statusEl.textContent = '';
+        if (!data.success || !data.extracted) {
+            autoPopulateFromFilename(file.name);
+            return;
+        }
+
+        const ex = data.extracted;
+        applyExtractedToModal(ex, { skipSupplier: !!manualBatchSupplier });
+
+        if (ex.suggested_po) {
+            const spo = ex.suggested_po;
+            selectModalPOFromSearch(spo.workguru_id, spo.display_number, spo.po_type || 'supplier');
+            if (statusEl) {
+                statusEl.textContent = `PO matched: ${spo.display_number}${spo.supplier_name ? ' - ' + spo.supplier_name : ''}`;
+                setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 5000);
+            }
+        }
+    })
+    .catch(() => {
+        if (statusEl) statusEl.textContent = '';
+        autoPopulateFromFilename(file.name);
+    });
+}
+
+// -- Link sender email → supplier ----------------------------------------------
+// Enable/disable the "Link to supplier" button. When the sender is already
+// mapped to a supplier (an existing SupplierEmailRule), linking again is
+// redundant, so the button is disabled with an explanatory tooltip.
+function setLinkSupplierButtonState(alreadyLinked, supplierName) {
+    const btn = document.getElementById('modal-link-supplier-btn');
+    if (!btn) return;
+    btn.classList.remove('linked');
+    if (alreadyLinked) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-check-lg"></i> Linked';
+        btn.title = supplierName
+            ? `This sender is already linked to ${supplierName}`
+            : 'This sender is already linked to a supplier';
+    } else {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-link-45deg"></i> Link to supplier';
+        btn.title = "Map this sender's email to the selected supplier so future emails auto-match";
+    }
+}
+
+// Creates/updates a SupplierEmailRule so future emails from this sender (or its
+// domain) auto-match to the currently selected supplier.
+function linkEmailToSupplier() {
+    const supplierInput = document.getElementById('new-pinv-supplier');
+    const supplierName = supplierInput ? supplierInput.value.trim() : '';
+    if (!supplierName) {
+        alert('Select or enter a supplier first, then link the email.');
+        if (supplierInput) supplierInput.focus();
+        return;
+    }
+    const email = (currentEmailSenderEmail || '').trim().toLowerCase();
+    if (!email || email.indexOf('@') === -1) {
+        alert('No sender email address is available for this email.');
+        return;
+    }
+    const domain = email.split('@')[1];
+    const personalDomains = ['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.uk',
+        'hotmail.com', 'hotmail.co.uk', 'outlook.com', 'live.com', 'live.co.uk',
+        'icloud.com', 'aol.com', 'msn.com'];
+    // Domain-level rule for business addresses (handier — matches the whole
+    // supplier), exact address for personal/shared mailboxes.
+    const pattern = personalDomains.includes(domain) ? email : '@' + domain;
+    const btn = document.getElementById('modal-link-supplier-btn');
+    if (btn) btn.disabled = true;
+    fetch('{% url "manage_supplier_rules" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'add',
+            email_pattern: pattern,
+            supplier_name: supplierName,
+            note: 'Linked from AP create-invoice modal',
+        }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (btn) btn.disabled = false;
+        if (data.success) {
+            if (btn) {
+                btn.classList.add('linked');
+                btn.innerHTML = '<i class="bi bi-check-lg"></i> Linked';
+                setTimeout(() => {
+                    // Sender is now linked — keep the button in the disabled
+                    // "Linked" state rather than re-enabling a redundant action.
+                    setLinkSupplierButtonState(true, supplierName);
+                }, 2500);
+            }
+        } else {
+            alert(data.error || 'Failed to link supplier.');
+        }
+    })
+    .catch(err => { if (btn) btn.disabled = false; alert('Error: ' + err.message); });
+}
+
+// -- Create Invoice Modal ------------------------------------------------------
+function openCreateModal(btn) {
+    currentEmailId = btn.dataset.emailId;
+    // Email creation is single-invoice - clear any manual batch state
+    manualBatchFiles = [];
+    manualBatchIndex = 0;
+    manualBatchQueue = {};
+    const _badge = document.getElementById('modal-batch-progress');
+    if (_badge) { _badge.style.display = 'none'; _badge.textContent = ''; }
+    const _headerNav = document.getElementById('modal-batch-header-nav');
+    if (_headerNav) _headerNav.style.display = 'none';
+    // Email mode always uses the single Create Invoice action
+    const _queueBtn = document.getElementById('modal-queue-btn');
+    const _queueSubmitBtn = document.getElementById('modal-queue-submit-btn');
+    const _confirmBtn = document.getElementById('modal-confirm-btn');
+    if (_queueBtn) _queueBtn.style.display = 'none';
+    if (_queueSubmitBtn) _queueSubmitBtn.style.display = 'none';
+    if (_confirmBtn) _confirmBtn.style.display = '';
+    const attachments = JSON.parse(btn.dataset.attachments || '[]');
+    const senderDisplay = btn.dataset.sender || '';
+    const senderName = btn.dataset.senderName || '';
+
+    // Reset form fields
+    resetCreateModalBase();
+    const matchedSupplier = btn.dataset.matchedSupplier || '';
+    if (matchedSupplier) {
+        prefillMatchedSupplier(matchedSupplier);
+    } else {
+        document.getElementById('new-pinv-supplier').value = senderName;
+    }
+    // Disable the "Link to supplier" button when the sender is already linked
+    // (an existing SupplierEmailRule already maps this sender to a supplier),
+    // since linking again would be redundant.
+    setLinkSupplierButtonState(!!matchedSupplier, matchedSupplier);
+    // Pre-fill PO if the email has a matched PO
+    const prePoId    = btn.dataset.poId    || '';
+    const prePoLabel = btn.dataset.poLabel || '';
+    const prePoType  = btn.dataset.poType  || '';
+    if (prePoId) selectModalPO(prePoId, prePoLabel || prePoId, prePoType);;
+
+    // Email context
+    document.getElementById('modal-sender').textContent = senderDisplay;
+    currentEmailSenderEmail = btn.dataset.senderEmail || '';
+
+    // Render attachment selector
+    const list = document.getElementById('modal-attachment-list');
+    if (attachments.length) {
+        list.innerHTML = attachments.map((a, i) => {
+            const isPdf = (a.content_type || '').toLowerCase().includes('pdf')
+                       || (a.name || '').toLowerCase().endsWith('.pdf');
+            const icon = isPdf ? 'bi-file-earmark-pdf' : 'bi-file-earmark';
+            const size = formatBytes(a.size);
+            const attId = a.id;
+            return `<div class="apay-att-option-row">
+                <label class="apay-att-option">
+                    <input type="radio" name="modal_att_id" value="${attId}" ${i === 0 ? 'checked' : ''}
+                           onchange="onAttachmentChange(this, '${a.name.replace(/'/g, "\\'")}', ${isPdf})">
+                    <i class="bi ${icon}"></i>
+                    <span class="apay-att-option-name">${a.name}</span>
+                    <span class="apay-att-option-size">${size}</span>
+                </label>${isPdf
+                ? `<a href="/accounts-payable/${currentEmailId}/attachment/${attId}/" target="_blank"
+                       class="apay-att-preview-btn" title="Open PDF in new tab">
+                       <i class="bi bi-eye"></i> Preview
+                   </a>
+                   <a href="/accounts-payable/${currentEmailId}/attachment/${attId}/?download=1" download
+                       class="apay-att-preview-btn" title="Download PDF">
+                       <i class="bi bi-download"></i> Download
+                   </a>`
+                : ''}
+            </div>`;
+        }).join('');
+
+        const first = attachments[0];
+        currentAttachmentId = first.id;
+        // Pre-fill reference with the first attachment's filename (no extension)
+        const refEl = document.getElementById('new-pinv-reference');
+        if (refEl && !refEl.value) refEl.value = (first.name || '').replace(/\.[^/.]+$/, '');
+        if ((first.content_type || '').toLowerCase().includes('pdf')) {
+            parseEmailAttachment(first.id, !!matchedSupplier);
+        } else {
+            autoPopulateFromFilename(first.name);
+        }
+    } else {
+        list.innerHTML = '<p class="apay-att-no-message">No attachments on this email.</p>';
+    }
+
+    // Surface "No matching POs found" straight away unless a PO was pre-filled
+    // or a PDF parse is still pending — in the pending case the parse callback
+    // settles the hint once it knows whether it found a suggested PO.
+    const _willParse = attachments.length
+        && (attachments[0].content_type || '').toLowerCase().includes('pdf');
+    if (!prePoId && !_willParse) setModalPoNoMatch(true);
+
+    addModalLine();
+    document.getElementById('create-invoice-modal').classList.add('open');
+}
+
+function closeCreateModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('create-invoice-modal').classList.remove('open');
+    currentEmailId = null;
+    currentAttachmentId = null;
+    currentManualAttachmentFile = null;
+    // Cancel any in-progress batch
+    manualBatchFiles = [];
+    manualBatchIndex = 0;
+    manualBatchSupplier = null;
+    manualBatchQueue = {};
+    if (_manualPreviewUrl) { URL.revokeObjectURL(_manualPreviewUrl); _manualPreviewUrl = null; }
+    const badge = document.getElementById('modal-batch-progress');
+    if (badge) { badge.style.display = 'none'; badge.textContent = ''; }
+    // Restore default footer buttons for the next (single) modal open
+    const queueBtn = document.getElementById('modal-queue-btn');
+    const queueSubmitBtn = document.getElementById('modal-queue-submit-btn');
+    const confirmBtn = document.getElementById('modal-confirm-btn');
+    if (queueBtn) queueBtn.style.display = 'none';
+    if (queueSubmitBtn) queueSubmitBtn.style.display = 'none';
+    if (confirmBtn) confirmBtn.style.display = '';
+}
+
+function prefillMatchedSupplier(name) {
+    if (!name) return;
+    fetch(`/api/supplier-search/?q=${encodeURIComponent(name)}`, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        credentials: 'same-origin',
+    })
+    .then(r => r.json())
+    .then(data => {
+        const results = data.results || [];
+        const exact = results.find(s => s.name.toLowerCase() === name.toLowerCase());
+        if (exact) {
+            selectModalSupplier(exact.name, exact.vat_rate !== undefined ? exact.vat_rate : null);
+        } else {
+            selectModalSupplier(name, null);
+        }
+    })
+    .catch(() => selectModalSupplier(name, null));
+}
+
+function onAttachmentChange(radio, filename, isPdf) {
+    currentAttachmentId = radio.value;
+    const supplierInput = document.getElementById('new-pinv-supplier');
+    const supplierAlreadySet = !!(supplierInput && supplierInput.dataset.supplierId === 'matched');
+    if (isPdf) {
+        parseEmailAttachment(radio.value, supplierAlreadySet);
+    } else {
+        autoPopulateFromFilename(filename);
+    }
+}
+
+function parseEmailAttachment(attachmentId, hasMatchedSupplier = false) {
+    if (!currentEmailId) return;
+    const statusEl = document.getElementById('modal-parse-status');
+    statusEl.textContent = 'Extracting data from PDF\u2026';
+
+    fetch(`/accounts-payable/${currentEmailId}/attachment/${attachmentId}/parse/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
+    })
+    .then(r => r.json())
+    .then(data => {
+        statusEl.textContent = '';
+        if (!data.success || !data.extracted) { refreshPoNoMatchHint(); return; }
+        const ex = data.extracted;
+        applyExtractedToModal(ex, { skipSupplier: hasMatchedSupplier });
+
+        // Auto-fill PO field when the PDF contains a matched PO reference
+        if (ex.suggested_po) {
+            const spo = ex.suggested_po;
+            selectModalPOFromSearch(spo.workguru_id, spo.display_number, spo.po_type || 'supplier');
+            statusEl.textContent = `\u2713 PO matched: ${spo.display_number}${spo.supplier_name ? ' \u2013 ' + spo.supplier_name : ''}`;
+            setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 5000);
+        }
+        refreshPoNoMatchHint();
+    })
+    .catch(() => { statusEl.textContent = ''; refreshPoNoMatchHint(); });
+}
+
+// After a parse settles, show the "No matching POs found" hint only when no PO
+// ended up selected (either pre-filled from the email or found in the PDF).
+function refreshPoNoMatchHint() {
+    const poInput = document.getElementById('new-pinv-po-search');
+    setModalPoNoMatch(!(poInput && poInput.dataset.poId));
+}
+
+function submitCreateInvoice() {
+    const invoiceNumber = document.getElementById('new-pinv-number').value.trim();
+    if (!invoiceNumber) { alert('Invoice number is required'); return; }
+
+    const data = gatherModalInvoiceData();
+    const fd = buildInvoiceFormData(data, (!currentEmailId && currentManualAttachmentFile) ? currentManualAttachmentFile : null);
+    if (currentAttachmentId) fd.append('attachment_id', currentAttachmentId);
+
+    const btn = document.getElementById('modal-confirm-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Creating\u2026';
+
+    const createUrl = currentEmailId
+        ? `/accounts-payable/${currentEmailId}/create-invoice/`
+        : '{% url "create_purchase_invoice" %}';
+    const headers = currentEmailId
+        ? { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' }
+        : { 'X-CSRFToken': CSRF_TOKEN };
+
+    fetch(createUrl, {
+        method: 'POST',
+        headers,
+        body: fd,
+    })
+    .then(r => {
+        if (!r.ok) return r.text().then(t => { throw new Error(`Server ${r.status}: ${t.substring(0, 400)}`); });
+        return r.json();
+    })
+    .then(data => {
+        if (data.success || data.invoice_url) {
+            // Manual batch: if more invoices remain in the queue, advance to the
+            // next file instead of navigating away.
+            const inBatch = !currentEmailId && manualBatchFiles.length > 1;
+            if (inBatch && manualBatchIndex < manualBatchFiles.length - 1) {
+                showBatchToast(`Invoice ${manualBatchIndex + 1} of ${manualBatchFiles.length} created`);
+                advanceManualBatch();
+                return;
+            }
+            if (inBatch) showBatchToast('Final invoice created');
+            window.location.href = data.redirect || data.invoice_url;
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Create Invoice';
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-lg"></i> Create Invoice';
+        alert('Error creating invoice:\n' + err.message);
+    });
+}
+
+// -- Reusable form gather / build ------------------------------------------
+// Collect every field in the create modal into a plain object so the same
+// data can be submitted now (Create Invoice) or stored for later (Add to Queue).
+function gatherModalInvoiceData() {
+    const lineItems = [];
+    document.querySelectorAll('.pinv-line-row').forEach(row => {
+        const desc     = row.querySelector('.pinv-line-desc').value.trim();
+        const qty      = parseFloat(row.querySelector('.pinv-line-qty')?.value) || 1;
+        const rate     = parseFloat(row.querySelector('.pinv-line-rate').value) || 0;
+        const totalRaw = parseFloat(row.querySelector('.pinv-line-total')?.value);
+        const total    = Number.isFinite(totalRaw) ? totalRaw : null;
+        const ordInp   = row.querySelector('.pinv-line-order-input');
+        const orderId  = ordInp ? (ordInp.dataset.orderId || null) : null;
+        const orderLabel = ordInp ? (ordInp.value || '') : '';
+        if (desc) lineItems.push({
+            description: desc, quantity: qty, rate, line_total: total,
+            order_id: orderId, order_label: orderLabel,
+            po_product_id: row.dataset.poProductId || '',
+            is_carriage: row.dataset.isCarriage === '1',
+            is_surcharge: row.dataset.isSurcharge === '1',
+        });
+    });
+    const poInput = document.getElementById('new-pinv-po-search');
+    const vatEnabled = document.getElementById('modal-vat-enabled')?.checked;
+    const vatRate    = parseFloat(document.getElementById('modal-vat-rate')?.value) || 0;
+    let discount     = parseFloat(document.getElementById('modal-discount')?.value) || 0;
+    if (discount < 0) discount = 0;
+    const discountPreVat = document.getElementById('modal-discount-pre-vat')?.checked;
+    return {
+        invoice_number: document.getElementById('new-pinv-number').value.trim(),
+        supplier_name: document.getElementById('new-pinv-supplier').value.trim(),
+        date: document.getElementById('new-pinv-date').value,
+        due_date: document.getElementById('new-pinv-due-date').value,
+        status: document.getElementById('new-pinv-status').value,
+        notes: document.getElementById('new-pinv-notes').value.trim(),
+        reference: document.getElementById('new-pinv-reference').value.trim(),
+        supplier_reference: document.getElementById('new-pinv-supplier-ref').value.trim(),
+        purchase_order_id: poInput ? (poInput.dataset.poId || '') : '',
+        purchase_order_label: poInput ? (poInput.value || '') : '',
+        purchase_order_type: poInput ? (poInput.dataset.poType || '') : '',
+        currency: typeof _modalCurrency !== 'undefined' ? _modalCurrency : 'GBP',
+        vat_enabled: !!vatEnabled,
+        vat_rate: vatRate,
+        discount: discount,
+        discount_pre_vat: discountPreVat !== false,
+        line_items: lineItems,
+    };
+}
+
+// Build the multipart FormData expected by the create endpoints from a
+// gathered data object. `file` is the manual-upload File (omit for email mode).
+function buildInvoiceFormData(data, file) {
+    const fd = new FormData();
+    fd.append('invoice_number', data.invoice_number);
+    fd.append('supplier_name', data.supplier_name);
+    fd.append('date', data.date);
+    fd.append('due_date', data.due_date);
+    fd.append('status', data.status);
+    fd.append('notes', data.notes);
+    fd.append('reference', data.reference);
+    fd.append('supplier_reference', data.supplier_reference);
+    if (data.purchase_order_id) fd.append('purchase_order_id', data.purchase_order_id);
+    fd.append('currency', data.currency);
+    if (data.vat_enabled && data.vat_rate > 0) fd.append('vat_rate', data.vat_rate);
+    if (data.discount && data.discount > 0) fd.append('discount', data.discount);
+    fd.append('discount_pre_vat', data.discount_pre_vat !== false ? 'true' : 'false');
+    const carriageLine = data.line_items.find(li => li.is_carriage);
+    if (carriageLine) fd.append('freight_cost', (carriageLine.quantity || 1) * carriageLine.rate);
+    const surchargeLine = data.line_items.find(li => li.is_surcharge);
+    if (surchargeLine) fd.append('surcharge_cost', (surchargeLine.quantity || 1) * surchargeLine.rate);
+    data.line_items.forEach((li, i) => {
+        fd.append(`line_desc_${i}`, li.description);
+        fd.append(`line_qty_${i}`, li.quantity);
+        fd.append(`line_rate_${i}`, li.rate);
+        if (li.line_total !== null && li.line_total !== undefined) fd.append(`line_total_${i}`, li.line_total);
+        fd.append(`line_order_${i}`, li.order_id || '');
+        if (li.po_product_id) fd.append(`line_po_product_${i}`, li.po_product_id);
+    });
+    if (file) fd.append('attachment', file, file.name || 'invoice-upload');
+    return fd;
+}
+
+// -- Pending invoice queue (manual batch) -----------------------------------
+// Lets the user fill out each file in a batch, "Add to Queue" to bank that
+// invoice's data, then create every queued invoice together at the end.
+function queueCount() { return Object.keys(manualBatchQueue).length; }
+
+function nextUnqueuedIndex() {
+    for (let i = manualBatchIndex + 1; i < manualBatchFiles.length; i++) {
+        if (!manualBatchQueue[i]) return i;
+    }
+    for (let i = 0; i < manualBatchFiles.length; i++) {
+        if (!manualBatchQueue[i]) return i;
+    }
+    return -1;
+}
+
+function addInvoiceToQueue() {
+    const data = gatherModalInvoiceData();
+    if (!data.invoice_number) { alert('Invoice number is required before adding to the queue'); return; }
+    if (!data.line_items.length && !confirm('No line items entered. Add this invoice to the queue anyway?')) return;
+
+    // Guard against duplicate numbers within the queue. Auto-generated numbers
+    // (INV-Axx-yyy) are all fetched as the same "next number" before anything is
+    // saved, so bump to the next free value if another queued entry already uses
+    // it. Manually-typed numbers are warned about but not silently changed.
+    if (/^INV-A\d{2}-\d{3}$/.test(data.invoice_number)) {
+        data.invoice_number = nextFreeQueueNumber(data.invoice_number);
+    } else {
+        const clash = Object.keys(manualBatchQueue).some(
+            k => Number(k) !== manualBatchIndex &&
+                 manualBatchQueue[k].invoice_number === data.invoice_number
+        );
+        if (clash && !confirm(`Invoice number "${data.invoice_number}" is already used by another queued invoice. Queue it anyway?`)) return;
+    }
+
+    manualBatchQueue[manualBatchIndex] = data;
+    showBatchToast(`Invoice ${manualBatchIndex + 1} queued as ${data.invoice_number} (${queueCount()} of ${manualBatchFiles.length})`);
+    const next = nextUnqueuedIndex();
+    if (next !== -1 && next !== manualBatchIndex) {
+        manualBatchIndex = next;
+        openManualCreateModal(manualBatchFiles[manualBatchIndex]);
+    } else {
+        updateBatchProgress();
+    }
+}
+
+// Return the supplied auto-pattern number, advanced past any value already used
+// by another queued invoice so the batch never produces duplicates.
+function nextFreeQueueNumber(num) {
+    const used = new Set(
+        Object.keys(manualBatchQueue)
+            .filter(k => Number(k) !== manualBatchIndex)
+            .map(k => manualBatchQueue[k].invoice_number)
+    );
+    const m = /^INV-A(\d{2})-(\d{3})$/.exec(num);
+    if (!m) return num;
+    let group = parseInt(m[1], 10);
+    let seq = parseInt(m[2], 10);
+    let candidate = `INV-A${String(group).padStart(2, '0')}-${String(seq).padStart(3, '0')}`;
+    while (used.has(candidate)) {
+        seq++;
+        if (seq > 999) { group++; seq = 0; }
+        candidate = `INV-A${String(group).padStart(2, '0')}-${String(seq).padStart(3, '0')}`;
+    }
+    return candidate;
+}
+
+// Restore a previously-queued invoice back into the modal form.
+function applyQueuedDataToModal(data) {
+    document.getElementById('new-pinv-number').value = data.invoice_number || '';
+    if (data.supplier_name) {
+        selectModalSupplier(data.supplier_name, data.vat_enabled ? data.vat_rate : null);
+    } else {
+        clearModalSupplier();
+    }
+    document.getElementById('new-pinv-date').value = data.date || '';
+    document.getElementById('new-pinv-due-date').value = data.due_date || '';
+    document.getElementById('new-pinv-status').value = data.status || 'Draft';
+    document.getElementById('new-pinv-notes').value = data.notes || '';
+    if (data.notes && typeof showInvoiceNote === 'function') showInvoiceNote();
+    document.getElementById('new-pinv-reference').value = data.reference || '';
+    document.getElementById('new-pinv-supplier-ref').value = data.supplier_reference || '';
+    setModalCurrency(data.currency || 'GBP');
+
+    if (data.purchase_order_id) {
+        selectModalPO(data.purchase_order_id, data.purchase_order_label || data.purchase_order_id, data.purchase_order_type || 'supplier');
+    } else {
+        clearModalPO();
+    }
+
+    const vatChk = document.getElementById('modal-vat-enabled');
+    if (vatChk) vatChk.checked = !!data.vat_enabled;
+    const vatRateEl = document.getElementById('modal-vat-rate');
+    if (vatRateEl && data.vat_rate) vatRateEl.value = data.vat_rate;
+
+    const discEl = document.getElementById('modal-discount');
+    if (discEl) discEl.value = (data.discount && data.discount > 0) ? data.discount : '';
+    const discChk = document.getElementById('modal-discount-pre-vat');
+    if (discChk) discChk.checked = data.discount_pre_vat !== false;
+
+    const linesEl = document.getElementById('modal-lines');
+    linesEl.innerHTML = '';
+    modalLineCount = 0;
+    if (data.line_items && data.line_items.length) {
+        data.line_items.forEach(li => {
+            addModalLine();
+            const row = linesEl.lastElementChild;
+            if (!row) return;
+            row.querySelector('.pinv-line-desc').value = li.description || '';
+            const qtyEl = row.querySelector('.pinv-line-qty'); if (qtyEl) qtyEl.value = li.quantity || 1;
+            row.querySelector('.pinv-line-rate').value = (li.rate != null ? li.rate : '');
+            const totalEl = row.querySelector('.pinv-line-total');
+            if (totalEl) totalEl.value = (li.line_total != null ? li.line_total : '');
+            if (li.is_carriage) row.dataset.isCarriage = '1';
+            if (li.is_surcharge) row.dataset.isSurcharge = '1';
+            if (li.po_product_id) row.dataset.poProductId = li.po_product_id;
+            if (li.order_id) {
+                const ordInp = row.querySelector('.pinv-line-order-input');
+                if (ordInp) {
+                    ordInp.dataset.orderId = li.order_id;
+                    ordInp.value = li.order_label || '';
+                    showOrderRow(row);
+                }
+            }
+        });
+    } else {
+        addModalLine();
+    }
+    recalcModalTotal();
+}
+
+function submitInvoiceQueue() {
+    // Bank whatever is currently on screen so the visible invoice isn't lost.
+    const current = gatherModalInvoiceData();
+    if (current.invoice_number && current.line_items.length && !manualBatchQueue[manualBatchIndex]) {
+        if (/^INV-A\d{2}-\d{3}$/.test(current.invoice_number)) {
+            current.invoice_number = nextFreeQueueNumber(current.invoice_number);
+        }
+        manualBatchQueue[manualBatchIndex] = current;
+    }
+    const indices = Object.keys(manualBatchQueue).map(Number).sort((a, b) => a - b);
+    if (!indices.length) { alert('Nothing in the queue yet. Use "Add to Queue" first.'); return; }
+
+    const submitBtn = document.getElementById('modal-queue-submit-btn');
+    const queueBtn = document.getElementById('modal-queue-btn');
+    if (submitBtn) submitBtn.disabled = true;
+    if (queueBtn) queueBtn.disabled = true;
+
+    let created = 0;
+    const failures = [];
+
+    const run = (pos) => {
+        if (pos >= indices.length) {
+            if (failures.length) {
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.innerHTML = '<i class="bi bi-check2-all"></i> Create Queue'; }
+                if (queueBtn) queueBtn.disabled = false;
+                alert(`${created} invoice(s) created. ${failures.length} failed:\n` + failures.join('\n'));
+                return;
+            }
+            showBatchToast(`${created} invoice(s) created`);
+            setTimeout(() => { window.location.href = '{% url "purchase_invoices_list" %}'; }, 900);
+            return;
+        }
+        const idx = indices[pos];
+        const data = manualBatchQueue[idx];
+        const file = manualBatchFiles[idx] || null;
+        if (submitBtn) submitBtn.innerHTML = `<i class="bi bi-hourglass-split"></i> Creating ${pos + 1}/${indices.length}\u2026`;
+        const fd = buildInvoiceFormData(data, file);
+        fetch('{% url "create_purchase_invoice" %}', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF_TOKEN },
+            body: fd,
+        })
+        .then(r => r.ok ? r.json() : r.text().then(t => { throw new Error(`Server ${r.status}: ${t.substring(0, 200)}`); }))
+        .then(resp => {
+            if (resp.success || resp.invoice_url) created++;
+            else failures.push(`${data.invoice_number}: ${resp.error || 'Unknown error'}`);
+        })
+        .catch(err => { failures.push(`${data.invoice_number}: ${err.message}`); })
+        .finally(() => run(pos + 1));
+    };
+    run(0);
+}
+
+// -- Helpers ----------------------------------------------------------------
+// -- Unprocess -----------------------------------------------------------------
+function unprocessEmail(btn) {
+    const emailId = btn.dataset.emailId;
+    btn.disabled = true;
+    fetch(`/accounts-payable/${emailId}/unprocess/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            apayReloadInbox();
+        } else {
+            btn.disabled = false;
+        }
+    })
+    .catch(() => { btn.disabled = false; });
+}
+
+// -- Expand / collapse email detail --------------------------------------------
+function toggleEmailDetail(emailId) {
+    const row = document.getElementById('detail-row-' + emailId);
+    const icon = document.getElementById('expand-icon-' + emailId);
+    const isOpen = row.style.display !== 'none';
+    row.style.display = isOpen ? 'none' : 'table-row';
+    icon.className = isOpen ? 'bi bi-chevron-right' : 'bi bi-chevron-down';
+}
+
+function formatBytes(bytes) {
+    if (!bytes) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+// -- Kebab menu ----------------------------------------------------------------
+// Toggling/positioning/closing handled by the global controller in base.html.
+function closeKebab() { closeAllKebabs(); }
+
+// -- Hide unmatched rows -------------------------------------------------------
+let _hideUnmatched = {{ matched_only|yesno:'true,false' }};
+
+// Sync button appearance on page load
+(function() {
+    if (_hideUnmatched) {
+        const icon  = document.getElementById('hide-unmatched-icon');
+        const label = document.getElementById('hide-unmatched-label');
+        if (icon)  icon.className  = 'bi bi-eye';
+        if (label) label.textContent = 'Show Unmatched';
+    }
+})();
+
+function toggleHideUnmatched() {
+    const params = new URLSearchParams(window.location.search);
+    if (_hideUnmatched) {
+        params.delete('matched_only');
+    } else {
+        params.set('matched_only', '1');
+    }
+    params.delete('page');
+    window.location.search = params.toString();
+}
+
+// -- Checkbox / bulk selection -------------------------------------------------
+function toggleSelectAll(master) {
+    document.querySelectorAll('.apay-row-check').forEach(cb => { cb.checked = master.checked; });
+    updateBulkBar();
+}
+
+function updateBulkBar() {
+    const checked = document.querySelectorAll('.apay-row-check:checked');
+    const bar = document.getElementById('bulk-bar');
+    const count = document.getElementById('bulk-count');
+    if (checked.length > 0) {
+        bar.style.display = 'flex';
+        count.textContent = `${checked.length} selected`;
+    } else {
+        bar.style.display = 'none';
+    }
+    const all = document.querySelectorAll('.apay-row-check');
+    const master = document.getElementById('select-all');
+    if (master) master.indeterminate = checked.length > 0 && checked.length < all.length;
+    if (master) master.checked = checked.length === all.length && all.length > 0;
+}
+
+function clearSelection() {
+    document.querySelectorAll('.apay-row-check').forEach(cb => { cb.checked = false; });
+    const master = document.getElementById('select-all');
+    if (master) { master.checked = false; master.indeterminate = false; }
+    updateBulkBar();
+}
+
+function getSelectedIds() {
+    return Array.from(document.querySelectorAll('.apay-row-check:checked')).map(cb => parseInt(cb.value));
+}
+
+function bulkAction(action) {
+    const ids = getSelectedIds();
+    if (!ids.length) return;
+    const label = action === 'delete' ? `Delete ${ids.length} email(s)?` : `Ignore ${ids.length} email(s)?`;
+    if (!confirm(label)) return;
+
+    fetch('{% url "bulk_email_action" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ids }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) { apayReloadInbox(); }
+        else { alert('Error: ' + (data.error || 'Unknown')); }
+    })
+    .catch(() => alert('Network error'));
+}
+
+{% include 'stock_take/partials/apay_rules_js.html' %}
+
+// -- Per-row kebab menu --------------------------------------------------------
+// Delegates to the global kebab controller (base.html).
+function toggleRowKebab(btn, e) { toggleKebab(btn, e); }
+function closeRowKebab() { closeAllKebabs(); }
+
+// -- Shared PO badge renderer --------------------------------------------------
+// Renders a PO badge into a cell, mirroring the server-side template so an
+// amount-based "educated guess" looks identical whether it appears on page load
+// or after a (re)scan: dashed border + a magic/question icon and an explanatory
+// tooltip. A confirmed match (explicit reference) renders as a solid badge.
+function apayRenderPoBadge(cell, po, opts) {
+    if (!cell || !po) return;
+    opts = opts || {};
+    const amountMatch = !!opts.amountMatch;
+    const amountFuzzy = !!opts.amountFuzzy;
+    const statusCls = (po.status === 'Received' || po.status === 'Partially Received')
+        ? 'apay-po-badge--received'
+        : po.status === 'Draft' ? 'apay-po-badge--draft' : 'apay-po-badge--approved';
+    const guessCls = amountMatch ? 'apay-po-badge--guess ' : '';
+    const label = po.display_number || po.workguru_id;
+    let amountNote = '';
+    if (amountFuzzy) amountNote = ' \u2013 approx. amount match (carriage?)';
+    else if (amountMatch) amountNote = ' \u2013 matched on amount';
+    let icon = '';
+    if (amountFuzzy) icon = '<i class="bi bi-question-circle apay-po-guess-icon"></i>';
+    else if (amountMatch) icon = '<i class="bi bi-magic apay-po-guess-icon"></i>';
+    const title = `${po.supplier_name || ''}${po.supplier_name ? ' \u2013 ' : ''}${po.status}${amountNote}`.trim();
+    cell.innerHTML = `<a href="/purchase-order/${po.workguru_id}/"
+        class="apay-po-badge ${guessCls}${statusCls}"
+        title="${title.replace(/"/g, '&quot;')}"
+        target="_blank">${icon}${label}</a>`;
+}
+
+function rescanEmailPO(emailId) {
+    const cell = document.getElementById('po-cell-' + emailId);
+    if (cell) {
+        cell.innerHTML = '<span class="apay-po-scan-pending"><span class="apay-po-scan-dot"></span></span>';
+    }
+    console.log(`[AP rescan] Email ${emailId}: POSTing force rescan...`);
+    fetch(`/accounts-payable/${emailId}/scan-po/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ force: true }),
+    })
+    .then(r => {
+        console.log(`[AP rescan] Email ${emailId}: HTTP ${r.status}`);
+        return r.json().then(data => ({ status: r.status, data }));
+    })
+    .then(({ status, data }) => {
+        console.log(`[AP rescan] Email ${emailId}: response`, data);
+        if (!cell) return;
+        if (status === 200 && data.success && data.po) {
+            const po = data.po;
+            apayRenderPoBadge(cell, po, {
+                amountMatch: !!data.amount_match,
+                amountFuzzy: !!data.amount_fuzzy,
+            });
+            const createBtn = document.querySelector(
+                `button.apay-icon-btn.create[data-email-id="${emailId}"]`
+            );
+            if (createBtn) {
+                createBtn.dataset.poId = po.workguru_id;
+                createBtn.dataset.poLabel = po.display_number || po.workguru_id;
+                createBtn.dataset.poType = po.po_type || 'supplier';
+            }
+        } else {
+            const reason = data.error
+                ? `error: ${data.error}`
+                : (data.po === null
+                    ? 'no PO matched. PDF text preview: ' + (data._debug_text || '(empty)')
+                    : 'unknown response shape');
+            console.warn(`[AP rescan] Email ${emailId}: ${reason}`);
+            cell.innerHTML = `<span class="apay-att-none" title="${(data.error || 'No PO found in PDF').replace(/"/g, '&quot;')}"><i class="bi bi-dash"></i></span>`;
+        }
+    })
+    .catch(err => {
+        console.error(`[AP rescan] Email ${emailId}: fetch failed`, err);
+        if (cell) cell.innerHTML = '<span class="apay-att-none" title="Network error"><i class="bi bi-dash"></i></span>';
+    });
+}
+
+function deleteEmail(emailId) {
+    if (!confirm('Delete this email from the inbox? This cannot be undone.')) return;
+    fetch(`/accounts-payable/${emailId}/delete/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById('email-row-' + emailId);
+            const detailRow = document.getElementById('detail-row-' + emailId);
+            [row, detailRow].forEach(el => {
+                if (el) {
+                    el.style.transition = 'opacity 0.25s';
+                    el.style.opacity = '0';
+                    setTimeout(() => el.remove(), 260);
+                }
+            });
+        }
+    });
+}
+
+// -- Split email into per-attachment emails ------------------------------------
+function splitEmail(emailId, count) {
+    splitEmailId = emailId;
+    splitEmailCount = count;
+    const msg = document.getElementById('split-email-message');
+    if (msg) {
+        msg.textContent = `Split this email into ${count} separate emails (one per attachment)?`;
+    }
+    const modal = document.getElementById('split-email-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeSplitEmailModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    const modal = document.getElementById('split-email-modal');
+    if (modal) modal.style.display = 'none';
+    splitEmailId = null;
+    splitEmailCount = 0;
+}
+
+function confirmSplitEmail() {
+    if (!splitEmailId) return;
+    const emailId = splitEmailId;
+    const confirmBtn = document.getElementById('split-email-confirm-btn');
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Splitting...';
+    }
+    fetch(`/accounts-payable/${emailId}/split/`, {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            apayReloadInbox();
+        } else {
+            closeSplitEmailModal();
+            alert('Split failed: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(() => {
+        closeSplitEmailModal();
+        alert('Network error during split');
+    })
+    .finally(() => {
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '<i class="bi bi-scissors"></i> Split';
+        }
+    });
+}
+
+// -- Auto-scan PDF attachments for PO references -------------------------------
+// For each inbox row that has a PDF but no stored PO match, fire a scan request
+// sequentially (one at a time) so the PO column fills in without a page reload.
+// A second pass also scans rows that have a PDF but no extracted_total yet,
+// so the amount is filled in even when the PO column is already resolved.
+// Re-callable so it can run again after the Accounts Payable modal swaps in a
+// fresh table fragment. Each run takes a generation token: an in-flight chain
+// from a previous render aborts as soon as a newer one starts, so it can never
+// write into rows that have since been replaced.
+let _apayScanGeneration = 0;
+
+function apayStartAutoScan(root) {
+    const scope = root || document;
+    const generation = ++_apayScanGeneration;
+    const stale = () => generation !== _apayScanGeneration;
+
+    // Primary queue: rows needing PO match (shows spinner in PO column)
+    const pending = Array.from(scope.querySelectorAll('[data-scan-id]'))
+                         .map(el => el.dataset.scanId);
+    // Secondary queue: rows with a PDF but no total yet (no spinner needed)
+    const pendingTotal = Array.from(scope.querySelectorAll('[data-total-id]'))
+                              .map(el => el.dataset.totalId)
+                              .filter(id => !pending.includes(id)); // don't double-scan
+
+    function poStatusClass(status) {
+        if (status === 'Received' || status === 'Partially Received') return 'apay-po-badge--received';
+        if (status === 'Draft') return 'apay-po-badge--draft';
+        return 'apay-po-badge--approved';
+    }
+
+    function injectTotal(emailId, total) {
+        if (!total) return;
+        const totalEl = document.getElementById('extracted-total-' + emailId);
+        if (totalEl) {
+            const formatted = parseFloat(total).toLocaleString('en-GB', {
+                minimumFractionDigits: 2, maximumFractionDigits: 2
+            });
+            totalEl.textContent = '\u00a3' + formatted;
+            totalEl.style.display = '';
+        }
+    }
+
+    function scanNext() {
+        if (stale()) return;
+        const emailId = pending.shift();
+        if (!emailId) {
+            // Primary queue done - start secondary (total-only) pass
+            setTimeout(scanTotalNext, 200);
+            return;
+        }
+        fetch(`/accounts-payable/${emailId}/scan-po/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
+        })
+        .then(r => r.json())
+        .then(data => {
+            const cell = document.getElementById('po-cell-' + emailId);
+            if (cell && data.success && data.po) {
+                apayRenderPoBadge(cell, data.po, {
+                    amountMatch: !!data.amount_match,
+                    amountFuzzy: !!data.amount_fuzzy,
+                });
+            } else if (cell) {
+                const spinner = cell.querySelector('.apay-po-scan-pending');
+                if (spinner) spinner.remove();
+            }
+            injectTotal(emailId, data.total);
+            setTimeout(scanNext, 150);
+        })
+        .catch(() => setTimeout(scanNext, 600));
+    }
+
+    function scanTotalNext() {
+        if (stale()) return;
+        const emailId = pendingTotal.shift();
+        if (!emailId) return;
+        fetch(`/accounts-payable/${emailId}/scan-po/`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
+        })
+        .then(r => r.json())
+        .then(data => {
+            injectTotal(emailId, data.total);
+            setTimeout(scanTotalNext, 200);
+        })
+        .catch(() => setTimeout(scanTotalNext, 800));
+    }
+
+    // Stagger start slightly so the page is fully rendered first
+    if (pending.length) {
+        setTimeout(scanNext, 800);
+    } else if (pendingTotal.length) {
+        setTimeout(scanTotalNext, 800);
+    }
+}

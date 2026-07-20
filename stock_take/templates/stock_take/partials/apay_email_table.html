@@ -1,0 +1,272 @@
+{% load humanize %}
+{% comment %}
+Email table + pagination. Rendered server-side on the standalone inbox page
+and fetched as a fragment by the Accounts Payable page, which injects it into
+its inbox modal. Keep it self-contained: no page chrome, no <script>.
+{% endcomment %}
+<!-- Email table -->
+<div class="apay-table-container">
+
+    {% if emails %}
+    <table class="table apay-table" id="apay-table">
+        <thead>
+            <tr>
+                <th class="apay-th-check">
+                    <input type="checkbox" id="select-all" title="Select all" onchange="toggleSelectAll(this)">
+                </th>
+                <th class="apay-th-expand"></th>
+                <th class="apay-th-from">From</th>
+                <th class="apay-th-po">PO</th>
+                <th class="apay-th-date">Received</th>
+                <th class="apay-th-att">Attachments</th>
+                <th class="apay-th-amount">Amount</th>
+                <th class="apay-th-action">Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for email in emails %}
+            <tr class="apay-row {% if email.is_priority and not email.is_processed %}priority {% endif %}{% if email.is_processed %}processed{% elif email.is_ignored %}ignored{% endif %}" id="email-row-{{ email.id }}" data-matched="{% if email.purchase_invoice %}1{% else %}0{% endif %}">
+                <td class="apay-td-center">
+                    <input type="checkbox" class="apay-row-check" value="{{ email.id }}" onchange="updateBulkBar()">
+                </td>
+                <td class="apay-expand-cell">
+                    <button class="apay-expand-btn" onclick="toggleEmailDetail({{ email.id }})" title="View details">
+                        <i class="bi bi-chevron-right" id="expand-icon-{{ email.id }}"></i>
+                    </button>
+                </td>
+                <td class="apay-from-cell">
+                    <div class="apay-from-email" title="{{ email.sender_email }}">{% if email.is_priority and not email.is_processed %}<i class="bi bi-lightning-fill apay-priority-badge" title="Priority - process immediately"></i>{% endif %}{{ email.sender_email|default:"(unknown)" }}</div>
+                    <div class="apay-from-subject" title="{{ email.subject }}">{{ email.subject|default:"(no subject)" }}</div>
+                </td>
+                <td class="apay-td-center" id="po-cell-{{ email.id }}">
+                    {% if email.matched_po %}
+                    <a href="{% url 'purchase_order_detail' email.matched_po.workguru_id %}"
+                       class="apay-po-badge {% if email.matched_po.status == 'Received' or email.matched_po.status == 'Partially Received' %}apay-po-badge--received{% elif email.matched_po.status == 'Draft' %}apay-po-badge--draft{% else %}apay-po-badge--approved{% endif %}"
+                       title="{{ email.matched_po.supplier_name }} &ndash; {{ email.matched_po.status }}"
+                       target="_blank">{{ email.matched_po.display_number|default:email.matched_po.workguru_id }}</a>
+                    {% elif email.po_match %}
+                    <a href="{% url 'purchase_order_detail' email.po_match.workguru_id %}"
+                       class="apay-po-badge {% if email.po_match_amount %}apay-po-badge--guess {% endif %}{% if email.po_match.status == 'Received' or email.po_match.status == 'Partially Received' %}apay-po-badge--received{% elif email.po_match.status == 'Draft' %}apay-po-badge--draft{% else %}apay-po-badge--approved{% endif %}"
+                       title="{{ email.po_match.supplier_name }} &ndash; {{ email.po_match.status }}{% if email.po_match_fuzzy %} &ndash; approx. amount match (carriage?){% elif email.po_match_amount %} &ndash; matched on amount{% endif %}"
+                       target="_blank">{% if email.po_match_fuzzy %}<i class="bi bi-question-circle apay-po-guess-icon"></i>{% elif email.po_match_amount %}<i class="bi bi-magic apay-po-guess-icon"></i>{% endif %}{{ email.po_match.display_number|default:email.po_match.workguru_id }}</a>
+                    {% elif not email.is_processed and email.has_pdf %}
+                    <span class="apay-po-scan-pending" data-scan-id="{{ email.id }}">
+                        <span class="apay-po-scan-dot"></span>
+                    </span>
+                    {% else %}
+                    <span class="apay-no-match">&ndash;</span>
+                    {% endif %}
+                </td>
+                <td class="apay-date">
+                    {% if email.received_at %}
+                    {{ email.received_at|date:"d M Y" }}<span class="apay-time"> {{ email.received_at|date:"H:i" }}</span>
+                    {% else %}&ndash;{% endif %}
+                </td>
+                <td class="apay-td-center">
+                    {% if email.attachment_list %}
+                    {% if email.attachment_list|length > 2 %}
+                    <div class="kebab-menu apay-att-overflow-wrap">
+                        <button class="kebab-trigger apay-att-overflow-btn" onclick="toggleKebab(this, event)" title="{{ email.attachment_list|length }} attachments">
+                            <i class="bi bi-paperclip"></i> {{ email.attachment_list|length }}
+                        </button>
+                        <div class="kebab-dropdown apay-att-overflow-menu">
+                            {% for att in email.attachment_list %}
+                            <a href="/accounts-payable/{{ email.id }}/attachment/{{ att.id }}/" target="_blank"
+                               class="kebab-item apay-att-overflow-link {% if 'pdf' in att.content_type %}pdf{% endif %}">
+                                <i class="bi {% if 'pdf' in att.content_type %}bi-file-earmark-pdf{% else %}bi-file-earmark{% endif %}"></i>
+                                <span class="apay-att-overflow-name">{{ att.name }}</span>
+                            </a>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="apay-att-links">
+                        {% for att in email.attachment_list %}
+                        <a href="/accounts-payable/{{ email.id }}/attachment/{{ att.id }}/"
+                           target="_blank"
+                           class="apay-att-link {% if 'pdf' in att.content_type %}pdf{% endif %}"
+                           title="{{ att.name }} ({{ att.size|filesizeformat }})">
+                            <i class="bi {% if 'pdf' in att.content_type %}bi-file-earmark-pdf{% else %}bi-file-earmark{% endif %}"></i>
+                            <span>{{ att.name }}</span>
+                        </a>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% else %}
+                    <span class="apay-att-none"><i class="bi bi-dash"></i></span>
+                    {% endif %}
+                </td>
+                <td class="apay-td-center apay-amount-cell">
+                    {% if email.extracted_total %}
+                    <span class="apay-extracted-total" id="extracted-total-{{ email.id }}">&pound;{{ email.extracted_total|floatformat:2 }}</span>
+                    {% elif not email.is_processed and email.has_pdf %}
+                    <span class="apay-extracted-total" id="extracted-total-{{ email.id }}" data-total-id="{{ email.id }}" style="display:none"></span>
+                    {% else %}
+                    <span class="apay-extracted-total" id="extracted-total-{{ email.id }}" style="display:none"></span>
+                    <span class="apay-no-match">&ndash;</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="apay-actions">
+                        {% if email.is_processed %}
+                        {% if email.purchase_invoice %}
+                        <a href="{% url 'purchase_invoice_detail' email.purchase_invoice.id %}"
+                           class="apay-icon-btn view" title="View linked invoice">
+                            <i class="bi bi-receipt"></i>
+                        </a>
+                        {% endif %}
+                        <div class="kebab-menu">
+                            <button class="kebab-trigger" onclick="toggleRowKebab(this, event)" title="More actions">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="kebab-dropdown">
+                                <button class="kebab-item"
+                                        data-email-id="{{ email.id }}"
+                                        onclick="closeRowKebab(this); unprocessEmail(this)">
+                                    <i class="bi bi-arrow-counterclockwise"></i> Unprocess
+                                </button>
+                                <button class="kebab-item danger"
+                                        onclick="closeRowKebab(this); deleteEmail({{ email.id }})">
+                                    <i class="bi bi-trash3"></i> Delete
+                                </button>
+                            </div>
+                        </div>
+                        {% elif email.is_ignored %}
+                        <div class="kebab-menu">
+                            <button class="kebab-trigger" onclick="toggleRowKebab(this, event)" title="More actions">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="kebab-dropdown">
+                                <button class="kebab-item"
+                                        data-email-id="{{ email.id }}"
+                                        onclick="closeRowKebab(this); unignoreEmail(this)">
+                                    <i class="bi bi-arrow-counterclockwise"></i> Restore
+                                </button>
+                                <button class="kebab-item danger"
+                                        onclick="closeRowKebab(this); deleteEmail({{ email.id }})">
+                                    <i class="bi bi-trash3"></i> Delete
+                                </button>
+                            </div>
+                        </div>
+                        {% else %}
+                        {% if email.tab == 'statements' %}
+                        <button class="apay-icon-btn create"
+                                data-email-id="{{ email.id }}"
+                                title="Mark as filed in Xero"
+                                onclick="markEmailFiled({{ email.id }})">
+                            <i class="bi bi-check2-circle"></i>
+                        </button>
+                        {% elif email.attachment_list %}
+                        <button class="apay-icon-btn create"
+                                data-email-id="{{ email.id }}"
+                                data-sender="{{ email.sender_name }}{% if email.sender_name and email.sender_email %} ({{ email.sender_email }}){% else %}{{ email.sender_email }}{% endif %}"
+                                data-sender-name="{{ email.sender_name }}"
+                                data-sender-email="{{ email.sender_email }}"
+                                data-subject="{{ email.subject|default:'(no subject)'|truncatechars:80 }}"
+                                data-attachments="{{ email.attachment_names }}"
+                                data-matched-supplier="{{ email.matched_supplier|default:'' }}"
+                                {% if email.matched_po %}data-po-id="{{ email.matched_po.workguru_id }}" data-po-label="{{ email.matched_po.display_number|default:email.matched_po.workguru_id }}" data-po-type="{{ email.matched_po.po_type|default:'supplier' }}"{% elif email.po_match and not email.po_match_fuzzy %}data-po-id="{{ email.po_match.workguru_id }}" data-po-label="{{ email.po_match.display_number|default:email.po_match.workguru_id }}" data-po-type="{{ email.po_match.po_type|default:'supplier' }}"{% endif %}
+                                title="Create purchase invoice"
+                                onclick="openCreateModal(this)">
+                            <i class="bi bi-plus-circle-fill"></i>
+                        </button>
+                        {% endif %}
+                        <div class="kebab-menu">
+                            <button class="kebab-trigger" onclick="toggleRowKebab(this, event)" title="More actions">
+                                <i class="bi bi-three-dots-vertical"></i>
+                            </button>
+                            <div class="kebab-dropdown">
+                                {% if email.has_pdf %}
+                                <button class="kebab-item"
+                                        onclick="closeRowKebab(this); rescanEmailPO({{ email.id }})">
+                                    <i class="bi bi-arrow-repeat"></i> Rescan PDF
+                                </button>
+                                {% endif %}
+                                <button class="kebab-item"
+                                        data-email-id="{{ email.id }}"
+                                        data-sender="{{ email.sender_name }}{% if email.sender_name and email.sender_email %} ({{ email.sender_email }}){% else %}{{ email.sender_email }}{% endif %}"
+                                        data-subject="{{ email.subject|default:'(no subject)'|truncatechars:80 }}"
+                                        onclick="closeRowKebab(this); openLinkModal(this)">
+                                    <i class="bi bi-link-45deg"></i> Link to Invoice
+                                </button>
+                                {% if email.attachment_list|length > 1 %}
+                                <button class="kebab-item"
+                                        onclick="closeRowKebab(this); splitEmail({{ email.id }}, {{ email.attachment_list|length }})">
+                                    <i class="bi bi-scissors"></i> Split into {{ email.attachment_list|length }} emails
+                                </button>
+                                {% endif %}
+                                <button class="kebab-item"
+                                        data-email-id="{{ email.id }}"
+                                        onclick="closeRowKebab(this); ignoreEmail(this)">
+                                    <i class="bi bi-slash-circle"></i> Ignore
+                                </button>
+                                <button class="kebab-item danger"
+                                        onclick="closeRowKebab(this); deleteEmail({{ email.id }})">
+                                    <i class="bi bi-trash3"></i> Delete
+                                </button>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            <tr class="apay-detail-row" id="detail-row-{{ email.id }}" style="display:none">
+                <td colspan="8" class="apay-detail-cell">
+                    <div class="apay-detail-panel">
+                        <div class="apay-detail-grid">
+                            <div class="apay-detail-item">
+                                <span class="apay-detail-label">From</span>
+                                <span class="apay-detail-value">{% if email.sender_name %}{{ email.sender_name }} &lt;{{ email.sender_email }}&gt;{% else %}{{ email.sender_email|default:"(unknown)" }}{% endif %}</span>
+                            </div>
+                            <div class="apay-detail-item">
+                                <span class="apay-detail-label">Subject</span>
+                                <span class="apay-detail-value">{{ email.subject|default:"(no subject)" }}</span>
+                            </div>
+                        </div>
+                        {% if email.body_preview %}
+                        <div class="apay-detail-body">
+                            <span class="apay-detail-label">Message</span>
+                            <p>{{ email.body_preview }}</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="apay-empty">
+        <i class="bi bi-inbox"></i>
+        <p>No emails found.{% if is_configured %} Click <strong>Sync Mailbox</strong> to fetch emails.{% endif %}</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Pagination -->
+{% if page_obj.paginator.num_pages > 1 %}
+<div class="apay-pagination">
+    {% if page_obj.has_previous %}
+    <a class="apay-page-btn" href="?{% if status_filter %}status={{ status_filter }}&{% endif %}{% if entity_tab %}tab={{ entity_tab }}&{% endif %}{% if search_query %}q={{ search_query }}&{% endif %}page={{ page_obj.previous_page_number }}">&laquo;</a>
+    {% else %}
+    <span class="apay-page-btn disabled">&laquo;</span>
+    {% endif %}
+
+    {% for num in page_obj.paginator.page_range %}
+        {% if num == page_obj.number %}
+        <span class="apay-page-btn active">{{ num }}</span>
+        {% elif num == 1 or num == page_obj.paginator.num_pages or num >= page_obj.number|add:"-2" and num <= page_obj.number|add:"2" %}
+        <a class="apay-page-btn" href="?{% if status_filter %}status={{ status_filter }}&{% endif %}{% if entity_tab %}tab={{ entity_tab }}&{% endif %}{% if search_query %}q={{ search_query }}&{% endif %}page={{ num }}">{{ num }}</a>
+        {% elif num == page_obj.number|add:"-3" or num == page_obj.number|add:"3" %}
+        <span class="apay-page-btn disabled">&hellip;</span>
+        {% endif %}
+    {% endfor %}
+
+    {% if page_obj.has_next %}
+    <a class="apay-page-btn" href="?{% if status_filter %}status={{ status_filter }}&{% endif %}{% if entity_tab %}tab={{ entity_tab }}&{% endif %}{% if search_query %}q={{ search_query }}&{% endif %}page={{ page_obj.next_page_number }}">&raquo;</a>
+    {% else %}
+    <span class="apay-page-btn disabled">&raquo;</span>
+    {% endif %}
+    <span class="apay-page-info">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} &mdash; {{ page_obj.paginator.count|intcomma }} emails</span>
+</div>
+{% endif %}

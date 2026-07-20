@@ -18,6 +18,7 @@ from django.core.paginator import Paginator
 from django.db import models as db_models
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
@@ -34,6 +35,17 @@ logger = logging.getLogger(__name__)
 
 
 _MATCHABLE_STATUSES = ('Draft', 'Approved', 'Received', 'Partially Received')
+
+
+def _with_attachments(qs):
+	"""Restrict a MailboxEmail queryset to emails that actually carry an attachment.
+
+	Only emails with a document attached can become a purchase invoice, so the
+	inbox ignores the rest. `attachment_names` is a JSON blob (blank, not null)
+	holding the non-inline attachments, and `attachment_count` is a Python-only
+	property — so the empty cases have to be excluded by value, not `__isnull`.
+	"""
+	return qs.exclude(attachment_names='').exclude(attachment_names='[]')
 
 # Free/personal email domains — the local-part (username) of these addresses
 # is a personal identifier, not a company name, so word-split supplier matching
@@ -391,8 +403,96 @@ def _build_supplier_email_index():
 
 @login_required
 @page_permission_required('accounts_payable')
+def accounts_payable(request):
+	"""Accounts Payable landing page — purchase orders awaiting a supplier invoice.
+
+	The work here is driven by the PO list, not the mailbox: pick the supplier an
+	invoice came from, and the awaiting-invoice POs narrow to that supplier so the
+	invoice can be raised against the right one. The shared mailbox is a secondary
+	source and lives behind the inbox modal.
+	"""
+	pos = _get_approved_unreceived_pos()
+
+	# Supplier picker options are built from the awaiting-invoice POs themselves,
+	# so the dropdown can never offer a supplier with nothing to invoice.
+	# PurchaseOrder has no FK to Supplier — the join is supplier_id == workguru_id
+	# — so carry both keys and let the client filter on whichever the PO has.
+	supplier_options = {}
+	for po in pos:
+		name = (po.supplier_name or '').strip()
+		if not name:
+			continue
+		key = name.lower()
+		entry = supplier_options.setdefault(key, {
+			'name': name,
+			'supplier_id': po.supplier_id,
+			'po_count': 0,
+			'total': Decimal('0'),
+		})
+		entry['po_count'] += 1
+		entry['total'] += po.total or Decimal('0')
+		if entry['supplier_id'] is None and po.supplier_id is not None:
+			entry['supplier_id'] = po.supplier_id
+
+	po_suppliers = sorted(supplier_options.values(), key=lambda s: s['name'].lower())
+
+	awaiting_total = sum((po.total or Decimal('0')) for po in pos)
+
+	# This page owns the inbox controls (entity tabs, status pills, search) and
+	# drives the embedded inbox through its query string, so it needs the same
+	# counts the inbox itself renders. Defaults match the inbox's own defaults:
+	# unprocessed, excluding statements.
+	_inbox = _with_attachments(MailboxEmail.objects.filter(is_split=False))
+	_unprocessed = _inbox.filter(is_processed=False, is_ignored=False)
+	inbox_counts = {
+		'total': _unprocessed.exclude(tab='statements').count(),
+		'rjl': _unprocessed.filter(tab='rjl').count(),
+		'group': _unprocessed.filter(tab='group').count(),
+		'statements': _unprocessed.filter(tab='statements').count(),
+	}
+
+	return render(request, 'stock_take/accounts_payable.html', {
+		'pos': pos,
+		'po_suppliers': po_suppliers,
+		'awaiting_count': len(pos),
+		'awaiting_total': awaiting_total,
+		'inbox_counts': inbox_counts,
+		'inbox_unprocessed': inbox_counts['total'],
+		'is_configured': graph_api.is_configured(),
+		'mailbox': graph_api._get_settings()['mailbox'],
+		'last_synced': MailboxEmail.objects.aggregate(last=db_models.Max('synced_at'))['last'],
+		# Plain supplier names — consumed by the shared apay_rules_modal.html partial.
+		'suppliers': list(Supplier.objects.values_list('name', flat=True).order_by('name')),
+		# Consumed by the shared invoice_modal.html partial.
+		'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
+		'opo_gl_codes': EnabledGLCode.objects.filter(enabled=True).order_by('code'),
+	})
+
+
+@login_required
+@page_permission_required('accounts_payable')
+def accounts_payable_inbox_fragment(request):
+	"""Just the email table + pagination, for the Accounts Payable inbox modal.
+
+	The modal renders the emails inline rather than loading the whole inbox page,
+	so it fetches this fragment and swaps it in. Same filtering as the full page —
+	the context is built once by accounts_payable_inbox and reused here.
+	"""
+	context = _build_inbox_context(request)
+	return HttpResponse(
+		render_to_string('stock_take/partials/apay_email_table.html', context, request=request)
+	)
+
+
+@login_required
+@page_permission_required('accounts_payable')
 def accounts_payable_inbox(request):
     """Display the Accounts Payable shared mailbox inbox."""
+    return render(request, 'stock_take/accounts_payable_inbox.html', _build_inbox_context(request))
+
+
+def _build_inbox_context(request):
+    """Shared context for the full inbox page and its table-only fragment."""
     mailbox = graph_api._get_settings()['mailbox']
 
     emails = MailboxEmail.objects.select_related('purchase_invoice', 'processed_by', 'matched_po').all()
@@ -400,6 +500,9 @@ def accounts_payable_inbox(request):
     # Hide emails that have been split into per-attachment child emails — the
     # children are shown instead.
     emails = emails.exclude(is_split=True)
+
+    # Only emails carrying an attachment can become an invoice.
+    emails = _with_attachments(emails)
 
     # Entity tab filter (All / RJL / Group / Statements)
     entity_tab = request.GET.get('tab', '')
@@ -444,22 +547,23 @@ def accounts_payable_inbox(request):
         matched_ids = list(email_po_matches_all.keys())
         emails = emails.filter(id__in=matched_ids)
 
-    total = MailboxEmail.objects.filter(is_ignored=False, is_split=False).count()
-    unprocessed = MailboxEmail.objects.filter(is_ignored=False, is_processed=False, is_split=False).count()
-    processed = MailboxEmail.objects.filter(is_ignored=False, is_processed=True, is_split=False).count()
-    ignored = MailboxEmail.objects.filter(is_ignored=True, is_split=False).count()
+    # All counts run through _with_attachments too, so the badges match the rows
+    # actually on screen rather than counting attachment-less email.
+    _all_emails = _with_attachments(MailboxEmail.objects.filter(is_split=False))
+    total = _all_emails.filter(is_ignored=False).count()
+    unprocessed = _all_emails.filter(is_ignored=False, is_processed=False).count()
+    processed = _all_emails.filter(is_ignored=False, is_processed=True).count()
+    ignored = _all_emails.filter(is_ignored=True).count()
     # Tab badge counts — respect the current status filter so badges match the visible rows
     if status_filter == 'ignored':
-        _count_base = MailboxEmail.objects.filter(is_ignored=True, is_split=False)
+        _count_base = _all_emails.filter(is_ignored=True)
     elif status_filter == 'processed':
-        _count_base = MailboxEmail.objects.filter(is_processed=True, is_ignored=False, is_split=False)
+        _count_base = _all_emails.filter(is_processed=True, is_ignored=False)
     elif status_filter == 'all':
-        _count_base = MailboxEmail.objects.filter(is_ignored=False, is_split=False)
+        _count_base = _all_emails.filter(is_ignored=False)
     else:  # unprocessed (default)
-        _count_base = MailboxEmail.objects.filter(is_processed=False, is_ignored=False, is_split=False)
+        _count_base = _all_emails.filter(is_processed=False, is_ignored=False)
     total_count = _count_base.exclude(tab='statements').count()
-    rjl_count = _count_base.filter(tab='rjl').count()
-    group_count = _count_base.filter(tab='group').count()
     statements_count = _count_base.filter(tab='statements').count()
 
     last_synced = MailboxEmail.objects.aggregate(
@@ -531,7 +635,8 @@ def accounts_payable_inbox(request):
     for email in page_obj.object_list:
         email.matched_supplier = _match_supplier(email.sender_email)
 
-    return render(request, 'stock_take/accounts_payable.html', {
+    return {
+        'embed': request.GET.get('embed') == '1',
         'emails': page_obj,
         'page_obj': page_obj,
         'total': total,
@@ -546,14 +651,11 @@ def accounts_payable_inbox(request):
         'last_synced': last_synced,
         'entity_tab': entity_tab,
         'total_count': total_count,
-        'rjl_count': rjl_count,
-        'group_count': group_count,
         'statements_count': statements_count,
         'suppliers': list(Supplier.objects.values_list('name', flat=True).order_by('name')),
         'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
         'opo_gl_codes': EnabledGLCode.objects.filter(enabled=True).order_by('code'),
-        'approved_unreceived_pos': _get_approved_unreceived_pos(),
-    })
+    }
 
 
 # ── Sync from mailbox ─────────────────────────────────────────────────────────

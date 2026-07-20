@@ -869,6 +869,21 @@ def load_order_indicators_ajax(request):
             ),
         )
     )
+    status_orders = list(status_orders)
+
+    # OS Doors PO numbers are stored as free text on Order.os_doors_po, so resolve
+    # their PurchaseOrder status in one query rather than per-order. A PO still at
+    # Draft has not actually been placed yet — it must not show as "ordered".
+    os_doors_po_numbers = {o.os_doors_po for o in status_orders if o.os_doors_po}
+    os_doors_po_status = {}
+    if os_doors_po_numbers:
+        os_doors_po_status = {
+            display_number: (status or '')
+            for display_number, status in PurchaseOrder.objects.filter(
+                display_number__in=os_doors_po_numbers
+            ).values_list('display_number', 'status')
+        }
+
     for o in status_orders:
         ind = indicators.setdefault(o.sale_number, {'sale_number': o.sale_number})
 
@@ -910,11 +925,20 @@ def load_order_indicators_ajax(request):
         else:
             ind['cat_accessories'] = 'none'
 
-        # OS Doors
+        # OS Doors — a PO exists once the doors have been added, but it is only
+        # genuinely "ordered" once the PO has moved off Draft (mirrors boards).
         if not o.os_doors_required:
             ind['cat_os_doors'] = 'na'
         elif o.os_doors_po:
-            ind['cat_os_doors'] = 'ordered'
+            po_status = os_doors_po_status.get(o.os_doors_po)
+            if po_status is None:
+                # PO number recorded but no matching PurchaseOrder row (legacy /
+                # manually entered) — treat as ordered, as before.
+                ind['cat_os_doors'] = 'ordered'
+            elif po_status.strip().lower() in ('', 'draft'):
+                ind['cat_os_doors'] = 'added'
+            else:
+                ind['cat_os_doors'] = 'ordered'
         elif processed:
             ind['cat_os_doors'] = 'missing'
         else:

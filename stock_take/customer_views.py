@@ -1,4 +1,5 @@
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.http import require_POST
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse, StreamingHttpResponse, HttpResponse
 from django.db.models import Count, Max, Sum, Q, Exists, OuterRef, F
@@ -11,6 +12,7 @@ import json
 import time
 import os
 import re
+import hashlib
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
@@ -2617,6 +2619,30 @@ def _rebalance_invoice_split(invoice_id):
 
 
 
+MANUAL_MATCH_TOLERANCE = Decimal('0.01')
+
+
+def _manual_amount_matches(manual_amount, invoice_total, invoice_amount_paid):
+	"""True when a manual payment's value equals what the invoice is worth.
+
+	Compared against both the invoice total and the amount Xero has recorded as
+	paid, so a placeholder entered for either figure is recognised. A penny of
+	tolerance absorbs rounding between the two systems.
+	"""
+	if manual_amount is None:
+		return False
+	for candidate in (invoice_total, invoice_amount_paid):
+		if candidate is None:
+			continue
+		try:
+			value = Decimal(str(candidate))
+		except (InvalidOperation, ValueError):
+			continue
+		if value > 0 and abs(Decimal(manual_amount) - value) <= MANUAL_MATCH_TOLERANCE:
+			return True
+	return False
+
+
 @login_required
 def xero_search_invoices(request, pk):
     """Search Xero for invoices matching this sale's customer name."""
@@ -2645,6 +2671,11 @@ def xero_search_invoices(request, pk):
 
     # Already-linked invoice IDs for this sale
     linked_ids = set(sale.payments.values_list('xero_invoice_id', flat=True))
+
+    # Manual placeholders on this sale that a Xero invoice could replace. Xero is
+    # the source of truth, so an exact-value manual entry is offered for matching
+    # (see xero_match_manual_payment) rather than left to double-count.
+    manual_candidates = list(sale.payments.filter(source='manual', ignored=False))
 
     # Invoices linked to OTHER sales — map invoice_id -> sale info
     other_links = (
@@ -2716,7 +2747,17 @@ def xero_search_invoices(request, pk):
         amount_due = Decimal(str(inv.get('AmountDue', 0)))
         amount_paid = Decimal(str(inv.get('AmountPaid', 0)))
         match_pk = _match_sale(inv.get('Reference', ''), inv.get('InvoiceNumber', ''))
+        manual_match = next(
+            (m for m in manual_candidates if _manual_amount_matches(m.amount, total, amount_paid)),
+            None,
+        )
         results.append({
+            'manual_match': {
+                'pk': manual_match.pk,
+                'amount': str(manual_match.amount),
+                'type': manual_match.payment_type or 'Manual',
+                'date': manual_match.date.strftime('%Y-%m-%d') if manual_match.date else '',
+            } if manual_match else None,
             'invoice_id': inv_id,
             'invoice_number': inv.get('InvoiceNumber', ''),
             'reference': inv.get('Reference', ''),
@@ -2738,125 +2779,209 @@ def xero_search_invoices(request, pk):
     return JsonResponse({'success': True, 'invoices': results, 'customer_name': customer_name})
 
 
+def _parse_xero_date(raw):
+	"""Parse the several date shapes Xero returns into a datetime (or None)."""
+	import datetime
+	if not raw:
+		return None
+	ms = re.search(r'/Date\((\d+)', raw)
+	if ms:
+		ts = int(ms.group(1)) / 1000
+		return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
+	for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+		try:
+			return datetime.datetime.strptime(raw[:10], fmt)
+		except ValueError:
+			pass
+	return None
+
+
+def _import_xero_invoice_payments(sale, invoice_id):
+	"""Import a Xero invoice's payments onto ``sale``.
+
+	Shared by "Link" and "Match" so both routes record a Xero invoice in exactly
+	the same way. Returns ``(invoice_number, created_count)``; raises ValueError
+	when the invoice can't be fetched.
+	"""
+	from .services.xero_api import get_invoice_with_payments
+
+	inv = get_invoice_with_payments(invoice_id)
+	if not inv:
+		raise ValueError('Could not fetch invoice from Xero')
+
+	inv_id = inv.get('InvoiceID', '')
+	inv_number = inv.get('InvoiceNumber', '')
+	inv_total = Decimal(str(inv.get('Total', 0)))
+	inv_amount_due = Decimal(str(inv.get('AmountDue', 0)))
+	inv_status = inv.get('Status', '')
+	payments_list = inv.get('Payments', [])
+	created_count = 0
+
+	if payments_list:
+		for p in payments_list:
+			if (p.get('Status', '') or '').upper() == 'CANCELLED':
+				continue
+			pid = p.get('PaymentID', '')
+			amount = Decimal(str(p.get('Amount', 0)))
+			date = _parse_xero_date(p.get('Date'))
+			ref = p.get('Reference', '') or 'Payment'
+
+			defaults = {
+				'source': 'xero',
+				'xero_invoice_id': inv_id,
+				'xero_invoice_number': inv_number,
+				'invoice_total': inv_total,
+				'invoice_amount_due': inv_amount_due,
+				'invoice_status': inv_status,
+				'payment_type': ref,
+				'date': date,
+				'amount': amount,
+				'status': inv_status,
+				'location': 'manual-link',
+				'user_name': '',
+			}
+
+			if pid:
+				AnthillPayment.objects.update_or_create(
+					sale=sale, anthill_payment_id=pid, defaults=defaults)
+			else:
+				AnthillPayment.objects.update_or_create(
+					sale=sale, xero_invoice_id=inv_id, date=date, defaults=defaults)
+			created_count += 1
+	else:
+		# No individual payments — create invoice-level summary
+		amount_paid = Decimal(str(inv.get('AmountPaid', 0)))
+		AnthillPayment.objects.update_or_create(
+			sale=sale,
+			xero_invoice_id=inv_id,
+			date=None,
+			defaults={
+				'source': 'xero',
+				'xero_invoice_id': inv_id,
+				'xero_invoice_number': inv_number,
+				'invoice_total': inv_total,
+				'invoice_amount_due': inv_amount_due,
+				'invoice_status': inv_status,
+				'payment_type': 'Invoice Payment',
+				'date': None,
+				'amount': amount_paid,
+				'status': inv_status,
+				'location': 'manual-link',
+				'user_name': '',
+			})
+		created_count = 1
+
+	# Split this invoice equally across every sale it is linked to.
+	_rebalance_invoice_split(inv_id)
+	return inv_number, created_count
+
+
 @login_required
+@require_POST
 def xero_link_invoice(request, pk):
-    """Fetch a Xero invoice's payments and link them to this sale."""
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+	"""Fetch a Xero invoice's payments and link them to this sale."""
+	sale = get_object_or_404(AnthillSale.objects.select_related('customer'), pk=pk)
 
-    from decimal import Decimal
-    from .services.xero_api import get_sale_payments_from_xero, get_invoice_with_payments
-    import re as _re, datetime, logging
-    logger = logging.getLogger(__name__)
+	try:
+		data = json.loads(request.body)
+		invoice_id = (data.get('invoice_id') or '').strip()
+	except (json.JSONDecodeError, KeyError):
+		return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
 
-    sale = get_object_or_404(AnthillSale.objects.select_related('customer'), pk=pk)
+	if not invoice_id:
+		return JsonResponse({'success': False, 'error': 'No invoice_id provided'}, status=400)
 
-    try:
-        data = json.loads(request.body)
-        invoice_id = data.get('invoice_id', '').strip()
-    except (json.JSONDecodeError, KeyError):
-        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+	# Check if already linked
+	if sale.payments.filter(xero_invoice_id=invoice_id).exists():
+		return JsonResponse({'success': False, 'error': 'Invoice already linked to this sale'}, status=400)
 
-    if not invoice_id:
-        return JsonResponse({'success': False, 'error': 'No invoice_id provided'}, status=400)
+	try:
+		with transaction.atomic():
+			inv_number, created_count = _import_xero_invoice_payments(sale, invoice_id)
+	except ValueError as e:
+		return JsonResponse({'success': False, 'error': str(e)}, status=400)
+	except Exception as e:
+		logger.exception('xero_link_invoice failed for sale %s, invoice %s', pk, invoice_id)
+		return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
-    # Check if already linked
-    if sale.payments.filter(xero_invoice_id=invoice_id).exists():
-        return JsonResponse({'success': False, 'error': 'Invoice already linked to this sale'}, status=400)
+	return JsonResponse({
+		'success': True,
+		'message': f'Linked {inv_number} — {created_count} payment(s) imported',
+		'payments_created': created_count,
+	})
 
-    try:
-        # Fetch full invoice detail with payments
-        inv = get_invoice_with_payments(invoice_id)
-        if not inv:
-            return JsonResponse({'success': False, 'error': 'Could not fetch invoice from Xero'}, status=400)
 
-        def _parse_xero_date(raw):
-            if not raw:
-                return None
-            ms = _re.search(r'/Date\((\d+)', raw)
-            if ms:
-                ts = int(ms.group(1)) / 1000
-                return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
-            for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
-                try:
-                    return datetime.datetime.strptime(raw[:10], fmt)
-                except ValueError:
-                    pass
-            return None
+@login_required
+@require_POST
+def xero_match_manual_payment(request, pk):
+	"""Replace a manual payment with the Xero invoice that records the same money.
 
-        inv_id = inv.get('InvoiceID', '')
-        inv_number = inv.get('InvoiceNumber', '')
-        inv_total = Decimal(str(inv.get('Total', 0)))
-        inv_amount_due = Decimal(str(inv.get('AmountDue', 0)))
-        inv_status = inv.get('Status', '')
-        payments_list = inv.get('Payments', [])
-        created_count = 0
+	Xero is the source of truth, so a manual placeholder entered before the
+	invoice appeared should not survive alongside it — leaving both would count
+	the payment twice. Imports the invoice and deletes the manual row in one
+	transaction.
 
-        if payments_list:
-            for p in payments_list:
-                if (p.get('Status', '') or '').upper() == 'CANCELLED':
-                    continue
-                pid = p.get('PaymentID', '')
-                amount = Decimal(str(p.get('Amount', 0)))
-                date = _parse_xero_date(p.get('Date'))
-                ref = p.get('Reference', '') or 'Payment'
+	Expects JSON body: {"invoice_id": str, "payment_pk": int}
+	"""
+	sale = get_object_or_404(AnthillSale.objects.select_related('customer'), pk=pk)
 
-                defaults = {
-                    'source': 'xero',
-                    'xero_invoice_id': inv_id,
-                    'xero_invoice_number': inv_number,
-                    'invoice_total': inv_total,
-                    'invoice_amount_due': inv_amount_due,
-                    'invoice_status': inv_status,
-                    'payment_type': ref,
-                    'date': date,
-                    'amount': amount,
-                    'status': inv_status,
-                    'location': 'manual-link',
-                    'user_name': '',
-                }
+	try:
+		data = json.loads(request.body)
+	except (json.JSONDecodeError, ValueError):
+		return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
 
-                if pid:
-                    AnthillPayment.objects.update_or_create(
-                        sale=sale, anthill_payment_id=pid, defaults=defaults)
-                else:
-                    AnthillPayment.objects.update_or_create(
-                        sale=sale, xero_invoice_id=inv_id, date=date, defaults=defaults)
-                created_count += 1
-        else:
-            # No individual payments — create invoice-level summary
-            amount_paid = Decimal(str(inv.get('AmountPaid', 0)))
-            AnthillPayment.objects.update_or_create(
-                sale=sale,
-                xero_invoice_id=inv_id,
-                date=None,
-                defaults={
-                    'source': 'xero',
-                    'xero_invoice_id': inv_id,
-                    'xero_invoice_number': inv_number,
-                    'invoice_total': inv_total,
-                    'invoice_amount_due': inv_amount_due,
-                    'invoice_status': inv_status,
-                    'payment_type': 'Invoice Payment',
-                    'date': None,
-                    'amount': amount_paid,
-                    'status': inv_status,
-                    'location': 'manual-link',
-                    'user_name': '',
-                })
-            created_count = 1
+	invoice_id = (data.get('invoice_id') or '').strip()
+	payment_pk = data.get('payment_pk')
+	if not invoice_id or not payment_pk:
+		return JsonResponse({'success': False, 'error': 'invoice_id and payment_pk are required'}, status=400)
 
-        # Split this invoice equally across every sale it is linked to.
-        _rebalance_invoice_split(inv_id)
+	payment = AnthillPayment.objects.filter(pk=payment_pk, sale=sale).first()
+	if not payment:
+		return JsonResponse({'success': False, 'error': 'Manual payment not found on this sale'}, status=404)
+	if payment.source != 'manual':
+		return JsonResponse({'success': False, 'error': 'Only manual payments can be matched'}, status=400)
 
-        return JsonResponse({
-            'success': True,
-            'message': f'Linked {inv_number} — {created_count} payment(s) imported',
-            'payments_created': created_count,
-        })
-    except Exception as e:
-        logger.exception('xero_link_invoice failed for sale %s, invoice %s', pk, invoice_id)
-        return JsonResponse({'success': False, 'error': str(e)}, status=500)
+	# Re-check the amounts server-side — the button is only offered on an exact
+	# match, but the page data may be stale by the time it is clicked.
+	try:
+		from .services.xero_api import get_invoice_with_payments
+		inv = get_invoice_with_payments(invoice_id)
+	except Exception as e:
+		logger.exception('xero_match_manual_payment lookup failed for sale %s, invoice %s', pk, invoice_id)
+		return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+	if not inv:
+		return JsonResponse({'success': False, 'error': 'Could not fetch invoice from Xero'}, status=400)
+
+	if not _manual_amount_matches(payment.amount, inv.get('Total'), inv.get('AmountPaid')):
+		return JsonResponse({
+			'success': False,
+			'error': f'Amounts no longer match — manual payment is £{payment.amount} but the '
+			         f'invoice is £{Decimal(str(inv.get("Total", 0)))}.',
+		}, status=400)
+
+	manual_label = f'{payment.payment_type or "Manual"} £{payment.amount}'
+	try:
+		with transaction.atomic():
+			inv_number, created_count = _import_xero_invoice_payments(sale, invoice_id)
+			payment.delete()
+			_recalculate_sale_financials(sale)
+	except ValueError as e:
+		return JsonResponse({'success': False, 'error': str(e)}, status=400)
+	except Exception as e:
+		logger.exception('xero_match_manual_payment failed for sale %s, invoice %s', pk, invoice_id)
+		return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+	logger.info(
+		'Matched manual payment %s (%s) on sale %s to Xero invoice %s',
+		payment_pk, manual_label, sale.pk, inv_number,
+	)
+	return JsonResponse({
+		'success': True,
+		'message': f'Matched {manual_label} to {inv_number} — manual entry removed',
+		'payments_created': created_count,
+		'removed_payment_pk': int(payment_pk),
+	})
 
 
 @login_required
@@ -3897,83 +4022,153 @@ def customer_anthill_scrape(request, pk):
     return JsonResponse({'success': True, 'sales': results})
 
 
+def _distribution_key(invoice_ids):
+	"""Stable identifier for one set of source invoices.
+
+	Stored on every ``Xero Distribution`` row as ``anthill_payment_id`` so that
+	re-distributing the same invoices replaces the previous spread instead of
+	stacking a second copy on top of it. The ``distribute:`` prefix can never
+	collide with a real Xero PaymentID, so the Xero sync's ``update_or_create``
+	(keyed on sale + anthill_payment_id) will never overwrite one of these rows.
+	"""
+	digest = hashlib.sha1(','.join(sorted(invoice_ids)).encode('utf-8')).hexdigest()
+	return f'distribute:{digest}'
+
+
 @login_required
+@require_POST
 def customer_distribute_payments(request, pk):
-    """Distribute a total amount across multiple sales, creating payment records.
+	"""Re-spread the payments on one or more Xero invoices across several sales.
 
-    Expects JSON body:
-        {
-            "invoice_ids": [str, ...],     # Xero invoice IDs (for reference)
-            "distributions": [
-                {"sale_pk": int, "amount": str},
-                ...
-            ]
-        }
-    """
-    if request.method != 'POST':
-        return JsonResponse({'success': False, 'error': 'POST required'}, status=405)
+	A lump sum rarely maps to a single job, so an operator can take the payments
+	recorded against the source invoices and allocate them across the customer's
+	sales by hand. The source payments are marked ``ignored`` in the same
+	transaction as the new distribution rows are written — recording the spread
+	while leaving the originals active would count the same money twice and show
+	the customer as overpaid (see ``_build_customer_payment_pool``).
 
-    customer = get_object_or_404(Customer, pk=pk)
+	Expects JSON body:
+		{
+			"invoice_ids": [str, ...],     # Xero invoice IDs the money came from
+			"distributions": [
+				{"sale_pk": int, "amount": str},
+				...
+			]
+		}
+	"""
+	customer = get_object_or_404(Customer, pk=pk)
 
-    try:
-        data = json.loads(request.body)
-    except (json.JSONDecodeError, ValueError):
-        return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+	try:
+		data = json.loads(request.body)
+	except (json.JSONDecodeError, ValueError):
+		return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
 
-    distributions = data.get('distributions', [])
-    invoice_ids = data.get('invoice_ids', [])
-    if not distributions:
-        return JsonResponse({'success': False, 'error': 'No distributions provided'}, status=400)
+	from django.utils import timezone as _tz
 
-    from decimal import Decimal, InvalidOperation
-    from django.utils import timezone as _tz
+	distributions = data.get('distributions') or []
+	invoice_ids = [str(i).strip() for i in (data.get('invoice_ids') or []) if str(i).strip()]
 
-    invoice_ref = ', '.join(invoice_ids[:5])
-    if len(invoice_ids) > 5:
-        invoice_ref += f' (+{len(invoice_ids) - 5} more)'
+	if not distributions:
+		return JsonResponse({'success': False, 'error': 'No distributions provided'}, status=400)
+	if not invoice_ids:
+		# Without the source invoices we cannot retire the original payments, so
+		# writing the spread would double-count the money. Refuse rather than
+		# corrupt the customer's balance.
+		return JsonResponse({
+			'success': False,
+			'error': 'No source invoices supplied — cannot distribute without knowing '
+			         'which payments to replace.',
+		}, status=400)
 
-    created = 0
-    errors = []
+	# Resolve and validate every row up front: a distribution is all-or-nothing,
+	# so a bad row must not leave a half-applied spread behind.
+	parsed = []
+	errors = []
+	for dist in distributions:
+		sale_pk = dist.get('sale_pk')
+		try:
+			amount = Decimal(str(dist.get('amount', '0')))
+		except (InvalidOperation, ValueError):
+			errors.append(f'Invalid amount for sale {sale_pk}')
+			continue
+		if amount <= 0:
+			continue
+		try:
+			sale = AnthillSale.objects.get(pk=sale_pk, customer=customer)
+		except AnthillSale.DoesNotExist:
+			errors.append(f'Sale {sale_pk} not found for this customer')
+			continue
+		parsed.append((sale, amount))
 
-    for dist in distributions:
-        sale_pk = dist.get('sale_pk')
-        amount_str = dist.get('amount', '0')
+	if errors:
+		return JsonResponse({'success': False, 'error': '; '.join(errors)}, status=400)
+	if not parsed:
+		return JsonResponse({'success': False, 'error': 'No positive amounts to distribute'}, status=400)
 
-        try:
-            amount = Decimal(str(amount_str))
-        except (InvalidOperation, ValueError):
-            errors.append(f'Invalid amount for sale {sale_pk}')
-            continue
+	dist_key = _distribution_key(invoice_ids)
+	invoice_ref = ', '.join(invoice_ids[:5])
+	if len(invoice_ids) > 5:
+		invoice_ref += f' (+{len(invoice_ids) - 5} more)'
 
-        if amount <= 0:
-            continue
+	# The payments being replaced: everything recorded against the source
+	# invoices on any of this customer's sales, excluding a previous spread of
+	# this same invoice set (that gets deleted and rewritten below).
+	source_payments = list(
+		AnthillPayment.objects
+		.filter(sale__customer=customer, xero_invoice_id__in=invoice_ids)
+		.exclude(anthill_payment_id=dist_key)
+	)
+	source_total = sum((p.amount or Decimal('0')) for p in source_payments)
 
-        try:
-            sale = AnthillSale.objects.get(pk=sale_pk, customer=customer)
-        except AnthillSale.DoesNotExist:
-            errors.append(f'Sale {sale_pk} not found')
-            continue
+	allocated_total = sum(amount for _sale, amount in parsed)
+	if source_total > 0 and allocated_total > source_total + Decimal('0.01'):
+		return JsonResponse({
+			'success': False,
+			'error': f'Cannot allocate £{allocated_total} — the selected invoices only '
+			         f'account for £{source_total}.',
+		}, status=400)
 
-        AnthillPayment.objects.create(
-            sale=sale,
-            source='xero',
-            payment_type='Xero Distribution',
-            amount=amount,
-            date=_tz.now().date(),
-            location='distribute',
-            status='Confirmed',
-        )
-        created += 1
-        _recalculate_sale_financials(sale)
+	with transaction.atomic():
+		# Replace any earlier spread of the same invoices rather than adding to it.
+		replaced, _ = AnthillPayment.objects.filter(
+			sale__customer=customer, anthill_payment_id=dist_key,
+		).delete()
 
-    if errors:
-        return JsonResponse({
-            'success': created > 0,
-            'created': created,
-            'error': '; '.join(errors),
-        })
+		ignored_count = AnthillPayment.objects.filter(
+			pk__in=[p.pk for p in source_payments], ignored=False,
+		).update(ignored=True)
 
-    return JsonResponse({'success': True, 'created': created})
+		for sale, amount in parsed:
+			AnthillPayment.objects.create(
+				sale=sale,
+				source='xero',
+				payment_type='Xero Distribution',
+				amount=amount,
+				full_amount=source_total or None,
+				date=_tz.now().date(),
+				location='distribute',
+				status='Confirmed',
+				anthill_payment_id=dist_key,
+				xero_invoice_number=invoice_ref,
+			)
+
+		# One pooled recalculation for the whole customer — the per-sale helper
+		# would redo this same work once per sale.
+		_recalculate_customer_financials(customer)
+
+	if not source_payments:
+		logger.warning(
+			'Distribution for customer %s matched no local payments for invoices %s — '
+			'nothing was retired, so the spread may double-count.', customer.pk, invoice_ref,
+		)
+
+	return JsonResponse({
+		'success': True,
+		'created': len(parsed),
+		'replaced': replaced,
+		'sources_ignored': ignored_count,
+		'source_total': str(source_total),
+	})
 
 
 @login_required

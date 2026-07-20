@@ -570,6 +570,49 @@
                 </div>
             </dialog>
 
+            <!-- Confirm replacing a manual payment with its Xero invoice -->
+            <dialog id="matchConfirmModal">
+                <div class="manual-modal-header">
+                    <div class="manual-modal-title">
+                        <i class="bi bi-arrow-left-right text-accent"></i>
+                        <span>Match Payment</span>
+                    </div>
+                    <button class="manual-modal-close" onclick="closeMatchConfirmModal()"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="manual-modal-body">
+                    <div class="match-confirm-label">Replacing manual entry</div>
+                    <div class="match-confirm-card">
+                        <span class="match-confirm-name">
+                            <span id="matchConfirmManualType"></span>
+                            <span class="match-confirm-meta" id="matchConfirmManualDate"></span>
+                        </span>
+                        <span class="match-confirm-amount" id="matchConfirmManualAmount"></span>
+                    </div>
+                    <div class="match-confirm-arrow"><i class="bi bi-arrow-down"></i></div>
+                    <div class="match-confirm-label">With Xero invoice</div>
+                    <div class="match-confirm-card match-confirm-card--target">
+                        <span class="match-confirm-name">
+                            <span id="matchConfirmInvoiceNumber"></span>
+                            <span class="match-confirm-meta" id="matchConfirmInvoiceMeta"></span>
+                        </span>
+                        <span class="match-confirm-amount" id="matchConfirmInvoiceAmount"></span>
+                    </div>
+                    <div class="match-confirm-warning">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <span>The Xero payment is imported and the manual entry is deleted. This cannot be undone.</span>
+                    </div>
+                    <div class="sale-modal-footer">
+                        <button type="button" class="btn btn-sm btn-primary" id="matchConfirmBtn" onclick="confirmMatchXeroManualPayment()">
+                            <i class="bi bi-check-lg"></i> Match Payment
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="closeMatchConfirmModal()">
+                            Cancel
+                        </button>
+                        <span id="matchConfirmMsg" class="sale-modal-msg"></span>
+                    </div>
+                </div>
+            </dialog>
+
             <!-- Search Payments Modal (Xero or Anthill, toggled by mode) -->
             <dialog id="searchPaymentsModal">
                 <div class="manual-modal-header">
@@ -661,6 +704,7 @@
             const SCRAPE_ANTHILL_URL = "{% url 'scrape_anthill_payments' sale.pk %}";
             const XERO_SEARCH_URL = "{% url 'xero_search_invoices' sale.pk %}";
             const XERO_LINK_URL = "{% url 'xero_link_invoice' sale.pk %}";
+            const XERO_MATCH_URL = "{% url 'xero_match_manual_payment' sale.pk %}";
             const CUSTOMER_XERO_LINK_URL = {% if sale.customer %}"{% url 'customer_xero_link' sale.customer.pk %}"{% else %}null{% endif %};
             const SALE_MERGE_URL = "{% url 'sale_merge' sale.pk %}";
             const DELETE_MANUAL_BASE = "/sale/{{ sale.pk }}/payments/";
@@ -888,6 +932,18 @@
                     } else {
                         html += '<span class="xero-draft-badge"><i class="bi bi-file-earmark-text"></i> Draft</span> ';
                         html += '<button class="btn btn-sm btn-outline-success" onclick="linkXeroInvoice(\'' + inv.invoice_id + '\', this)"><i class="bi bi-link-45deg"></i> Link</button>';
+                    }
+                    // A manual payment of the same value is a placeholder for this
+                    // invoice — matching imports the Xero record and clears it.
+                    // Offered on linked rows too, so an existing duplicate can be
+                    // tidied without unlinking first.
+                    if (inv.manual_match && !otherSale) {
+                        const mm = inv.manual_match;
+                        const title = 'Replace the manual ' + mm.type + ' of £' + parseFloat(mm.amount).toFixed(2)
+                            + (mm.date ? ' (' + mm.date + ')' : '') + ' with this Xero invoice';
+                        html += ' <button class="btn btn-sm btn-outline-primary" title="' + escHtml(title) + '"'
+                            + ' onclick="matchXeroManualPayment(\'' + inv.invoice_id + '\', ' + mm.pk + ')">'
+                            + '<i class="bi bi-arrow-left-right"></i> Match £' + parseFloat(mm.amount).toFixed(2) + '</button>';
                     }
                     html += '</td></tr>';
                 });
@@ -1648,6 +1704,94 @@
                 });
             }
 
+            // Replace a manual placeholder with the real Xero invoice. Deleting the
+            // manual row is irreversible, so the confirmation modal spells out both
+            // records before anything is sent.
+            let _pendingMatch = null;
+
+            function matchXeroManualPayment(invoiceId, paymentPk) {
+                const inv = XERO_INVOICES.find(i => i.invoice_id === invoiceId);
+                const mm = inv && inv.manual_match;
+                if (!mm) return;
+
+                _pendingMatch = {invoiceId: invoiceId, paymentPk: paymentPk};
+
+                document.getElementById('matchConfirmManualType').textContent = mm.type || 'Manual';
+                document.getElementById('matchConfirmManualDate').textContent = mm.date || '';
+                document.getElementById('matchConfirmManualAmount').textContent = '£' + parseFloat(mm.amount).toFixed(2);
+                document.getElementById('matchConfirmInvoiceNumber').textContent = inv.invoice_number || '';
+                document.getElementById('matchConfirmInvoiceMeta').textContent =
+                    [inv.date, inv.status].filter(Boolean).join(' · ');
+                document.getElementById('matchConfirmInvoiceAmount').textContent = '£' + parseFloat(inv.total).toFixed(2);
+
+                const msg = document.getElementById('matchConfirmMsg');
+                msg.textContent = '';
+                msg.className = 'sale-modal-msg';
+                const confirmBtn = document.getElementById('matchConfirmBtn');
+                confirmBtn.disabled = false;
+                confirmBtn.innerHTML = '<i class="bi bi-check-lg"></i> Match Payment';
+
+                document.getElementById('matchConfirmModal').showModal();
+            }
+
+            function closeMatchConfirmModal() {
+                _pendingMatch = null;
+                document.getElementById('matchConfirmModal').close();
+            }
+
+            function confirmMatchXeroManualPayment() {
+                if (!_pendingMatch) return;
+                const {invoiceId, paymentPk} = _pendingMatch;
+                const confirmBtn = document.getElementById('matchConfirmBtn');
+                const msg = document.getElementById('matchConfirmMsg');
+
+                confirmBtn.disabled = true;
+                confirmBtn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Matching…';
+                msg.textContent = '';
+                msg.className = 'sale-modal-msg';
+
+                fetch(XERO_MATCH_URL, {
+                    method: 'POST',
+                    headers: {'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json'},
+                    body: JSON.stringify({invoice_id: invoiceId, payment_pk: paymentPk}),
+                })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        // The manual payment is gone, so no other invoice may
+                        // offer it any more.
+                        XERO_INVOICES.forEach(i => {
+                            if (i.manual_match && i.manual_match.pk === paymentPk) i.manual_match = null;
+                        });
+                        const ci = XERO_INVOICES.find(i => i.invoice_id === invoiceId);
+                        if (ci) ci.already_linked = true;
+                        const row = document.getElementById('manual-row-' + paymentPk);
+                        if (row) row.remove();
+                        renderXeroInvoices();
+                        closeMatchConfirmModal();
+                        const searchMsg = document.getElementById('searchPaymentsMsg');
+                        searchMsg.textContent = result.message || 'Matched';
+                        searchMsg.className = 'sale-modal-msg text-success';
+                    } else {
+                        confirmBtn.disabled = false;
+                        confirmBtn.innerHTML = '<i class="bi bi-check-lg"></i> Match Payment';
+                        msg.textContent = result.error || 'Match failed';
+                        msg.className = 'sale-modal-msg text-danger';
+                    }
+                })
+                .catch(err => {
+                    confirmBtn.disabled = false;
+                    confirmBtn.innerHTML = '<i class="bi bi-check-lg"></i> Match Payment';
+                    msg.textContent = 'Error: ' + err.message;
+                    msg.className = 'sale-modal-msg text-danger';
+                });
+            }
+
+            // Close on backdrop click, matching the other modals on this page.
+            document.getElementById('matchConfirmModal').addEventListener('click', function(e) {
+                if (e.target === this) closeMatchConfirmModal();
+            });
+
             function linkAllAvailableXero(btn) {
                 const available = XERO_INVOICES.filter(i => !i.already_linked && !i.linked_to_other);
                 if (!available.length) return;
@@ -2397,9 +2541,17 @@
 				<button type="button" class="wf-complete-sale-btn" onclick="completeSaleManual()">
 					<i class="bi bi-check2-circle"></i> Complete Sale
 				</button>
-				<p class="wf-complete-hint"><i class="bi bi-info-circle"></i> Final sign-off — marks this sale as completed.</p>
 				{% endif %}
                 {% endif %}
+                {% if workflow_progress.current_stage.name == 'Complete Sale' %}
+                {% if not is_completed %}
+                <div class="wf-stage-actions">
+                    <button type="button" class="wf-revert-btn" onclick="revertToPreviousStage({{ order.id }})">
+                        <i class="bi bi-arrow-left-circle"></i> Revert to Previous Stage
+                    </button>
+                </div>
+                {% endif %}
+                {% else %}
                 <div class="wf-stage-actions">
                     {% if stage_criteria_met %}
                     <button type="button" class="wf-progress-btn" onclick="progressToNextStage({{ order.id }})">
@@ -2411,6 +2563,7 @@
                     </button>
                     {% endif %}
                 </div>
+                {% endif %}
                 {% endif %}
             </div>
             <!-- Expand toggle -->

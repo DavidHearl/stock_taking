@@ -41,13 +41,22 @@
 
 <!-- Top bar: type selector tabs + per-type toolbar, all on one row -->
 <div class="inv-topbar" id="inv-topbar">
-	<div class="tab-nav tab-nav-pills" data-pill-slider>
+	<div class="tab-nav tab-nav-pills" data-pill-slider data-cross-page-tabs="#inv-toolbar, #inv-body">
 		<a href="?type=sales{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if invoice_type == 'sales' %}active{% endif %}" data-inv-type="sales">
 			Sales Invoices
 		</a>
 		<a href="?type=purchase{% if search_query %}&q={{ search_query }}{% endif %}" class="tab-button {% if invoice_type == 'purchase' %}active{% endif %}" data-inv-type="purchase">
 			Purchase Invoices
 		</a>
+		{% comment %}
+		Accounts Payable keeps its own URL (and so its own RBAC page code) —
+		the tab-switch controller lets non-"?" hrefs navigate normally.
+		{% endcomment %}
+		{% if role_perms.accounts_payable.can_view or is_role_admin %}
+		<a href="{% url 'accounts_payable' %}" class="tab-button" data-inv-type="payable">
+			Match Invoices
+		</a>
+		{% endif %}
 	</div>
 	<div class="inv-toolbar-slot" id="inv-toolbar">
 		{% include 'stock_take/partials/invoices_toolbar.html' %}
@@ -55,15 +64,17 @@
 </div>
 
 <!-- Tab body (table / status tabs / modals) — swapped client-side without a full reload -->
-<div id="inv-body">
+<div id="inv-body" class="tab-glide-in">
 	{% include 'stock_take/partials/invoices_body.html' %}
 </div>
 
 {% endblock %}
 
 {% block extra_js %}
-{# Both tabs' scripts are always loaded so functions stay defined when the
-   opposite tab's markup is swapped in via AJAX (no full page reload). #}
+{% comment %}
+Both tabs' scripts are always loaded so functions stay defined when the
+opposite tab's markup is swapped in via AJAX (no full page reload).
+{% endcomment %}
 <script>
 
 // ── Add Invoice Modal ─────────────────────────────────────────
@@ -737,9 +748,12 @@ function pushSelectedToXero() {
 	}
 
 	// Type tabs (fixed nav) — pre-slide the thumb, then swap.
+	// Tabs pointing at another page (Accounts Payable) are left alone so the
+	// browser performs a normal navigation.
 	typeNav.addEventListener('click', function(e) {
 		const a = e.target.closest('a.tab-button');
 		if (!a || !typeNav.contains(a) || a.classList.contains('active')) return;
+		if (!isInPageLink(a)) return;
 		e.preventDefault();
 		setTypePill(a.getAttribute('data-inv-type'));
 		loadTab(a.getAttribute('href'), true);

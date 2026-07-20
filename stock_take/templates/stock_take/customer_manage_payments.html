@@ -1489,11 +1489,14 @@ function _updateDistTotals() {
 function confirmDistribute() {
     const body = document.getElementById('distSalesBody');
     const invoiceIds = (body.dataset.invoiceIds || '').split(',').filter(Boolean);
+    const selectedTotal = parseFloat(body.dataset.selectedTotal) || 0;
     const distributions = [];
+    let allocTotal = 0;
 
     body.querySelectorAll('.dist-amount-input').forEach(inp => {
         const amount = parseFloat(inp.value);
         if (amount > 0) {
+            allocTotal += amount;
             distributions.push({
                 sale_pk: parseInt(inp.dataset.salePk),
                 amount: amount.toFixed(2),
@@ -1503,6 +1506,22 @@ function confirmDistribute() {
 
     if (distributions.length === 0) {
         document.getElementById('distMsg').textContent = 'No amounts to distribute';
+        document.getElementById('distMsg').style.color = 'var(--danger-color)';
+        return;
+    }
+
+    // Allocating more than the selected invoices hold would invent money the
+    // customer never paid — the server rejects it too, this is just the earlier
+    // and clearer of the two messages.
+    if (Math.round((allocTotal - selectedTotal) * 100) / 100 > 0.01) {
+        document.getElementById('distMsg').textContent =
+            'Over-allocated by £' + fmtMoney(allocTotal - selectedTotal) + ' — reduce the amounts before distributing.';
+        document.getElementById('distMsg').style.color = 'var(--danger-color)';
+        return;
+    }
+
+    if (!invoiceIds.length) {
+        document.getElementById('distMsg').textContent = 'No source invoices selected — cannot distribute.';
         document.getElementById('distMsg').style.color = 'var(--danger-color)';
         return;
     }

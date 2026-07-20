@@ -11,14 +11,16 @@ from django.contrib.auth.models import User
 from django.db.models import Sum
 from django.test import TestCase, RequestFactory, Client, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import (
     AnthillPayment, AnthillSale, Accessory, BoardsPO, Category, Customer,
     DesktopComponent, DesktopMachine, Expense, Fitter, Lead, OSDoor, Order, PNXItem, PagePermission,
-    PurchaseOrder, Role, StockHistory, StockItem, Timesheet, UserProfile,
+    PurchaseOrder, Role, StockHistory, StockItem, Supplier, Timesheet, UserProfile,
 )
 from .forms import BoardsPOForm, OrderForm
 from .dashboard_view import _contract_prefix_for_location, _get_monthly_sales_data, _contract_prefixes_for_locations
+from .customer_views import _manual_amount_matches
 from .permissions import get_user_permissions
 from .services.location_filter import profile_locations, location_q
 
@@ -1181,3 +1183,376 @@ class ReconcileGallerySalePhotosTests(TestCase):
         call_command('reconcile_gallery_sale_photos', stdout=StringIO())  # dry-run default
         img.refresh_from_db()
         self.assertIsNone(img.order_id)
+
+
+class DistributePaymentsViewTests(TestCase):
+	"""Distributing must retire the payments it re-spreads.
+
+	Writing the spread while leaving the source payments active counts the same
+	money twice and shows a phantom account credit on every sale for that
+	customer (see _build_customer_payment_pool).
+	"""
+
+	def setUp(self):
+		self.client = Client()
+		self.user = _create_user()
+		self.user.profile.role = _create_role('admin')
+		self.user.profile.save()
+		self.client.login(username='testuser', password='testpass123')
+
+		self.customer = _create_customer(name='Pool Customer')
+		self.sale_a = AnthillSale.objects.create(
+			anthill_activity_id='ACT100', customer=self.customer,
+			customer_name='Pool Customer', sale_value=Decimal('6000'),
+		)
+		self.sale_b = AnthillSale.objects.create(
+			anthill_activity_id='ACT101', customer=self.customer,
+			customer_name='Pool Customer', sale_value=Decimal('4000'),
+		)
+		# A single £9,000 invoice paid against sale A that really covers both jobs.
+		self.source = AnthillPayment.objects.create(
+			sale=self.sale_a, source='xero', payment_type='Payment',
+			xero_invoice_id='INV-UUID-1', xero_invoice_number='INV-0001',
+			amount=Decimal('9000'), status='Confirmed',
+		)
+		self.url = reverse('customer_distribute_payments', args=[self.customer.pk])
+
+	def _post(self, payload):
+		return self.client.post(
+			self.url, data=json.dumps(payload), content_type='application/json',
+		)
+
+	def _active_total(self):
+		return sum(
+			p.amount for p in AnthillPayment.objects.filter(
+				sale__customer=self.customer, ignored=False,
+			)
+		)
+
+	def test_distribute_retires_source_payments(self):
+		response = self._post({
+			'invoice_ids': ['INV-UUID-1'],
+			'distributions': [
+				{'sale_pk': self.sale_a.pk, 'amount': '5000.00'},
+				{'sale_pk': self.sale_b.pk, 'amount': '4000.00'},
+			],
+		})
+		self.assertEqual(response.status_code, 200)
+		body = response.json()
+		self.assertTrue(body['success'])
+		self.assertEqual(body['sources_ignored'], 1)
+
+		self.source.refresh_from_db()
+		self.assertTrue(self.source.ignored)
+		# £9,000 spread, not £18,000 counted twice.
+		self.assertEqual(self._active_total(), Decimal('9000.00'))
+
+	def test_redistributing_replaces_rather_than_stacks(self):
+		payload = {
+			'invoice_ids': ['INV-UUID-1'],
+			'distributions': [
+				{'sale_pk': self.sale_a.pk, 'amount': '5000.00'},
+				{'sale_pk': self.sale_b.pk, 'amount': '4000.00'},
+			],
+		}
+		self._post(payload)
+		payload['distributions'] = [
+			{'sale_pk': self.sale_a.pk, 'amount': '6000.00'},
+			{'sale_pk': self.sale_b.pk, 'amount': '3000.00'},
+		]
+		response = self._post(payload)
+		self.assertTrue(response.json()['success'])
+
+		dist_rows = AnthillPayment.objects.filter(
+			sale__customer=self.customer, payment_type='Xero Distribution', ignored=False,
+		)
+		self.assertEqual(dist_rows.count(), 2)
+		self.assertEqual(self._active_total(), Decimal('9000.00'))
+
+	def test_over_allocation_is_rejected(self):
+		response = self._post({
+			'invoice_ids': ['INV-UUID-1'],
+			'distributions': [
+				{'sale_pk': self.sale_a.pk, 'amount': '6000.00'},
+				{'sale_pk': self.sale_b.pk, 'amount': '4000.00'},
+			],
+		})
+		self.assertEqual(response.status_code, 400)
+		self.source.refresh_from_db()
+		self.assertFalse(self.source.ignored)
+		self.assertFalse(
+			AnthillPayment.objects.filter(payment_type='Xero Distribution').exists()
+		)
+
+	def test_missing_invoice_ids_is_rejected(self):
+		response = self._post({
+			'invoice_ids': [],
+			'distributions': [{'sale_pk': self.sale_a.pk, 'amount': '9000.00'}],
+		})
+		self.assertEqual(response.status_code, 400)
+		self.source.refresh_from_db()
+		self.assertFalse(self.source.ignored)
+
+	def test_unknown_sale_writes_nothing(self):
+		other = _create_customer(name='Someone Else')
+		foreign = AnthillSale.objects.create(
+			anthill_activity_id='ACT999', customer=other, sale_value=Decimal('100'),
+		)
+		response = self._post({
+			'invoice_ids': ['INV-UUID-1'],
+			'distributions': [
+				{'sale_pk': self.sale_a.pk, 'amount': '1000.00'},
+				{'sale_pk': foreign.pk, 'amount': '500.00'},
+			],
+		})
+		self.assertEqual(response.status_code, 400)
+		self.source.refresh_from_db()
+		self.assertFalse(self.source.ignored)
+		self.assertFalse(
+			AnthillPayment.objects.filter(payment_type='Xero Distribution').exists()
+		)
+
+
+class XeroMatchManualPaymentTests(TestCase):
+	"""Xero is the source of truth: matching imports the invoice and removes the
+	manual placeholder, so the same money is never counted twice."""
+
+	def setUp(self):
+		self.client = Client()
+		self.user = _create_user()
+		self.user.profile.role = _create_role('admin')
+		self.user.profile.save()
+		self.client.login(username='testuser', password='testpass123')
+
+		self.customer = _create_customer(name='Joanna Test')
+		self.sale = AnthillSale.objects.create(
+			anthill_activity_id='ACT200', customer=self.customer,
+			customer_name='Joanna Test', contract_number='BFS-NR-ACT200',
+			sale_value=Decimal('2000'),
+		)
+		self.manual = AnthillPayment.objects.create(
+			sale=self.sale, source='manual', payment_type='Stock',
+			amount=Decimal('593.25'), status='Confirmed',
+		)
+		self.url = reverse('xero_match_manual_payment', args=[self.sale.pk])
+		self.invoice = {
+			'InvoiceID': 'INV-UUID-9', 'InvoiceNumber': 'INV-1204',
+			'Total': '593.25', 'AmountDue': '0', 'AmountPaid': '593.25',
+			'Status': 'PAID',
+			'Payments': [{
+				'PaymentID': 'PAY-UUID-9', 'Amount': '593.25',
+				'Date': '2026-06-05', 'Reference': 'Payment', 'Status': 'AUTHORISED',
+			}],
+		}
+
+	def _post(self, **payload):
+		return self.client.post(
+			self.url, data=json.dumps(payload), content_type='application/json',
+		)
+
+	def _patch(self, invoice):
+		from unittest.mock import patch
+		return patch(
+			'stock_take.services.xero_api.get_invoice_with_payments',
+			return_value=invoice,
+		)
+
+	def test_match_imports_invoice_and_deletes_manual(self):
+		with self._patch(self.invoice):
+			response = self._post(invoice_id='INV-UUID-9', payment_pk=self.manual.pk)
+
+		self.assertEqual(response.status_code, 200)
+		self.assertTrue(response.json()['success'])
+		self.assertFalse(AnthillPayment.objects.filter(pk=self.manual.pk).exists())
+
+		imported = AnthillPayment.objects.get(sale=self.sale, anthill_payment_id='PAY-UUID-9')
+		self.assertEqual(imported.source, 'xero')
+		self.assertEqual(imported.amount, Decimal('593.25'))
+		# £593.25 recorded once, not twice.
+		self.assertEqual(
+			sum(p.amount for p in self.sale.payments.filter(ignored=False)),
+			Decimal('593.25'),
+		)
+
+	def test_amount_mismatch_is_rejected_and_manual_survives(self):
+		invoice = dict(self.invoice, Total='820.00', AmountPaid='820.00')
+		with self._patch(invoice):
+			response = self._post(invoice_id='INV-UUID-9', payment_pk=self.manual.pk)
+
+		self.assertEqual(response.status_code, 400)
+		self.assertTrue(AnthillPayment.objects.filter(pk=self.manual.pk).exists())
+		self.assertFalse(AnthillPayment.objects.filter(source='xero').exists())
+
+	def test_non_manual_payment_cannot_be_matched(self):
+		xero_payment = AnthillPayment.objects.create(
+			sale=self.sale, source='xero', payment_type='Payment',
+			amount=Decimal('593.25'), status='Confirmed',
+		)
+		with self._patch(self.invoice):
+			response = self._post(invoice_id='INV-UUID-9', payment_pk=xero_payment.pk)
+
+		self.assertEqual(response.status_code, 400)
+		self.assertTrue(AnthillPayment.objects.filter(pk=xero_payment.pk).exists())
+
+	def test_payment_from_another_sale_is_rejected(self):
+		other = AnthillSale.objects.create(
+			anthill_activity_id='ACT201', customer=self.customer, sale_value=Decimal('500'),
+		)
+		foreign = AnthillPayment.objects.create(
+			sale=other, source='manual', payment_type='Stock',
+			amount=Decimal('593.25'), status='Confirmed',
+		)
+		with self._patch(self.invoice):
+			response = self._post(invoice_id='INV-UUID-9', payment_pk=foreign.pk)
+
+		self.assertEqual(response.status_code, 404)
+		self.assertTrue(AnthillPayment.objects.filter(pk=foreign.pk).exists())
+
+	def test_missing_arguments_are_rejected(self):
+		response = self._post(invoice_id='INV-UUID-9')
+		self.assertEqual(response.status_code, 400)
+
+
+class ManualAmountMatchTests(TestCase):
+	def test_matches_invoice_total(self):
+		self.assertTrue(_manual_amount_matches(Decimal('593.25'), '593.25', '0'))
+
+	def test_matches_amount_paid(self):
+		self.assertTrue(_manual_amount_matches(Decimal('593.25'), '1200.00', '593.25'))
+
+	def test_penny_tolerance(self):
+		self.assertTrue(_manual_amount_matches(Decimal('593.25'), '593.26', '0'))
+		self.assertFalse(_manual_amount_matches(Decimal('593.25'), '593.30', '0'))
+
+	def test_zero_invoice_never_matches(self):
+		self.assertFalse(_manual_amount_matches(Decimal('0'), '0', '0'))
+
+	def test_none_amount_never_matches(self):
+		self.assertFalse(_manual_amount_matches(None, '593.25', '593.25'))
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  ACCOUNTS PAYABLE
+# ═══════════════════════════════════════════════════════════════════════
+
+class AccountsPayableAttachmentFilterTests(TestCase):
+	"""The inbox only deals with email that can actually become an invoice."""
+
+	def setUp(self):
+		from .models import MailboxEmail
+		self.MailboxEmail = MailboxEmail
+		base = dict(sender_email='ap@supplier.com', received_at=timezone.now())
+		self.with_att = MailboxEmail.objects.create(
+			graph_message_id='m-with', subject='Invoice 1',
+			attachment_names='[{"id": "a1", "name": "inv.pdf"}]', **base
+		)
+		self.blank = MailboxEmail.objects.create(
+			graph_message_id='m-blank', subject='No attachment', attachment_names='', **base
+		)
+		self.empty_list = MailboxEmail.objects.create(
+			graph_message_id='m-empty', subject='Empty list', attachment_names='[]', **base
+		)
+
+	def test_keeps_only_emails_with_attachments(self):
+		from .accounts_payable_views import _with_attachments
+		ids = set(_with_attachments(self.MailboxEmail.objects.all()).values_list('id', flat=True))
+		self.assertEqual(ids, {self.with_att.id})
+
+	def test_excludes_blank_and_empty_json(self):
+		from .accounts_payable_views import _with_attachments
+		kept = _with_attachments(self.MailboxEmail.objects.all())
+		self.assertNotIn(self.blank, kept)
+		self.assertNotIn(self.empty_list, kept)
+
+
+class AccountsPayablePageTests(TestCase):
+	"""The AP landing page is driven by POs awaiting a supplier invoice."""
+
+	def setUp(self):
+		self.client = Client()
+		self.user = _create_user(is_superuser=True)
+		self.client.login(username='testuser', password='testpass123')
+		# Received, no linked invoice, dated in-window -> awaiting an invoice.
+		self.po = PurchaseOrder.objects.create(
+			workguru_id=9001, display_number='PO9001', status='Received',
+			supplier_id=555, supplier_name='Acme Timber',
+			received_date='2026-03-04', total=Decimal('1250.00'),
+		)
+		# Excluded: explicitly flagged as needing no invoice.
+		PurchaseOrder.objects.create(
+			workguru_id=9002, display_number='PO9002', status='Received',
+			supplier_id=556, supplier_name='No Invoice Ltd',
+			received_date='2026-03-05', total=Decimal('99.00'),
+			invoice_not_required=True,
+		)
+		# Excluded: not received yet.
+		PurchaseOrder.objects.create(
+			workguru_id=9003, display_number='PO9003', status='Draft',
+			supplier_id=557, supplier_name='Draft Supplies',
+			received_date='2026-03-06', total=Decimal('10.00'),
+		)
+
+	def test_page_loads(self):
+		response = self.client.get(reverse('accounts_payable'))
+		self.assertEqual(response.status_code, 200)
+
+	def test_lists_only_pos_awaiting_an_invoice(self):
+		response = self.client.get(reverse('accounts_payable'))
+		listed = {po.workguru_id for po in response.context['pos']}
+		self.assertIn(9001, listed)
+		self.assertNotIn(9002, listed)
+		self.assertNotIn(9003, listed)
+
+	def test_supplier_options_come_from_awaiting_pos(self):
+		response = self.client.get(reverse('accounts_payable'))
+		suppliers = response.context['po_suppliers']
+		names = [s['name'] for s in suppliers]
+		self.assertEqual(names, ['Acme Timber'])
+		self.assertEqual(suppliers[0]['supplier_id'], 555)
+		self.assertEqual(suppliers[0]['po_count'], 1)
+
+	def test_suppliers_context_is_plain_names_for_rules_modal(self):
+		"""The shared rules modal renders `suppliers` as <option> strings."""
+		Supplier.objects.create(workguru_id=555, name='Acme Timber')
+		response = self.client.get(reverse('accounts_payable'))
+		self.assertEqual(list(response.context['suppliers']), ['Acme Timber'])
+
+	def test_awaiting_total_sums_po_values(self):
+		response = self.client.get(reverse('accounts_payable'))
+		self.assertEqual(response.context['awaiting_total'], Decimal('1250.00'))
+		self.assertEqual(response.context['awaiting_count'], 1)
+
+
+class AccountsPayableInboxTests(TestCase):
+	"""The inbox has its own page, and a table-only fragment for the AP modal."""
+
+	def setUp(self):
+		self.client = Client()
+		self.user = _create_user(is_superuser=True)
+		self.client.login(username='testuser', password='testpass123')
+
+	def test_inbox_has_its_own_url(self):
+		response = self.client.get(reverse('accounts_payable_inbox'))
+		self.assertEqual(response.status_code, 200)
+
+	def test_fragment_returns_table_without_page_chrome(self):
+		"""The AP modal renders this inline, so it must not carry the layout."""
+		response = self.client.get(reverse('accounts_payable_inbox_fragment'))
+		self.assertEqual(response.status_code, 200)
+		body = response.content.decode()
+		self.assertIn('apay-table-container', body)
+		self.assertNotIn('<body', body)
+		self.assertNotIn('apay-toolbar', body)
+		self.assertNotIn('<script', body)
+
+	def test_fragment_honours_status_filter(self):
+		from .models import MailboxEmail
+		MailboxEmail.objects.create(
+			graph_message_id='m-ig', subject='Ignored one', sender_email='a@b.com',
+			received_at=timezone.now(), attachment_names='[{"id": "a1", "name": "i.pdf"}]',
+			is_ignored=True,
+		)
+		visible = self.client.get(reverse('accounts_payable_inbox_fragment'), {'status': 'ignored'})
+		self.assertIn('Ignored one', visible.content.decode())
+		hidden = self.client.get(reverse('accounts_payable_inbox_fragment'))
+		self.assertNotIn('Ignored one', hidden.content.decode())

@@ -1,0 +1,356 @@
+{% comment %}
+Inbox rules JS - priority filters, routing filters, exemptions and supplier
+rules. Shared by the standalone Accounts Payable inbox and the Accounts Payable
+page, which owns these controls when the inbox is shown as a modal.
+Bare JS with no <script> wrapper - the including page supplies that, because
+on the inbox page this sits inside an existing script block.
+Requires CSRF_TOKEN to be defined by the including page.
+{% endcomment %}
+// -- Inbox Rules combined modal ------------------------------------------------
+function openInboxRulesModal(tab) {
+    document.getElementById('inbox-rules-modal').style.display = 'flex';
+    switchRulesTab(tab || 'priority');
+}
+function closeInboxRulesModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('inbox-rules-modal').style.display = 'none';
+}
+function switchRulesTab(tab) {
+    ['priority', 'routing', 'exemptions', 'suppliers'].forEach(t => {
+        document.getElementById('rules-tab-' + t).classList.toggle('active', t === tab);
+        document.getElementById('rules-panel-' + t).style.display = t === tab ? 'block' : 'none';
+    });
+    if (tab === 'priority') loadPriorityFilters();
+    if (tab === 'routing') loadEmailFilters();
+    if (tab === 'exemptions') loadExemptions();
+    if (tab === 'suppliers') loadSupplierRules();
+}
+
+// Backwards-compat shims (in case anything still calls the old names)
+function openExemptionModal() { openInboxRulesModal('exemptions'); }
+function closeExemptionModal() { closeInboxRulesModal(); }
+function openEmailFilterModal() { openInboxRulesModal('routing'); }
+function closeEmailFilterModal() { closeInboxRulesModal(); }
+
+// -- Priority filters ----------------------------------------------------------
+function loadPriorityFilters() {
+    const list = document.getElementById('priority-filter-list');
+    list.innerHTML = '<div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>';
+    fetch('{% url "manage_email_filters" %}', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(r => r.json())
+    .then(data => {
+        const filters = (data.filters || []).filter(f => f.tab === 'priority');
+        if (!filters.length) {
+            list.innerHTML = '<div class="apay-exempt-empty">No priority rules defined yet.</div>';
+            return;
+        }
+        list.innerHTML = filters.map(f => `
+            <div class="apay-exempt-row" id="priority-row-${f.id}">
+                <div class="apay-exempt-info">
+                    <span class="apay-exempt-addr">${f.email_pattern}</span>
+                    ${f.note ? `<span class="apay-exempt-note">${f.note}</span>` : ''}
+                </div>
+                <button class="apay-icon-btn" title="Apply now" onclick="runPriorityFilter(${f.id})">
+                    <i class="bi bi-play-fill"></i>
+                </button>
+                <button class="apay-icon-btn ignore" title="Remove" onclick="removePriorityFilter(${f.id})">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>`).join('');
+    })
+    .catch(() => { list.innerHTML = '<div class="apay-exempt-empty">Failed to load.</div>'; });
+}
+
+function addPriorityFilter() {
+    const patternInput = document.getElementById('priority-pattern-input');
+    const pattern = patternInput.value.trim();
+    if (!pattern) { patternInput.focus(); return; }
+    fetch('{% url "manage_email_filters" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', email_pattern: pattern, tab: 'priority' }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            patternInput.value = '';
+            loadPriorityFilters();
+            if (data.applied_to > 0) {
+                showFilterToast(`Priority rule saved - flagged <strong>${data.applied_to}</strong> email(s).`);
+            }
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    });
+}
+
+function runPriorityFilter(id) {
+    fetch('{% url "manage_email_filters" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'run', id }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showFilterToast(`Priority rule applied to <strong>${data.applied_to}</strong> email(s).`);
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    });
+}
+
+function removePriorityFilter(id) {
+    if (!confirm('Remove this priority rule?')) return;
+    fetch('{% url "manage_email_filters" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', id }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById('priority-row-' + id);
+            if (row) row.remove();
+            if (!document.querySelector('#priority-filter-list .apay-exempt-row')) {
+                document.getElementById('priority-filter-list').innerHTML = '<div class="apay-exempt-empty">No priority rules defined yet.</div>';
+            }
+        }
+    });
+}
+
+// -- Exemption modal -----------------------------------------------------------
+
+function loadExemptions() {
+    const list = document.getElementById('exemption-list');
+    list.innerHTML = '<div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>';
+    fetch('{% url "manage_exemptions" %}', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(r => r.json())
+    .then(data => {
+        if (!data.exemptions.length) {
+            list.innerHTML = '<div class="apay-exempt-empty">No exemptions yet.</div>';
+            return;
+        }
+        list.innerHTML = data.exemptions.map(e => `
+            <div class="apay-exempt-row" id="exempt-row-${e.id}">
+                <div class="apay-exempt-info">
+                    <span class="apay-exempt-addr">${e.email_address}</span>
+                    ${e.note ? `<span class="apay-exempt-note">${e.note}</span>` : ''}
+                </div>
+                <button class="apay-icon-btn ignore" title="Remove" onclick="removeExemption('${e.email_address}', ${e.id})">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>`).join('');
+    })
+    .catch(() => { list.innerHTML = '<div class="apay-exempt-empty">Failed to load.</div>'; });
+}
+
+function addExemption() {
+    const emailInput = document.getElementById('exempt-email-input');
+    const email = emailInput.value.trim();
+    if (!email) { emailInput.focus(); return; }
+
+    fetch('{% url "manage_exemptions" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', email }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            emailInput.value = '';
+            loadExemptions();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    });
+}
+
+function removeExemption(email, rowId) {
+    fetch('{% url "manage_exemptions" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', email }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById('exempt-row-' + rowId);
+            if (row) row.remove();
+            if (!document.querySelector('.apay-exempt-row')) {
+                document.getElementById('exemption-list').innerHTML = '<div class="apay-exempt-empty">No exemptions yet.</div>';
+            }
+        }
+    });
+}
+
+// -- Email filter modal (routing tab) -----------------------------------------
+
+function loadEmailFilters() {
+    const list = document.getElementById('email-filter-list');
+    list.innerHTML = '<div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>';
+    fetch('{% url "manage_email_filters" %}', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(r => r.json())
+    .then(data => {
+        const filters = (data.filters || []).filter(f => f.tab !== 'priority');
+        if (!filters.length) {
+            list.innerHTML = '<div class="apay-exempt-empty">No filters defined yet.</div>';
+            return;
+        }
+        list.innerHTML = filters.map(f => `
+            <div class="apay-exempt-row" id="filter-row-${f.id}">
+                <div class="apay-exempt-info">
+                    <span class="apay-exempt-addr">${f.email_pattern}</span>
+                </div>
+                <span class="apay-tab-badge tab-${f.tab}">${f.tab.toUpperCase()}</span>
+                <button class="apay-icon-btn" title="Run filter now" onclick="runEmailFilter(${f.id})">
+                    <i class="bi bi-play-fill"></i>
+                </button>
+                <button class="apay-icon-btn ignore" title="Remove" onclick="removeEmailFilter(${f.id})">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>`).join('');
+    })
+    .catch(() => { list.innerHTML = '<div class="apay-exempt-empty">Failed to load.</div>'; });
+}
+
+function addEmailFilter() {
+    const patternInput = document.getElementById('filter-pattern-input');
+    const tab = document.getElementById('filter-tab-select').value;
+    const pattern = patternInput.value.trim();
+    if (!pattern) { patternInput.focus(); return; }
+
+    fetch('{% url "manage_email_filters" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', email_pattern: pattern, tab }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            patternInput.value = '';
+            loadEmailFilters();
+            if (data.applied_to > 0) {
+                showFilterToast(`Filter saved - applied to <strong>${data.applied_to}</strong> email(s).`);
+            }
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    });
+}
+
+function runEmailFilter(id) {
+    fetch('{% url "manage_email_filters" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'run', id }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showFilterToast(`Filter applied to <strong>${data.applied_to}</strong> email(s).`);
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    });
+}
+
+function removeEmailFilter(id) {
+    if (!confirm('Remove this email filter?')) return;
+    fetch('{% url "manage_email_filters" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', id }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById('filter-row-' + id);
+            if (row) row.remove();
+            if (!document.querySelector('#email-filter-list .apay-exempt-row')) {
+                document.getElementById('email-filter-list').innerHTML = '<div class="apay-exempt-empty">No filters defined yet.</div>';
+            }
+        }
+    });
+}
+function showFilterToast(message) {
+    const toast = document.getElementById('filter-toast');
+    document.getElementById('filter-toast-msg').innerHTML = message;
+    toast.classList.add('visible');
+    clearTimeout(toast._hideTimer);
+    toast._hideTimer = setTimeout(() => toast.classList.remove('visible'), 4000);
+}
+
+// -- Supplier Matching Rules ---------------------------------------------------
+function openSupplierRulesModal() { openInboxRulesModal('suppliers'); }
+function closeSupplierRulesModal() { closeInboxRulesModal(); }
+
+function loadSupplierRules() {
+    const list = document.getElementById('supplier-rule-list');
+    list.innerHTML = '<div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>';
+    fetch('{% url "manage_supplier_rules" %}', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(r => r.json())
+    .then(data => {
+        const rules = data.rules || [];
+        if (!rules.length) {
+            list.innerHTML = '<div class="apay-exempt-empty">No supplier rules defined yet.</div>';
+            return;
+        }
+        list.innerHTML = rules.map(r => `
+            <div class="apay-exempt-row" id="srule-row-${r.id}">
+                <div class="apay-exempt-info">
+                    <span class="apay-exempt-addr">${r.email_pattern}</span>
+                    <span class="apay-exempt-note">&rarr; ${r.supplier_name}</span>
+                    ${r.note ? `<span class="apay-exempt-note" style="color:var(--text-muted)">${r.note}</span>` : ''}
+                </div>
+                <button class="apay-icon-btn ignore" title="Remove" onclick="removeSupplierRule(${r.id})">
+                    <i class="bi bi-trash3"></i>
+                </button>
+            </div>`).join('');
+    })
+    .catch(() => { list.innerHTML = '<div class="apay-exempt-empty">Failed to load.</div>'; });
+}
+
+function addSupplierRule() {
+    const patternInput   = document.getElementById('srule-pattern-input');
+    const supplierSelect = document.getElementById('srule-supplier-select');
+    const pattern  = patternInput.value.trim();
+    const supplier = supplierSelect.value;
+    if (!pattern)  { patternInput.focus();   return; }
+    if (!supplier) { supplierSelect.focus(); return; }
+
+    fetch('{% url "manage_supplier_rules" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', email_pattern: pattern, supplier_name: supplier }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            patternInput.value   = '';
+            supplierSelect.value = '';
+            loadSupplierRules();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown'));
+        }
+    });
+}
+
+function removeSupplierRule(id) {
+    if (!confirm('Remove this supplier rule?')) return;
+    fetch('{% url "manage_supplier_rules" %}', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove', id }),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const row = document.getElementById('srule-row-' + id);
+            if (row) row.remove();
+            if (!document.querySelector('#supplier-rule-list .apay-exempt-row')) {
+                document.getElementById('supplier-rule-list').innerHTML = '<div class="apay-exempt-empty">No supplier rules defined yet.</div>';
+            }
+        }
+    });
+}

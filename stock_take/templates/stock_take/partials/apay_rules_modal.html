@@ -1,0 +1,115 @@
+{% comment %}
+Inbox rules modal + the toast its actions raise. Shared by the standalone
+Accounts Payable inbox and the Accounts Payable page.
+Must sit outside any transformed/animated wrapper - both are position:fixed.
+{% endcomment %}
+<!-- Filter action toast -->
+<div id="filter-toast" class="apay-filter-toast">
+    <i class="bi bi-check-circle-fill"></i>
+    <span id="filter-toast-msg"></span>
+</div>
+
+<!-- Inbox Rules Modal (combined: Priority / Routing / Exemptions) -->
+<div id="inbox-rules-modal" class="modal-overlay" onclick="closeInboxRulesModal(event)">
+    <div class="modal-dialog" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3><i class="bi bi-gear"></i> Rules</h3>
+            <button class="modal-close" onclick="closeInboxRulesModal()"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="tab-nav tab-nav-pills" data-pill-slider>
+                <button class="tab-button active" id="rules-tab-priority" onclick="switchRulesTab('priority')">
+                    Priority
+                </button>
+                <button class="tab-button" id="rules-tab-routing" onclick="switchRulesTab('routing')">
+                    Routing
+                </button>
+                <button class="tab-button" id="rules-tab-exemptions" onclick="switchRulesTab('exemptions')">
+                    Exemptions
+                </button>
+                <button class="tab-button" id="rules-tab-suppliers" onclick="switchRulesTab('suppliers')">
+                    Suppliers
+                </button>
+            </div>
+
+            <!-- Priority panel -->
+            <div id="rules-panel-priority" class="apay-rules-panel">
+                <p>
+                    Emails from matching senders are pinned to the <strong>top of the inbox</strong> and highlighted in red - they must be processed immediately.
+                    Use <code>@domain.com</code> for an entire domain, or a full address for an exact match.
+                </p>
+                <div class="apay-exempt-add">
+                    <input type="text" id="priority-pattern-input" placeholder="e.g. @hmrc.gov.uk or urgent@supplier.com" class="apay-exempt-input">
+                    <button class="apay-btn" onclick="addPriorityFilter()">
+                        <i class="bi bi-plus-lg"></i> Add
+                    </button>
+                </div>
+                <div id="priority-filter-list" class="apay-exempt-list">
+                    <div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>
+                </div>
+            </div>
+
+            <!-- Routing panel -->
+            <div id="rules-panel-routing" class="apay-rules-panel">
+                <p>
+                    Route incoming emails to the <strong>RJL</strong> or <strong>Group</strong> tab based on sender address.
+                    Use <code>@domain.com</code> to match an entire domain, or a full email address for an exact match.
+                    Rules are applied automatically during sync and to existing untagged emails when added.
+                </p>
+                <div class="apay-exempt-add">
+                    <input type="text" id="filter-pattern-input" placeholder="e.g. @rjl.com or supplier@example.com" class="apay-exempt-input">
+                    <select id="filter-tab-select" class="apay-exempt-input">
+                        <option value="rjl">RJL</option>
+                        <option value="group">Group</option>
+                    </select>
+                    <button class="apay-btn" onclick="addEmailFilter()">
+                        <i class="bi bi-plus-lg"></i> Add
+                    </button>
+                </div>
+                <div id="email-filter-list" class="apay-exempt-list">
+                    <div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>
+                </div>
+            </div>
+
+            <!-- Exemptions panel -->
+            <div id="rules-panel-exemptions" class="apay-rules-panel">
+                <p>
+                    Emails from exempted addresses will be silently skipped during sync.
+                </p>
+                <div class="apay-exempt-add">
+                    <input type="email" id="exempt-email-input" placeholder="email@example.com" class="apay-exempt-input">
+                    <button class="apay-btn" onclick="addExemption()">
+                        <i class="bi bi-plus-lg"></i> Add
+                    </button>
+                </div>
+                <div id="exemption-list" class="apay-exempt-list">
+                    <div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>
+                </div>
+            </div>
+
+            <!-- Suppliers panel -->
+            <div id="rules-panel-suppliers" class="apay-rules-panel">
+                <p>
+                    When a sender matches a rule, the <strong>supplier field</strong> in the Create Invoice
+                    modal is pre-filled automatically. Use <code>@domain.com</code> to match an entire
+                    domain, or a full address for an exact match.
+                </p>
+                <div class="apay-exempt-add">
+                    <input type="text" id="srule-pattern-input" placeholder="e.g. @osdoors.com or finance@supplier.com" class="apay-exempt-input">
+                    <select id="srule-supplier-select" class="apay-exempt-input">
+                        <option value="">-- Select supplier --</option>
+                        {% for s in suppliers %}
+                        <option value="{{ s }}">{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                    <button class="apay-btn" onclick="addSupplierRule()">
+                        <i class="bi bi-plus-lg"></i> Add
+                    </button>
+                </div>
+                <div id="supplier-rule-list" class="apay-exempt-list">
+                    <div class="apay-exempt-loading"><i class="bi bi-hourglass-split"></i> Loading...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

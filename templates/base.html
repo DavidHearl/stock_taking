@@ -182,9 +182,13 @@
                         <i class="bi bi-cash-stack"></i><span class="nav-text">Payments</span>
                     </a>
                     {% endif %}
-                    {% if role_perms.accounts_payable.can_view or is_role_admin %}
-                    <a href="{% url 'accounts_payable_inbox' %}" class="nav-link {% block nav_accounts_payable_active %}{% endblock %}" title="Accounts Payable">
-                        <i class="bi bi-wallet2"></i><span class="nav-text">Accounts Payable</span>
+                    {% comment %}
+                    Match Invoices is a tab on the Invoices page, so it only needs its
+                    own sidebar entry for users who can't reach the Invoices page at all.
+                    {% endcomment %}
+                    {% if role_perms.accounts_payable.can_view and not role_perms.invoices.can_view and not role_perms.purchase_invoices.can_view and not is_role_admin %}
+                    <a href="{% url 'accounts_payable' %}" class="nav-link" title="Match Invoices">
+                        <i class="bi bi-wallet2"></i><span class="nav-text">Match Invoices</span>
                     </a>
                     {% endif %}
                     <a href="{% url 'xero_status' %}" class="nav-link {% block nav_xero_active %}{% endblock %}" title="Xero">
@@ -948,7 +952,47 @@
             if (document.fonts && document.fonts.ready) { document.fonts.ready.then(move); }
         });
     };
-    document.addEventListener('DOMContentLoaded', function() { window.initPillSliders(document); });
+    // Cross-page pill tabs — tabs that navigate to a different URL instead of
+	// swapping content in place (e.g. Accounts Payable in the Invoices tab
+	// group, which keeps its own URL so RBAC still resolves to its page code).
+	// A plain anchor would hard-jump with no feedback, so we slide the thumb and
+	// fade the outgoing content first; the destination then glides in. The
+	// result reads the same as the in-page AJAX swap.
+	// Opt in with data-cross-page-tabs="<selector for the content to fade>".
+	window.initCrossPageTabs = function(root) {
+		var scope = root || document;
+		scope.querySelectorAll('.tab-nav-pills[data-cross-page-tabs]').forEach(function(nav) {
+			if (nav._crossPageTabs) return;
+			nav._crossPageTabs = true;
+			var fadeSel = nav.getAttribute('data-cross-page-tabs');
+			nav.addEventListener('click', function(e) {
+				if (e.defaultPrevented) return;
+				var a = e.target.closest('a.tab-button');
+				if (!a || !nav.contains(a) || a.classList.contains('active')) return;
+				// Same-page "?" tabs belong to the page's own AJAX controller.
+				var href = a.getAttribute('href') || '';
+				if (!href || href.charAt(0) === '?' || href.charAt(0) === '#') return;
+				// Let modified clicks open a new tab/window as the user expects.
+				if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+				e.preventDefault();
+				nav.querySelectorAll('.tab-button').forEach(function(b) {
+					b.classList.toggle('active', b === a);
+				});
+				if (fadeSel) {
+					document.querySelectorAll(fadeSel).forEach(function(el) {
+						el.classList.add('tab-swapping');
+					});
+				}
+				// Long enough for the thumb to visibly start moving, short
+				// enough that it never feels like added latency.
+				window.setTimeout(function() { window.location = href; }, 140);
+			});
+		});
+	};
+	document.addEventListener('DOMContentLoaded', function() {
+		window.initPillSliders(document);
+		window.initCrossPageTabs(document);
+	});
     </script>
 
     <script>

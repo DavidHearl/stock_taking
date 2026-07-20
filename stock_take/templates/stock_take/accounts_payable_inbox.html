@@ -1,0 +1,172 @@
+﻿{% extends 'base.html' %}
+{% load static humanize %}
+
+{% block title %}Accounts Payable Inbox{% endblock %}
+{% block page_title %}Accounts Payable Inbox{% endblock %}
+
+{% block nav_invoices_active %}active{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/accounts_payable_inbox.css' %}">
+{# Needed for the shared invoice_modal.html partial included at the foot of this page. #}
+<link rel="stylesheet" href="{% static 'css/purchase_invoices.css' %}">
+{% endblock %}
+
+{% block content %}
+
+<div class="tab-nav tab-nav-pills apay-type-nav" data-pill-slider data-cross-page-tabs=".apay-page">
+	<a href="{% url 'invoices_list' %}?type=sales" class="tab-button">Sales Invoices</a>
+	<a href="{% url 'invoices_list' %}?type=purchase" class="tab-button">Purchase Invoices</a>
+	<a href="{% url 'accounts_payable' %}" class="tab-button active">Match Invoices</a>
+</div>
+
+<div class="apay-page tab-glide-in">
+
+{% if not is_configured %}
+<!-- Setup required banner -->
+<div class="apay-setup-banner">
+    <div class="apay-setup-icon"><i class="bi bi-shield-exclamation"></i></div>
+    <div class="apay-setup-body">
+        <h3>Microsoft Graph API Not Configured</h3>
+        <p>To connect the <strong>{{ mailbox }}</strong> shared mailbox, add the following to your <code>.env</code> file:</p>
+        <pre class="apay-setup-code">MS_GRAPH_TENANT_ID=&lt;your-azure-tenant-id&gt;
+MS_GRAPH_CLIENT_ID=&lt;your-app-client-id&gt;
+MS_GRAPH_CLIENT_SECRET=&lt;your-client-secret-value&gt;
+MS_GRAPH_MAILBOX=accounts.payable@sliderobes.com</pre>
+        <p class="apay-setup-steps">
+            <strong>Azure setup steps:</strong>
+            Go to <a href="https://portal.azure.com" target="_blank">Azure Portal</a> &rarr;
+            Microsoft Entra ID &rarr; App registrations &rarr; New registration.
+            Add a <em>Client secret</em> under Certificates &amp; secrets.
+            Under API permissions add <strong>Mail.Read</strong> (Application, not Delegated) and click
+            <em>Grant admin consent</em>.
+        </p>
+    </div>
+</div>
+{% endif %}
+
+<!-- Entity tabs -->
+<div class="tab-nav tab-nav-pills" data-pill-slider>
+    <a href="?{% if status_filter and status_filter != 'unprocessed' %}status={{ status_filter }}&{% endif %}{% if search_query %}q={{ search_query }}{% endif %}"
+       class="tab-button {% if not entity_tab %}active{% endif %}">
+        All
+        <span class="tab-count">{{ total_count|intcomma }}</span>
+    </a>
+    <a href="?tab=statements{% if status_filter and status_filter != 'unprocessed' %}&status={{ status_filter }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
+       class="tab-button {% if entity_tab == 'statements' %}active{% endif %}">
+        Statements
+        <span class="tab-count">{{ statements_count }}</span>
+    </a>
+
+    {% include 'stock_take/partials/apay_bulk_bar.html' %}
+</div>
+
+<!-- Toolbar -->
+<div class="apay-toolbar">
+    <form method="get" action="" class="search-input-wrapper apay-search-box">
+        <i class="bi bi-search"></i>
+        <input type="text" name="q" id="apay-search" value="{{ search_query }}"
+               placeholder="Search by sender or subject..." autocomplete="off">
+        {% if search_query %}<a href="?{% if entity_tab %}tab={{ entity_tab }}&{% endif %}" class="apay-search-clear">&times;</a>{% endif %}
+        {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+        {% if entity_tab %}<input type="hidden" name="tab" value="{{ entity_tab }}">{% endif %}
+    </form>
+
+    <!-- Status filter pills -->
+    <div class="apay-filter-pills">
+        <a href="?status=all{% if entity_tab %}&tab={{ entity_tab }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
+           class="apay-pill {% if status_filter == 'all' %}active{% endif %}">All</a>
+        <a href="?{% if entity_tab %}tab={{ entity_tab }}&{% endif %}{% if search_query %}q={{ search_query }}&{% endif %}"
+           class="apay-pill {% if not status_filter or status_filter == 'unprocessed' %}active{% endif %}">Unprocessed</a>
+        <a href="?status=processed{% if entity_tab %}&tab={{ entity_tab }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
+           class="apay-pill {% if status_filter == 'processed' %}active{% endif %}">Processed</a>
+        <a href="?status=ignored{% if entity_tab %}&tab={{ entity_tab }}{% endif %}{% if search_query %}&q={{ search_query }}{% endif %}"
+           class="apay-pill ignored {% if status_filter == 'ignored' %}active{% endif %}">Ignored</a>
+    </div>
+
+    <div class="apay-toolbar-right">
+        <div class="apay-split-btn" id="add-invoice-split">
+            <button class="apay-btn apay-btn-green apay-split-main" id="add-invoice-btn" onclick="openAddInvoicePicker()"
+                    title="Click to attach an invoice, or drag &amp; drop a file here"
+                    ondragover="event.preventDefault(); this.classList.add('apay-drag-over');"
+                    ondragleave="this.classList.remove('apay-drag-over');"
+                    ondrop="this.classList.remove('apay-drag-over'); handleAddButtonDrop(event);">
+                <i class="bi bi-plus-lg"></i>
+                <span>Add</span>
+            </button>
+            <button class="apay-btn apay-btn-green apay-split-toggle" id="add-invoice-caret"
+                    onclick="toggleAddMenu(event)" title="More add options" aria-haspopup="true" aria-expanded="false">
+                <i class="bi bi-chevron-down"></i>
+            </button>
+            <div class="apay-split-menu" id="add-invoice-menu">
+                <button type="button" class="apay-split-menu-item" onclick="openBatchAddPicker()">
+                    <i class="bi bi-files"></i>
+                    <span>Batch Add</span>
+                </button>
+            </div>
+        </div>
+        <button class="apay-btn" id="sync-btn" onclick="syncMailbox()" {% if not is_configured %}disabled title="Graph API not configured"{% endif %}>
+            <i class="bi bi-arrow-repeat"></i>
+            <span>Sync Mailbox</span>
+        </button>
+        {% if last_synced %}
+        <span class="apay-last-synced">Last synced {{ last_synced|date:"l, d M Y H:i" }}</span>
+        {% endif %}
+
+        <!-- 3-dot settings menu -->
+        <div class="kebab-menu">
+            <button class="kebab-trigger" id="kebab-btn" onclick="toggleKebab(this, event)" title="Options">
+                <i class="bi bi-three-dots-vertical"></i>
+            </button>
+            <div class="kebab-dropdown" id="kebab-menu">
+                <button class="kebab-item" onclick="openInboxRulesModal(); closeKebab();">
+                    <i class="bi bi-gear"></i> Rules
+                </button>
+                <button class="kebab-item" id="hide-unmatched-btn" onclick="toggleHideUnmatched(); closeKebab();">
+                    <i class="bi bi-eye-slash" id="hide-unmatched-icon"></i> <span id="hide-unmatched-label">Hide Unmatched</span>
+                </button>
+                {% if is_configured %}
+                <hr>
+                <button class="kebab-item" onclick="fullResync(); closeKebab();" title="Re-fetch all emails from the mailbox (ignores date filters)">
+                    <i class="bi bi-arrow-clockwise"></i> Full Resync
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% include 'stock_take/partials/apay_email_table.html' %}
+
+<input type="file" id="manual-invoice-input" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" multiple style="display:none" onchange="handleManualInvoiceAttachment(this)">
+
+{% comment %}
+Close the animated wrapper before the fixed-position toast and modal overlays —
+an ancestor with a transform or opacity becomes their containing block, which
+would knock them out of viewport alignment mid-transition.
+{% endcomment %}
+</div>{# .apay-page #}
+
+{% include 'stock_take/partials/apay_rules_modal.html' %}
+
+{% include 'stock_take/partials/apay_inbox_modals.html' %}
+
+{% endblock %}
+
+{% block extra_js %}
+{% include 'stock_take/partials/invoice_modal_js.html' %}
+<script>
+{% include 'stock_take/partials/apay_inbox_js.html' %}
+
+// On the full page the list is server-rendered, so refreshing it means reloading.
+// (The Accounts Payable modal re-fetches the table fragment instead.)
+function apayReloadInbox() {
+	window.location.reload();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+	apayStartAutoScan();
+});
+</script>
+
+{% endblock %}

@@ -25,6 +25,8 @@ from reportlab.platypus import (
     Image, HRFlowable, KeepTogether
 )
 
+from .templatetags.custom_filters import material_code, material_thickness
+
 
 # Brand colours
 BRAND_DARK = colors.HexColor('#1a1a2e')
@@ -81,7 +83,7 @@ def _section_header(text, styles):
     )
 
 
-def _build_table(data, col_widths, has_total_row=False):
+def _build_table(data, col_widths, has_total_row=False, extra_styles=None):
     """Build a consistently styled table."""
     table = Table(data, colWidths=col_widths, repeatRows=1)
 
@@ -121,6 +123,9 @@ def _build_table(data, col_widths, has_total_row=False):
             ('FONTNAME', (0, last), (-1, last), 'Helvetica-Bold'),
             ('BACKGROUND', (0, last), (-1, last), HEADER_BG),
         ]
+
+    if extra_styles:
+        style_commands += extra_styles
 
     table.setStyle(TableStyle(style_commands))
     return table
@@ -225,27 +230,54 @@ def generate_summary_pdf(order, price_per_sqm=12):
     if order_pnx_items:
         elements.append(_section_header('Board Items', styles))
 
-        board_data = [['Material', 'Description', 'L (mm)', 'W (mm)', 'Qty', 'Grain']]
+        # Material is shown as the bare colour code — the internal SKU prefix
+        # (SHT_MFC_EGG_) is dropped and the trailing thickness (_18_) is split
+        # out into its own column, matching how the order page displays it.
+        board_data = [[
+            'Material', 'Description', 'L (mm)', 'W (mm)', 'T (mm)', 'Qty', 'Grain',
+            'E1', 'E3', 'E4', 'E2',
+        ]]
         for item in order_pnx_items:
+            thickness = material_thickness(item.matname)
             board_data.append([
-                str(item.matname),
+                str(material_code(item.matname)),
                 str(item.partdesc) if item.partdesc else '—',
                 f'{item.cleng:,.0f}',
                 f'{item.cwidth:,.0f}',
+                thickness or '—',
                 f'{item.cnt:,.0f}',
                 str(item.grain) if item.grain else '—',
+                # Edging, in the same E1/E3/E4/E2 (left/right/top/bottom) order
+                # as the checkboxes on the order page.
+                'X' if item.prfid1 else '',
+                'X' if item.prfid3 else '',
+                'X' if item.prfid4 else '',
+                'X' if item.prfid2 else '',
             ])
 
         # Summary row
         total_boards = sum(item.cnt for item in order_pnx_items)
-        board_data.append(['', '', '', '', f'{total_boards:,.0f}', f'{len(order_pnx_items)} items'])
+        board_data.append([
+            '', '', '', '', '',
+            f'{total_boards:,.0f}', f'{len(order_pnx_items)} items',
+            '', '', '', '',
+        ])
 
         board_widths = [
-            page_width * 0.25, page_width * 0.30,
-            page_width * 0.12, page_width * 0.12,
-            page_width * 0.09, page_width * 0.12,
+            page_width * 0.16, page_width * 0.24,
+            page_width * 0.09, page_width * 0.09, page_width * 0.07,
+            page_width * 0.07, page_width * 0.08,
+            page_width * 0.05, page_width * 0.05,
+            page_width * 0.05, page_width * 0.05,
         ]
-        elements.append(_build_table(board_data, board_widths, has_total_row=True))
+        elements.append(_build_table(
+            board_data, board_widths, has_total_row=True,
+            extra_styles=[
+                ('ALIGN', (2, 0), (4, -1), 'RIGHT'),
+                ('ALIGN', (5, 0), (5, -1), 'CENTER'),
+                ('ALIGN', (7, 0), (-1, -1), 'CENTER'),
+            ],
+        ))
         elements.append(Spacer(1, 4 * mm))
 
     # ─── 2. ACCESSORIES ──────────────────────────────────────
