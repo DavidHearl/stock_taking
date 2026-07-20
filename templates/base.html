@@ -187,7 +187,7 @@
                     own sidebar entry for users who can't reach the Invoices page at all.
                     {% endcomment %}
                     {% if role_perms.accounts_payable.can_view and not role_perms.invoices.can_view and not role_perms.purchase_invoices.can_view and not is_role_admin %}
-                    <a href="{% url 'accounts_payable' %}" class="nav-link" title="Match Invoices">
+                    <a href="{% url 'match_invoices' %}" class="nav-link" title="Match Invoices">
                         <i class="bi bi-wallet2"></i><span class="nav-text">Match Invoices</span>
                     </a>
                     {% endif %}
@@ -337,7 +337,7 @@
 			<div class="kebab-menu top-location-menu">
 				<button class="kebab-trigger kebab-trigger-labeled" onclick="toggleKebab(this, event)" title="Location" aria-label="Set location">
 					<i class="bi bi-geo-alt"></i>
-					<span class="top-location-current">{% if not current_locations %}All Locations{% elif current_locations|length == 1 %}{{ current_locations.0 }}{% else %}{{ current_locations|length }} branches{% endif %}</span>
+					<span class="top-location-current">{% if not current_locations %}All Locations{% elif current_locations|length == 1 %}{{ current_locations.0 }}{% else %}Multiple{% endif %}</span>
 					<i class="bi bi-chevron-down top-location-caret"></i>
 				</button>
 				<div class="kebab-dropdown top-location-dropdown" data-keep-open>
@@ -677,6 +677,14 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
+					// Update the trigger label straight away — one branch shows
+					// its name, several show "Multiple", none shows "All Locations".
+					const label = document.querySelector('.top-location-current');
+					if (label) {
+						const picked = data.locations || [];
+						label.textContent = picked.length === 0 ? 'All Locations'
+							: (picked.length === 1 ? picked[0] : 'Multiple');
+					}
                     // Reload so all pages reflect the new location filter
                     window.location.reload();
                 }

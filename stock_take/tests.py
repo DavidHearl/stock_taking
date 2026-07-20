@@ -1454,19 +1454,19 @@ class AccountsPayableAttachmentFilterTests(TestCase):
 		)
 
 	def test_keeps_only_emails_with_attachments(self):
-		from .accounts_payable_views import _with_attachments
+		from .match_invoices_views import _with_attachments
 		ids = set(_with_attachments(self.MailboxEmail.objects.all()).values_list('id', flat=True))
 		self.assertEqual(ids, {self.with_att.id})
 
 	def test_excludes_blank_and_empty_json(self):
-		from .accounts_payable_views import _with_attachments
+		from .match_invoices_views import _with_attachments
 		kept = _with_attachments(self.MailboxEmail.objects.all())
 		self.assertNotIn(self.blank, kept)
 		self.assertNotIn(self.empty_list, kept)
 
 
-class AccountsPayablePageTests(TestCase):
-	"""The AP landing page is driven by POs awaiting a supplier invoice."""
+class MatchInvoicesPageTests(TestCase):
+	"""The Match Invoices page is driven by POs awaiting a supplier invoice."""
 
 	def setUp(self):
 		self.client = Client()
@@ -1493,18 +1493,18 @@ class AccountsPayablePageTests(TestCase):
 		)
 
 	def test_page_loads(self):
-		response = self.client.get(reverse('accounts_payable'))
+		response = self.client.get(reverse('match_invoices'))
 		self.assertEqual(response.status_code, 200)
 
 	def test_lists_only_pos_awaiting_an_invoice(self):
-		response = self.client.get(reverse('accounts_payable'))
+		response = self.client.get(reverse('match_invoices'))
 		listed = {po.workguru_id for po in response.context['pos']}
 		self.assertIn(9001, listed)
 		self.assertNotIn(9002, listed)
 		self.assertNotIn(9003, listed)
 
 	def test_supplier_options_come_from_awaiting_pos(self):
-		response = self.client.get(reverse('accounts_payable'))
+		response = self.client.get(reverse('match_invoices'))
 		suppliers = response.context['po_suppliers']
 		names = [s['name'] for s in suppliers]
 		self.assertEqual(names, ['Acme Timber'])
@@ -1514,30 +1514,26 @@ class AccountsPayablePageTests(TestCase):
 	def test_suppliers_context_is_plain_names_for_rules_modal(self):
 		"""The shared rules modal renders `suppliers` as <option> strings."""
 		Supplier.objects.create(workguru_id=555, name='Acme Timber')
-		response = self.client.get(reverse('accounts_payable'))
+		response = self.client.get(reverse('match_invoices'))
 		self.assertEqual(list(response.context['suppliers']), ['Acme Timber'])
 
 	def test_awaiting_total_sums_po_values(self):
-		response = self.client.get(reverse('accounts_payable'))
+		response = self.client.get(reverse('match_invoices'))
 		self.assertEqual(response.context['awaiting_total'], Decimal('1250.00'))
 		self.assertEqual(response.context['awaiting_count'], 1)
 
 
-class AccountsPayableInboxTests(TestCase):
-	"""The inbox has its own page, and a table-only fragment for the AP modal."""
+class MatchInvoicesInboxTests(TestCase):
+	"""The mailbox is a table-only fragment rendered inside the Match Invoices modal."""
 
 	def setUp(self):
 		self.client = Client()
 		self.user = _create_user(is_superuser=True)
 		self.client.login(username='testuser', password='testpass123')
 
-	def test_inbox_has_its_own_url(self):
-		response = self.client.get(reverse('accounts_payable_inbox'))
-		self.assertEqual(response.status_code, 200)
-
 	def test_fragment_returns_table_without_page_chrome(self):
-		"""The AP modal renders this inline, so it must not carry the layout."""
-		response = self.client.get(reverse('accounts_payable_inbox_fragment'))
+		"""The modal renders this inline, so it must not carry the layout."""
+		response = self.client.get(reverse('match_invoices_inbox_fragment'))
 		self.assertEqual(response.status_code, 200)
 		body = response.content.decode()
 		self.assertIn('apay-table-container', body)
@@ -1552,7 +1548,7 @@ class AccountsPayableInboxTests(TestCase):
 			received_at=timezone.now(), attachment_names='[{"id": "a1", "name": "i.pdf"}]',
 			is_ignored=True,
 		)
-		visible = self.client.get(reverse('accounts_payable_inbox_fragment'), {'status': 'ignored'})
+		visible = self.client.get(reverse('match_invoices_inbox_fragment'), {'status': 'ignored'})
 		self.assertIn('Ignored one', visible.content.decode())
-		hidden = self.client.get(reverse('accounts_payable_inbox_fragment'))
+		hidden = self.client.get(reverse('match_invoices_inbox_fragment'))
 		self.assertNotIn('Ignored one', hidden.content.decode())

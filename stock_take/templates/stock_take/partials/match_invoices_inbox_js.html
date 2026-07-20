@@ -4,7 +4,7 @@ flow (from an email attachment or a manual upload), the link/split modals,
 bulk actions and the background PDF PO-scan.
 
 Bare JS - the including page supplies the <script> wrapper, and must also
-include apay_inbox_modals.html and define apayReloadInbox().
+include match_invoices_inbox_modals.html and define apayReloadInbox().
 {% endcomment %}
 const CSRF_TOKEN = '{{ csrf_token }}';
 let currentEmailId = null;
@@ -77,7 +77,7 @@ function decrementActiveTabCount() {
 function ignoreEmail(btn) {
     const emailId = btn.dataset.emailId;
     btn.disabled = true;
-    fetch(`/accounts-payable/${emailId}/ignore/`, {
+    fetch(`/match-invoices/${emailId}/ignore/`, {
         method: 'POST',
         headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
         body: JSON.stringify({ ignore: true }),
@@ -98,7 +98,7 @@ function ignoreEmail(btn) {
 function unignoreEmail(btn) {
     const emailId = btn.dataset.emailId;
     btn.disabled = true;
-    fetch(`/accounts-payable/${emailId}/ignore/`, {
+    fetch(`/match-invoices/${emailId}/ignore/`, {
         method: 'POST',
         headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
         body: JSON.stringify({ ignore: false }),
@@ -118,7 +118,7 @@ function unignoreEmail(btn) {
 
 function markEmailFiled(emailId) {
     const row = document.getElementById(`email-row-${emailId}`);
-    fetch(`/accounts-payable/${emailId}/file/`, {
+    fetch(`/match-invoices/${emailId}/file/`, {
         method: 'POST',
         headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
     })
@@ -222,7 +222,7 @@ function submitLinkInvoice() {
     const btn = document.getElementById('link-inv-confirm-btn');
     btn.disabled = true;
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Saving...';
-    fetch(`/accounts-payable/${linkEmailId}/link-invoice/`, {
+    fetch(`/match-invoices/${linkEmailId}/link-invoice/`, {
         method: 'POST',
         headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
         body: JSON.stringify({ invoice_id: selectedInvoiceId }),
@@ -686,11 +686,11 @@ function openCreateModal(btn) {
                     <span class="apay-att-option-name">${a.name}</span>
                     <span class="apay-att-option-size">${size}</span>
                 </label>${isPdf
-                ? `<a href="/accounts-payable/${currentEmailId}/attachment/${attId}/" target="_blank"
+                ? `<a href="/match-invoices/${currentEmailId}/attachment/${attId}/" target="_blank"
                        class="apay-att-preview-btn" title="Open PDF in new tab">
                        <i class="bi bi-eye"></i> Preview
                    </a>
-                   <a href="/accounts-payable/${currentEmailId}/attachment/${attId}/?download=1" download
+                   <a href="/match-invoices/${currentEmailId}/attachment/${attId}/?download=1" download
                        class="apay-att-preview-btn" title="Download PDF">
                        <i class="bi bi-download"></i> Download
                    </a>`
@@ -781,7 +781,7 @@ function parseEmailAttachment(attachmentId, hasMatchedSupplier = false) {
     const statusEl = document.getElementById('modal-parse-status');
     statusEl.textContent = 'Extracting data from PDF\u2026';
 
-    fetch(`/accounts-payable/${currentEmailId}/attachment/${attachmentId}/parse/`, {
+    fetch(`/match-invoices/${currentEmailId}/attachment/${attachmentId}/parse/`, {
         method: 'POST',
         headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
     })
@@ -824,7 +824,7 @@ function submitCreateInvoice() {
     btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Creating\u2026';
 
     const createUrl = currentEmailId
-        ? `/accounts-payable/${currentEmailId}/create-invoice/`
+        ? `/match-invoices/${currentEmailId}/create-invoice/`
         : '{% url "create_purchase_invoice" %}';
     const headers = currentEmailId
         ? { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' }
@@ -1134,7 +1134,7 @@ function submitInvoiceQueue() {
 function unprocessEmail(btn) {
     const emailId = btn.dataset.emailId;
     btn.disabled = true;
-    fetch(`/accounts-payable/${emailId}/unprocess/`, {
+    fetch(`/match-invoices/${emailId}/unprocess/`, {
         method: 'POST',
         headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json' },
     })
@@ -1245,7 +1245,7 @@ function bulkAction(action) {
     .catch(() => alert('Network error'));
 }
 
-{% include 'stock_take/partials/apay_rules_js.html' %}
+{% include 'stock_take/partials/match_invoices_rules_js.html' %}
 
 // -- Per-row kebab menu --------------------------------------------------------
 // Delegates to the global kebab controller (base.html).
@@ -1286,7 +1286,7 @@ function rescanEmailPO(emailId) {
         cell.innerHTML = '<span class="apay-po-scan-pending"><span class="apay-po-scan-dot"></span></span>';
     }
     console.log(`[AP rescan] Email ${emailId}: POSTing force rescan...`);
-    fetch(`/accounts-payable/${emailId}/scan-po/`, {
+    fetch(`/match-invoices/${emailId}/scan-po/`, {
         method: 'POST',
         headers: { 'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
         body: JSON.stringify({ force: true }),
@@ -1330,7 +1330,7 @@ function rescanEmailPO(emailId) {
 
 function deleteEmail(emailId) {
     if (!confirm('Delete this email from the inbox? This cannot be undone.')) return;
-    fetch(`/accounts-payable/${emailId}/delete/`, {
+    fetch(`/match-invoices/${emailId}/delete/`, {
         method: 'POST',
         headers: { 'X-CSRFToken': CSRF_TOKEN },
     })
@@ -1378,7 +1378,7 @@ function confirmSplitEmail() {
         confirmBtn.disabled = true;
         confirmBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Splitting...';
     }
-    fetch(`/accounts-payable/${emailId}/split/`, {
+    fetch(`/match-invoices/${emailId}/split/`, {
         method: 'POST',
         headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
     })
@@ -1453,7 +1453,7 @@ function apayStartAutoScan(root) {
             setTimeout(scanTotalNext, 200);
             return;
         }
-        fetch(`/accounts-payable/${emailId}/scan-po/`, {
+        fetch(`/match-invoices/${emailId}/scan-po/`, {
             method: 'POST',
             headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
         })
@@ -1479,7 +1479,7 @@ function apayStartAutoScan(root) {
         if (stale()) return;
         const emailId = pendingTotal.shift();
         if (!emailId) return;
-        fetch(`/accounts-payable/${emailId}/scan-po/`, {
+        fetch(`/match-invoices/${emailId}/scan-po/`, {
             method: 'POST',
             headers: { 'X-CSRFToken': CSRF_TOKEN, 'X-Requested-With': 'XMLHttpRequest' },
         })

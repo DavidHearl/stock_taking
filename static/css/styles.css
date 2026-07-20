@@ -1046,36 +1046,9 @@ body.light-mode .sidebar.collapsed:hover .logo-icon {
 	flex-shrink: 0;
 }
 
-/* Labeled variant of .kebab-trigger: auto width with an inline value + caret,
-   and a persistent border so it reads as a top-bar control. */
-.kebab-trigger-labeled {
-	width: auto;
-	max-width: 200px;
-	height: 32px;
-	gap: 6px;
-	padding: 0 10px;
-	font-size: var(--fs-md);
-	font-weight: 500;
-	color: var(--text-primary);
-	border-color: var(--border-color);
-	background: var(--bg-primary);
-}
-
-.kebab-trigger-labeled .bi-geo-alt {
-	color: var(--primary-color);
-}
-
-.kebab-trigger-labeled .top-location-current {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.kebab-trigger-labeled .top-location-caret {
-	font-size: var(--fs-sm);
-	opacity: 0.7;
-	transition: transform var(--transition);
-}
+/* NOTE: the .kebab-trigger-labeled rules live further down, immediately after
+   the base .kebab-trigger block — they override its fixed 32px width, so they
+   must come after it in source order (same specificity). */
 
 .top-location-menu.open .top-location-caret {
 	transform: rotate(180deg);
@@ -1727,6 +1700,39 @@ body.light-mode .theme-switch-label-light {
     background: var(--bg-hover);
     color: var(--text-primary);
     border-color: var(--border-color);
+}
+
+/* Labeled variant of .kebab-trigger (top-bar location picker): auto width with
+   an inline value + caret, and a persistent border so it reads as a control.
+   Must stay after .kebab-trigger — it overrides that rule's fixed 32px width
+   and zero padding at the same specificity. */
+.kebab-trigger-labeled {
+	width: auto;
+	max-width: 200px;
+	height: 32px;
+	gap: 6px;
+	padding: 0 10px;
+	font-size: var(--fs-md);
+	font-weight: 500;
+	color: var(--text-primary);
+	border-color: var(--border-color);
+	background: var(--bg-primary);
+}
+
+.kebab-trigger-labeled .bi-geo-alt {
+	color: var(--primary-color);
+}
+
+.kebab-trigger-labeled .top-location-current {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.kebab-trigger-labeled .top-location-caret {
+	font-size: var(--fs-sm);
+	opacity: 0.7;
+	transition: transform var(--transition);
 }
 
 .kebab-dropdown {
@@ -3982,6 +3988,140 @@ dialog::backdrop {
 		flex-basis: 100%;
 		width: 100%;
 	}
+}
+
+/* =============================================
+   Detail page component library
+   Promoted from order_details.css, which had become the de-facto shared
+   base for every entity detail page (sale, product, remedial, customer,
+   OS doors). These names are detail-page-unique, so pages can now load
+   just their own sheet on top of this base instead of pulling in the
+   whole order_details.css.
+   ============================================= */
+
+/* ── Two-column detail layout ── */
+.order-details-grid {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 24px;
+}
+
+.main-column {
+	display: flex;
+	flex-direction: column;
+	gap: 24px;
+	min-width: 0;
+}
+
+.sidebar-column {
+	min-width: 0;
+}
+
+/* ── Info sections (grouped read-only fields inside a card) ── */
+.info-section-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	margin-bottom: 12px;
+}
+
+.info-section-title {
+	margin: 0;
+	font-size: var(--fs-lg);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	border-bottom: 1px solid;
+	padding-bottom: 4px;
+	flex: 1;
+}
+
+/* Entity-type accents so a section reads as customer / sale / job at a glance */
+.info-section-title.customer {
+	color: var(--primary-color);
+	border-bottom-color: var(--primary-color);
+}
+
+.info-section-title.sale {
+	color: var(--success-color);
+	border-bottom-color: var(--success-color);
+}
+
+.info-section-title.job {
+	color: var(--warning-color);
+	border-bottom-color: var(--warning-color);
+}
+
+.info-display {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+/* ── Label / value field rows ── */
+.field-label {
+	font-size: var(--fs-sm);
+	color: var(--text-secondary);
+}
+
+.field-value {
+	font-size: var(--fs-md);
+	color: var(--text-primary);
+}
+
+.field-value-large {
+	font-size: var(--fs-md);
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.field-row-with-button {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+/* Small trailing link-out button (Anthill / Xero / etc.) */
+.external-link-btn {
+	padding: 2px 8px;
+	font-size: var(--fs-sm);
+	white-space: nowrap;
+}
+
+.form-grid-3col {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 16px;
+	align-items: start;
+}
+
+/* ── Card chrome used by detail pages ── */
+.card-header h3 {
+	display: flex;
+	align-items: center;
+	gap: var(--sp-4);
+	margin: 0;
+	font-size: var(--fs-lg);
+	font-weight: 700;
+	letter-spacing: 0.3px;
+	text-transform: uppercase;
+}
+
+/* Horizontal spacing between title and inline control is the flex gap above;
+   these elements' own left margins would otherwise double it. */
+.card-header h3 .badge-ml {
+	margin-left: 0;
+}
+
+/* Opt-in zero padding so a table sits flush to the card edges. */
+.card-body.flush {
+	padding: 0;
+}
+
+/* Opt-in explicit padding. Kept !important so it still wins on pages whose
+   own sheet zeroes .card-body out wholesale. */
+.card-body.padded {
+	padding: 16px !important;
 }
 
 /* ===== Detail Tab Panels ===== */

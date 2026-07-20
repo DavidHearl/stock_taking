@@ -75,7 +75,7 @@ The app router defines **200+ named URL patterns**, grouped below by area. All n
 | `/invoices/` | `invoices_list` |
 | `/invoices/<id>/` | `invoice_detail` |
 | `/payments/` | `payments_list` |
-| `/accounts-payable/` | `accounts_payable_inbox` |
+| `/match-invoices/` | `match_invoices` |
 | `/overhead-po/` | `overhead_po_list` |
 | `/xero/` | `xero_status` |
 | `/timesheets/` | `timesheets` |

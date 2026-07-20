@@ -62,9 +62,10 @@ URL_TO_PAGE = {
     'invoices_list': 'invoices',
     'invoice_detail': 'invoices',
     'sync_invoices': 'invoices',
-    'accounts_payable': 'accounts_payable',
-    'accounts_payable_inbox': 'accounts_payable',
-    'accounts_payable_inbox_fragment': 'accounts_payable',
+    # URL names were renamed to match_invoices_*; the page codename stays
+    # 'accounts_payable' so existing PagePermission rows keep working.
+    'match_invoices': 'accounts_payable',
+    'match_invoices_inbox_fragment': 'accounts_payable',
     'sync_mailbox': 'accounts_payable',
     'create_invoice_from_email': 'accounts_payable',
     'ignore_email': 'accounts_payable',

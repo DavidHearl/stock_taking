@@ -43,10 +43,9 @@ from .purchase_invoice_views import (
     manual_link_xero, sync_xero_payment_statuses, next_invoice_number, supplier_search,
     resync_invoice_timesheets, flatten_vat_to_line_item, flatten_discount_to_line_item,
 )
-from .accounts_payable_views import (
-    accounts_payable,
-    accounts_payable_inbox,
-    accounts_payable_inbox_fragment,
+from .match_invoices_views import (
+    match_invoices,
+    match_invoices_inbox_fragment,
     sync_mailbox,
     create_invoice_from_email,
     link_existing_invoice_to_email,
@@ -161,25 +160,24 @@ urlpatterns = [
     # Payments
     path('payments/', payments_list, name='payments_list'),
 
-    # Accounts Payable
-    path('accounts-payable/', accounts_payable, name='accounts_payable'),
-    path('accounts-payable/inbox/', accounts_payable_inbox, name='accounts_payable_inbox'),
-    path('accounts-payable/inbox/fragment/', accounts_payable_inbox_fragment, name='accounts_payable_inbox_fragment'),
-    path('accounts-payable/sync/', sync_mailbox, name='sync_mailbox'),
-    path('accounts-payable/exemptions/', manage_exemptions, name='manage_exemptions'),
-    path('accounts-payable/email-filters/', manage_email_filters, name='manage_email_filters'),
-    path('accounts-payable/supplier-rules/', manage_supplier_rules, name='manage_supplier_rules'),
-    path('accounts-payable/bulk/', bulk_email_action, name='bulk_email_action'),
-    path('accounts-payable/<int:email_id>/create-invoice/', create_invoice_from_email, name='create_invoice_from_email'),
-    path('accounts-payable/<int:email_id>/link-invoice/', link_existing_invoice_to_email, name='link_existing_invoice_to_email'),
-    path('accounts-payable/<int:email_id>/ignore/', ignore_email, name='ignore_email'),
-    path('accounts-payable/<int:email_id>/unprocess/', unprocess_email, name='unprocess_email'),
-    path('accounts-payable/<int:email_id>/file/', mark_email_filed, name='mark_email_filed'),
-    path('accounts-payable/<int:email_id>/attachment/<str:attachment_id>/', download_mailbox_attachment, name='download_mailbox_attachment'),
-    path('accounts-payable/<int:email_id>/attachment/<str:attachment_id>/parse/', parse_email_attachment, name='parse_email_attachment'),
-    path('accounts-payable/<int:email_id>/scan-po/', scan_email_attachment_po, name='scan_email_attachment_po'),
-    path('accounts-payable/<int:email_id>/delete/', delete_email, name='delete_email'),
-    path('accounts-payable/<int:email_id>/split/', split_email, name='split_email'),
+    # Match Invoices
+    path('match-invoices/', match_invoices, name='match_invoices'),
+    path('match-invoices/inbox/fragment/', match_invoices_inbox_fragment, name='match_invoices_inbox_fragment'),
+    path('match-invoices/sync/', sync_mailbox, name='sync_mailbox'),
+    path('match-invoices/exemptions/', manage_exemptions, name='manage_exemptions'),
+    path('match-invoices/email-filters/', manage_email_filters, name='manage_email_filters'),
+    path('match-invoices/supplier-rules/', manage_supplier_rules, name='manage_supplier_rules'),
+    path('match-invoices/bulk/', bulk_email_action, name='bulk_email_action'),
+    path('match-invoices/<int:email_id>/create-invoice/', create_invoice_from_email, name='create_invoice_from_email'),
+    path('match-invoices/<int:email_id>/link-invoice/', link_existing_invoice_to_email, name='link_existing_invoice_to_email'),
+    path('match-invoices/<int:email_id>/ignore/', ignore_email, name='ignore_email'),
+    path('match-invoices/<int:email_id>/unprocess/', unprocess_email, name='unprocess_email'),
+    path('match-invoices/<int:email_id>/file/', mark_email_filed, name='mark_email_filed'),
+    path('match-invoices/<int:email_id>/attachment/<str:attachment_id>/', download_mailbox_attachment, name='download_mailbox_attachment'),
+    path('match-invoices/<int:email_id>/attachment/<str:attachment_id>/parse/', parse_email_attachment, name='parse_email_attachment'),
+    path('match-invoices/<int:email_id>/scan-po/', scan_email_attachment_po, name='scan_email_attachment_po'),
+    path('match-invoices/<int:email_id>/delete/', delete_email, name='delete_email'),
+    path('match-invoices/<int:email_id>/split/', split_email, name='split_email'),
 
     # Overhead Purchase Orders
     path('overhead-purchase-orders/', overhead_po_list, name='overhead_po_list'),

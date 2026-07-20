@@ -142,7 +142,7 @@ The sidebar in `base.html` is divided into named sections, each gated by `role_p
 | Projects | Active, Sales, Customers, Map, Gantt |
 | Products & Stock | Products, Stock Take, Shortages, Validation |
 | Purchase | Purchase Orders, Suppliers |
-| Accounting | Invoices, Payments, Accounts Payable, Xero, Timesheets |
+| Accounting | Invoices, Payments, Match Invoices, Xero, Timesheets |
 | IT | Mobile, Laptops, Desktops |
 | Internal | Gallery, Fitter Upload, Tickets, Claims, Enquiries |
 | Admin | Users, Roles, Activity Log, Settings, About |

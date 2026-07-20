@@ -14,7 +14,7 @@ Each feature area maps to a `*_views.py` module in `stock_take/` and a URL prefi
 | Invoicing | `invoice_views.py` | `/invoices/` | Sales invoice creation/management, Xero sync |
 | Purchase Orders | `purchase_order_views.py` | `/purchase-orders/` | Full PO lifecycle, suppliers, PDF gen, emailing |
 | Purchase Invoices | `purchase_invoice_views.py` | `/purchase-invoices/` | Supplier invoice processing, PDF parsing, Xero sync |
-| Accounts Payable | `accounts_payable_views.py` | `/accounts-payable/` | Email inbox (MS Graph), invoice extraction, PO matching |
+| Match Invoices | `match_invoices_views.py` | `/match-invoices/` | Email inbox (MS Graph), invoice extraction, PO matching |
 | Products / Stock | `product_view.py` | `/products/`, `/stock/` | Product catalog, stock items, pricing, images, history |
 | Stock Takes | `views.py` | `/schedules/` | Rolling / periodic counts, batch updates |
 | Leads & Contacts | `lead_views.py` | `/leads/` | Lead CRUD, status, bulk ops, merge |

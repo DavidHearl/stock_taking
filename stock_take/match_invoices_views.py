@@ -403,8 +403,8 @@ def _build_supplier_email_index():
 
 @login_required
 @page_permission_required('accounts_payable')
-def accounts_payable(request):
-	"""Accounts Payable landing page — purchase orders awaiting a supplier invoice.
+def match_invoices(request):
+	"""Match Invoices landing page — purchase orders awaiting a supplier invoice.
 
 	The work here is driven by the PO list, not the mailbox: pick the supplier an
 	invoice came from, and the awaiting-invoice POs narrow to that supplier so the
@@ -451,7 +451,7 @@ def accounts_payable(request):
 		'statements': _unprocessed.filter(tab='statements').count(),
 	}
 
-	return render(request, 'stock_take/accounts_payable.html', {
+	return render(request, 'stock_take/match_invoices.html', {
 		'pos': pos,
 		'po_suppliers': po_suppliers,
 		'awaiting_count': len(pos),
@@ -461,7 +461,7 @@ def accounts_payable(request):
 		'is_configured': graph_api.is_configured(),
 		'mailbox': graph_api._get_settings()['mailbox'],
 		'last_synced': MailboxEmail.objects.aggregate(last=db_models.Max('synced_at'))['last'],
-		# Plain supplier names — consumed by the shared apay_rules_modal.html partial.
+		# Plain supplier names — consumed by the shared match_invoices_rules_modal.html partial.
 		'suppliers': list(Supplier.objects.values_list('name', flat=True).order_by('name')),
 		# Consumed by the shared invoice_modal.html partial.
 		'opo_category_choices': OverheadPurchaseOrder.CATEGORY_CHOICES,
@@ -471,28 +471,20 @@ def accounts_payable(request):
 
 @login_required
 @page_permission_required('accounts_payable')
-def accounts_payable_inbox_fragment(request):
-	"""Just the email table + pagination, for the Accounts Payable inbox modal.
+def match_invoices_inbox_fragment(request):
+	"""Just the email table + pagination, for the Match Invoices mailbox modal.
 
-	The modal renders the emails inline rather than loading the whole inbox page,
-	so it fetches this fragment and swaps it in. Same filtering as the full page —
-	the context is built once by accounts_payable_inbox and reused here.
+	The modal renders the emails inline rather than loading a whole separate page,
+	so it fetches this fragment and swaps it in after every action.
 	"""
 	context = _build_inbox_context(request)
 	return HttpResponse(
-		render_to_string('stock_take/partials/apay_email_table.html', context, request=request)
+		render_to_string('stock_take/partials/match_invoices_email_table.html', context, request=request)
 	)
 
 
-@login_required
-@page_permission_required('accounts_payable')
-def accounts_payable_inbox(request):
-    """Display the Accounts Payable shared mailbox inbox."""
-    return render(request, 'stock_take/accounts_payable_inbox.html', _build_inbox_context(request))
-
-
 def _build_inbox_context(request):
-    """Shared context for the full inbox page and its table-only fragment."""
+    """Shared context for the mailbox modal's table fragment."""
     mailbox = graph_api._get_settings()['mailbox']
 
     emails = MailboxEmail.objects.select_related('purchase_invoice', 'processed_by', 'matched_po').all()
