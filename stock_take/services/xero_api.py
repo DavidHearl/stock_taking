@@ -1002,8 +1002,10 @@ def create_purchase_order(contact_name, po_number, line_items, date=None,
             line["AccountCode"] = item["account_code"]
         if item.get("tax_type"):
             line["TaxType"] = item["tax_type"]
-        if item.get("item_code"):
-            line["ItemCode"] = item["item_code"]
+        # Deliberately no ItemCode — Xero validates it against its own Inventory
+        # Items list, which we don't maintain, so any supplier part number we sent
+        # was rejected with "Item code '...' is not valid". Description +
+        # AccountCode fully describe the line.
         po_data["LineItems"].append(line)
 
     payload = {"PurchaseOrders": [po_data]}
@@ -1012,16 +1014,6 @@ def create_purchase_order(contact_name, po_number, line_items, date=None,
         # Retry with POST — some Xero configurations prefer POST for creation
         logger.info("PUT failed for PurchaseOrders, retrying with POST")
         result = _api_post("PurchaseOrders", payload)
-
-    # If still failing due to invalid item codes, strip them and retry
-    if result is None and _last_api_error and "Item code" in _last_api_error and "is not valid" in _last_api_error:
-        logger.warning("Xero rejected item codes — retrying without ItemCode fields")
-        for line in po_data["LineItems"]:
-            line.pop("ItemCode", None)
-        payload = {"PurchaseOrders": [po_data]}
-        result = _api_put("PurchaseOrders", payload)
-        if result is None:
-            result = _api_post("PurchaseOrders", payload)
 
     return result
 

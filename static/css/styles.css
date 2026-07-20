@@ -2464,7 +2464,20 @@ td > .qty-stepper-input {
     display: none !important;
 }
 
-/* ===== Tables ===== */
+/* ===== Tables =====
+   `.table` is the one canonical data table for the whole site. Page CSS should
+   only ever add column widths, max-heights and genuinely page-unique cells on
+   top of it — never restyle the base (padding, colours, borders, hover). If a
+   table needs to look different, use a modifier below or add one here. */
+
+/* Scroll container — pair with .table when the table can overflow. */
+.table-wrap {
+	overflow-x: auto;
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-sm);
+	background-color: var(--bg-secondary);
+}
+
 .table {
     width: 100%;
     border-collapse: collapse;
@@ -2478,10 +2491,13 @@ td > .qty-stepper-input {
     text-align: left;
     font-weight: 600;
     text-transform: uppercase;
-    font-size: var(--fs-md);
-    letter-spacing: 0.5px;
+	/* fs-sm / 0.05em is what 38 of the site's 42 tables already used before
+	   they were consolidated here — this is the established convention. */
+	font-size: var(--fs-sm);
+	letter-spacing: 0.05em;
     border-bottom: 1px solid var(--border-color);
     color: var(--text-secondary);
+	white-space: nowrap;
 }
 
 .table tbody tr {
@@ -2502,11 +2518,36 @@ td > .qty-stepper-input {
     padding: 8px 12px;
     color: var(--text-primary);
     font-variant-numeric: tabular-nums;
+	vertical-align: middle;
 }
 
+.table tbody tr:last-child {
+	border-bottom: none;
+}
+
+/* --- Table modifiers ------------------------------------------------ */
+
+/* Compact rows. */
 .table-sm td,
 .table-sm th {
     padding: 4px 8px;
+}
+
+/* Header stays put while the body scrolls (needs a height-bounded wrapper). */
+.table-sticky thead th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+}
+
+/* No row separators — for dense sub-tables and breakdowns. */
+.table-flush tbody tr {
+	border-bottom: none;
+}
+
+/* Column widths honoured exactly; pair with explicit th widths. */
+.table-fixed {
+	table-layout: fixed;
 }
 
 /* ===== Badges ===== */
@@ -2835,16 +2876,18 @@ dialog::backdrop {
     align-items: center;
 }
 
+/* Alignment utilities. `!important` is deliberate: these are explicit opt-in
+   overrides applied at the call site, so they must beat component rules. */
 .text-center {
-    text-align: center;
+	text-align: center !important;
 }
 
 .text-right {
-    text-align: right;
+	text-align: right !important;
 }
 
 .text-left {
-    text-align: left;
+	text-align: left !important;
 }
 
 /* ===== Global helper utilities =====
@@ -4612,4 +4655,229 @@ dialog::backdrop {
 /* ── Hidden Edit Values ── */
 .edit-val {
     display: none;
+}
+
+/* =============================================
+   Admin pages component library
+   Promoted from the old admin_pages.css so every admin page loads a
+   single page-specific sheet on top of this shared base. The .admin-*
+   and .user-badge/.empty-state-block names are admin-unique; the
+   .status-badge rules are scoped under .admin-page so they don't
+   collide with the differently-styled .status-badge on other pages.
+   ============================================= */
+.admin-page {
+	padding: 0;
+}
+
+.admin-page .page-header {
+	margin-bottom: 24px;
+}
+
+.admin-page .page-header h1 {
+	font-size: var(--fs-3xl);
+	font-weight: 700;
+	margin: 0 0 4px 0;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.admin-page .page-header h1 i {
+	color: var(--primary-color);
+}
+
+.admin-page .page-subtitle {
+	color: var(--text-secondary);
+	margin: 0 0 16px 0;
+}
+
+.admin-card {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-md);
+	overflow: hidden;
+	box-shadow:
+		0 1px 0 rgba(255,255,255,0.04) inset,
+		0 8px 24px rgba(0,0,0,0.35);
+}
+
+/* Headers use the global .card-header class; no bespoke layout needed. */
+.admin-card-body {
+	padding: 12px;
+}
+
+.admin-card-header h2 {
+	font-size: var(--fs-lg);
+	font-weight: 600;
+	color: var(--text-primary);
+	margin: 0;
+}
+
+/* Admin Table */
+.admin-table-wrapper {
+	overflow-x: auto;
+}
+
+.admin-table thead th {
+	padding: 12px 16px;
+	font-size: var(--fs-sm);
+	letter-spacing: 0.05em;
+	background: var(--bg-secondary);
+	white-space: nowrap;
+}
+
+.admin-table tbody td {
+	font-size: var(--fs-md);
+	border-bottom: 1px solid var(--border-color);
+	vertical-align: middle;
+}
+
+.admin-table tbody tr:last-child td {
+	border-bottom: none;
+}
+
+/* User Badge */
+.user-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 500;
+}
+
+.user-badge i {
+	font-size: var(--fs-xl);
+	color: var(--primary-color);
+}
+
+/* Status Badges — scoped to .admin-page (other pages define .status-badge differently) */
+.admin-page .status-badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	font-size: var(--fs-sm);
+}
+
+.admin-page .status-badge.status-active {
+	background: var(--success-subtle);
+	color: var(--success-color);
+}
+
+.admin-page .status-badge.status-inactive {
+	background: var(--danger-subtle);
+	color: var(--danger-color);
+}
+
+/* Empty State (block variant is admin-unique; the bare .empty-state override
+   was unused by admin templates and is intentionally left to the global one) */
+.empty-state-block {
+	text-align: center;
+	padding: 60px 20px;
+}
+
+.empty-state-block i {
+	font-size: var(--fs-4xl);
+	color: var(--text-secondary);
+	opacity: 0.4;
+	margin-bottom: 16px;
+	display: block;
+}
+
+.empty-state-block h3 {
+	font-size: var(--fs-xl);
+	font-weight: 600;
+	margin: 0 0 8px 0;
+}
+
+.empty-state-block p {
+	color: var(--text-secondary);
+	max-width: 500px;
+	margin: 0 auto;
+	line-height: 1.6;
+}
+
+/* =============================================
+   Calendar shell
+   Shared chrome for the calendar-style pages (Fit Board, Gantt Chart):
+   top toolbar, nav/date cluster and the view-toggle pill. Promoted from
+   the old calendar_shell.css. Page sheets (fit_board.css, gantt.css)
+   still layer their own overrides on top.
+   ============================================= */
+.cal-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 8px 12px;
+	background: var(--bg-secondary);
+	border-radius: var(--radius-lg);
+	margin-bottom: 16px;
+	flex-wrap: wrap;
+	position: sticky;
+	top: calc(var(--topbar-height, 52px) + 8px);
+	z-index: 100;
+}
+
+/* Compact buttons inside the toolbar */
+.cal-toolbar .btn {
+	padding: 4px 12px;
+	font-size: var(--fs-sm);
+	height: 30px;
+}
+
+.cal-toolbar-right {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+/* ── Nav / date cluster ── */
+.calendar-nav {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	flex-wrap: wrap;
+}
+
+.calendar-date {
+	font-size: var(--fs-lg);
+	font-weight: 700;
+	text-transform: uppercase;
+	margin: 0;
+	white-space: nowrap;
+}
+
+/* ── View toggle ── */
+.view-toggle {
+	display: flex;
+	background: var(--bg-primary);
+	border: 1px solid var(--border-color);
+	border-radius: var(--radius-pill);
+	overflow: hidden;
+}
+
+.view-toggle-btn {
+	padding: 4px 16px;
+	font-size: var(--fs-sm);
+	font-weight: 600;
+	color: var(--text-secondary);
+	text-decoration: none;
+	transition: all 0.2s;
+	border-right: 1px solid var(--border-color);
+}
+
+.view-toggle-btn:last-child {
+	border-right: none;
+}
+
+.view-toggle-btn:hover {
+	background: var(--bg-secondary);
+	color: var(--text-primary);
+}
+
+.view-toggle-btn.active {
+	background: var(--primary-color);
+	color: var(--text-on-color);
 }

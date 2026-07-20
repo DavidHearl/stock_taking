@@ -12125,6 +12125,8 @@ def calendar_view(request):
         _emp_locs = profile_locations(request.user.profile)
     except Exception:
         pass
+    # Human-readable label for the current location selection (blank = all).
+    _emp_location = ', '.join(_emp_locs)
     _emp_loc_q = location_q(_emp_locs, 'profile__selected_location', lookup='icontains')
     if _emp_loc_q:
         emp_user_qs = User.objects.filter(is_active=True).filter(_emp_loc_q).order_by(

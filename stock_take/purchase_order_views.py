@@ -5925,8 +5925,6 @@ def purchase_order_push_to_xero(request, po_id):
             line['account_code'] = product.account_code or gl_code
             if supplier_tax_type:
                 line['tax_type'] = supplier_tax_type
-            if product.supplier_code:
-                line['item_code'] = product.supplier_code
             line_items.append(line)
 
         # Board POs (e.g. Carnehill) carry no PurchaseOrderProduct rows — their lines
