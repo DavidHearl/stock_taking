@@ -30,6 +30,16 @@
         </button>
     </div>
 
+	<!-- Grand total of the checked rows. Hidden until at least one row is
+	     selected; split per currency when a mixed selection is made. -->
+	<div class="po-selection-total" id="po-selection-total" style="display:none;">
+		<span class="po-selection-count" id="po-selection-count">0 selected</span>
+		<span class="po-selection-amounts" id="po-selection-amounts"></span>
+		<button type="button" class="po-selection-clear" onclick="clearPOSelection()" title="Clear selection">
+			<i class="bi bi-x-lg"></i>
+		</button>
+	</div>
+
     <!-- Status tabs (Purchase Orders only) — animated pills, filtered client-side.
          Hidden while the Overheads tab is active. -->
     <div class="po-status-wrap" id="po-status-tabs"{% if active_po_tab == 'overheads' %} style="display:none"{% endif %}>
@@ -107,6 +117,39 @@
         </div>
     </div>
 
+	<!-- Ordered-date band filter — client-side, matches the status pills' model.
+	     Each row carries data-ordered="YYYY-MM-DD" (approved date, else issue date). -->
+	<div class="po-date-filter" id="po-date-filter">
+		<button class="po-filter-btn" onclick="togglePODateDropdown()" id="po-date-filter-btn">
+			<i class="bi bi-calendar-range"></i>
+			<span id="po-date-filter-label">Ordered Date</span>
+		</button>
+		<div class="po-date-dropdown" id="po-date-dropdown">
+			<div class="po-date-presets">
+				<button type="button" onclick="applyPODatePreset('mtd')">This month</button>
+				<button type="button" onclick="applyPODatePreset('last-month')">Last month</button>
+				<button type="button" onclick="applyPODatePreset('3m')">Last 3 months</button>
+				<button type="button" onclick="applyPODatePreset('6m')">Last 6 months</button>
+				<button type="button" onclick="applyPODatePreset('ytd')">This year</button>
+				<button type="button" onclick="applyPODatePreset('last-year')">Last year</button>
+			</div>
+			<div class="po-date-custom">
+				<label>
+					<span>From</span>
+					<input type="date" id="po-date-from">
+				</label>
+				<label>
+					<span>To</span>
+					<input type="date" id="po-date-to">
+				</label>
+			</div>
+			<div class="po-date-actions">
+				<button type="button" class="po-date-clear" onclick="clearPODateFilter()">Clear</button>
+				<button type="button" class="po-filter-apply" onclick="applyPODateFilter()">Apply</button>
+			</div>
+		</div>
+	</div>
+
     <button class="btn btn-success" title="Create new Purchase Order" onclick="document.getElementById('createPOModal').style.display='flex'">
         <i class="bi bi-plus-lg"></i> New PO
     </button>
@@ -147,6 +190,7 @@
         <table class="table po-table">
             <thead>
                 <tr>
+                    <th class="po-check-col"><input type="checkbox" id="po-check-all" onchange="togglePOSelectAll(this)" title="Select all visible"></th>
                     <th>PO</th>
                     <th>Supplier</th>
                     <th>Project</th>
@@ -159,7 +203,10 @@
             </thead>
             <tbody>
                 {% for po in purchase_orders %}
-                <tr data-status="{{ po.status|lower }}">
+                <tr data-status="{{ po.status|lower }}" data-ordered="{{ po.ordered_date_iso }}" data-total="{{ po.total|stringformat:'.2f' }}" data-currency="{{ po.currency|default:'GBP' }}">
+                    <td class="po-check-col">
+                        <input type="checkbox" class="po-row-check" onchange="onPORowCheck()"{% if po.ordered_date_iso %} title="Ordered {{ po.ordered_date_iso }}"{% endif %}>
+                    </td>
                     <td>
                         <a href="{% url 'purchase_order_detail' po.workguru_id %}" class="po-number">
                             {{ po.display_number|default:"-" }}
@@ -408,31 +455,17 @@ function buildUrl(overrides) {
 /* ── Status tab switching — client-side, no page reload ──
    Every status is rendered into the table; the pills just show/hide rows and
    the active pill's indicator slides across (global pill-slider observer). */
+/* Active client-side filters on the Purchase Orders table. Both the status pills
+   and the ordered-date band feed into applyPOFilters(). */
+let poStatusFilter = 'all';
+let poDateFrom = '';   // 'YYYY-MM-DD' — inclusive, '' = unbounded
+let poDateTo = '';     // 'YYYY-MM-DD' — inclusive, '' = unbounded
+
 function switchTab(status) {
+    poStatusFilter = status;
     document.querySelectorAll('#po-status-tabs .tab-button').forEach(b =>
         b.classList.toggle('active', b.dataset.status === status));
-
-    const tc = document.getElementById('po-table-container');
-    let visible = 0;
-    if (tc) {
-        tc.querySelectorAll('tbody tr').forEach(tr => {
-            const show = (status === 'all') || (tr.dataset.status === status);
-            tr.style.display = show ? '' : 'none';
-            if (show) visible++;
-        });
-        const hasRows = tc.querySelector('tbody tr') != null;
-        const empty = document.getElementById('po-status-empty');
-        const showEmpty = hasRows && visible === 0;
-        if (empty) {
-            empty.style.display = showEmpty ? '' : 'none';
-            const label = document.querySelector('#po-status-tabs .tab-button[data-status="' + status + '"]');
-            const msg = document.getElementById('po-status-empty-msg');
-            if (msg && label) msg.textContent = 'No purchase orders with status "' + label.textContent.replace(/\s*\d+\s*$/, '').trim() + '".';
-        }
-        tc.style.display = showEmpty ? 'none' : '';
-    }
-    const count = document.getElementById('po-results-count');
-    if (count) count.textContent = 'Showing ' + visible + ' of {{ total_count }} purchase orders';
+    applyPOFilters();
 
     // Reflect the selection in the URL without reloading
     const params = new URLSearchParams(window.location.search);
@@ -441,10 +474,205 @@ function switchTab(status) {
     history.replaceState(null, '', qs ? '?' + qs : window.location.pathname);
 }
 
+/* Show/hide rows against the current status + ordered-date filters, then refresh
+   the results count and the selection total. Rows hidden by a filter change are
+   deselected so the grand total always matches what's on screen. */
+function applyPOFilters() {
+    const tc = document.getElementById('po-table-container');
+    if (!tc) return;
+
+    let visible = 0;
+    tc.querySelectorAll('tbody tr').forEach(tr => {
+        const statusOk = (poStatusFilter === 'all') || (tr.dataset.status === poStatusFilter);
+        const ordered = tr.dataset.ordered || '';
+        // A row with no parseable ordered date can't satisfy a date band.
+        const dateOk = (!poDateFrom && !poDateTo)
+            || (ordered && (!poDateFrom || ordered >= poDateFrom) && (!poDateTo || ordered <= poDateTo));
+        const show = statusOk && dateOk;
+        tr.style.display = show ? '' : 'none';
+        if (show) {
+            visible++;
+        } else {
+            const cb = tr.querySelector('.po-row-check');
+            if (cb) cb.checked = false;
+        }
+    });
+
+    const hasRows = tc.querySelector('tbody tr') != null;
+    const empty = document.getElementById('po-status-empty');
+    const showEmpty = hasRows && visible === 0;
+    if (empty) {
+        empty.style.display = showEmpty ? '' : 'none';
+        const msg = document.getElementById('po-status-empty-msg');
+        if (msg) {
+            const label = document.querySelector('#po-status-tabs .tab-button[data-status="' + poStatusFilter + '"]');
+            const statusName = label ? label.textContent.replace(/\s*\d+\s*$/, '').trim() : '';
+            let text = 'No purchase orders';
+            if (poStatusFilter !== 'all' && statusName) text += ' with status "' + statusName + '"';
+            if (poDateFrom || poDateTo) text += ' ordered in the selected date range';
+            msg.textContent = text + '.';
+        }
+    }
+    tc.style.display = showEmpty ? 'none' : '';
+
+    const count = document.getElementById('po-results-count');
+    if (count) count.textContent = 'Showing ' + visible + ' of {{ total_count }} purchase orders';
+
+    updatePOSelectionTotal();
+}
+
 // Apply the initial status filter (e.g. arriving at ?status=draft) once loaded.
 document.addEventListener('DOMContentLoaded', function() {
     if (document.getElementById('po-status-tabs')) switchTab('{{ status_filter|default:"all" }}');
 });
+
+/* ── Ordered-date band filter ── */
+const PO_MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function poISO(d) {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function togglePODateDropdown() {
+    document.getElementById('po-date-dropdown').classList.toggle('open');
+}
+
+document.addEventListener('click', function(e) {
+    const filter = document.getElementById('po-date-filter');
+    if (filter && !filter.contains(e.target)) {
+        const dd = document.getElementById('po-date-dropdown');
+        if (dd) dd.classList.remove('open');
+    }
+});
+
+function applyPODatePreset(preset) {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    let from, to = now;
+    if (preset === 'mtd') {
+        from = new Date(y, m, 1);
+    } else if (preset === 'last-month') {
+        from = new Date(y, m - 1, 1);
+        to = new Date(y, m, 0);
+    } else if (preset === '3m') {
+        from = new Date(y, m - 2, 1);
+    } else if (preset === '6m') {
+        from = new Date(y, m - 5, 1);
+    } else if (preset === 'ytd') {
+        from = new Date(y, 0, 1);
+    } else if (preset === 'last-year') {
+        from = new Date(y - 1, 0, 1);
+        to = new Date(y - 1, 11, 31);
+    }
+    document.getElementById('po-date-from').value = poISO(from);
+    document.getElementById('po-date-to').value = poISO(to);
+    applyPODateFilter();
+}
+
+function applyPODateFilter() {
+    poDateFrom = document.getElementById('po-date-from').value || '';
+    poDateTo = document.getElementById('po-date-to').value || '';
+    // Tolerate a reversed range rather than silently showing nothing.
+    if (poDateFrom && poDateTo && poDateFrom > poDateTo) {
+        [poDateFrom, poDateTo] = [poDateTo, poDateFrom];
+        document.getElementById('po-date-from').value = poDateFrom;
+        document.getElementById('po-date-to').value = poDateTo;
+    }
+    updatePODateLabel();
+    document.getElementById('po-date-dropdown').classList.remove('open');
+    applyPOFilters();
+}
+
+function clearPODateFilter() {
+    poDateFrom = '';
+    poDateTo = '';
+    document.getElementById('po-date-from').value = '';
+    document.getElementById('po-date-to').value = '';
+    updatePODateLabel();
+    document.getElementById('po-date-dropdown').classList.remove('open');
+    applyPOFilters();
+}
+
+function updatePODateLabel() {
+    const label = document.getElementById('po-date-filter-label');
+    const btn = document.getElementById('po-date-filter-btn');
+    const fmt = iso => {
+        const [yy, mm, dd] = iso.split('-');
+        return Number(dd) + ' ' + PO_MONTH_NAMES[Number(mm) - 1] + ' ' + yy;
+    };
+    if (!poDateFrom && !poDateTo) {
+        label.textContent = 'Ordered Date';
+        btn.classList.remove('active');
+        return;
+    }
+    btn.classList.add('active');
+    if (poDateFrom && poDateTo) label.textContent = fmt(poDateFrom) + ' – ' + fmt(poDateTo);
+    else if (poDateFrom) label.textContent = 'From ' + fmt(poDateFrom);
+    else label.textContent = 'Up to ' + fmt(poDateTo);
+}
+
+/* ── Row selection & grand total ── */
+const PO_CCY_SYMBOLS = { GBP: '£', EUR: '€', USD: '$' };
+
+function togglePOSelectAll(master) {
+    document.querySelectorAll('#po-table-container tbody tr').forEach(tr => {
+        if (tr.style.display === 'none') return;
+        const cb = tr.querySelector('.po-row-check');
+        if (cb) cb.checked = master.checked;
+    });
+    updatePOSelectionTotal();
+}
+
+function onPORowCheck() {
+    updatePOSelectionTotal();
+}
+
+function clearPOSelection() {
+    document.querySelectorAll('.po-row-check').forEach(cb => cb.checked = false);
+    updatePOSelectionTotal();
+}
+
+function updatePOSelectionTotal() {
+    const chip = document.getElementById('po-selection-total');
+    if (!chip) return;
+
+    const totals = {};   // currency code -> summed total
+    let selected = 0;
+    let visible = 0;
+    document.querySelectorAll('#po-table-container tbody tr').forEach(tr => {
+        if (tr.style.display === 'none') return;
+        visible++;
+        const cb = tr.querySelector('.po-row-check');
+        if (!cb || !cb.checked) return;
+        selected++;
+        const ccy = (tr.dataset.currency || 'GBP').toUpperCase();
+        totals[ccy] = (totals[ccy] || 0) + (parseFloat(tr.dataset.total) || 0);
+    });
+
+    // Master checkbox reflects "all visible selected" / partial.
+    const master = document.getElementById('po-check-all');
+    if (master) {
+        master.checked = visible > 0 && selected === visible;
+        master.indeterminate = selected > 0 && selected < visible;
+    }
+
+    if (!selected) {
+        chip.style.display = 'none';
+        return;
+    }
+
+    document.getElementById('po-selection-count').textContent =
+        selected + ' selected';
+    document.getElementById('po-selection-amounts').innerHTML =
+        Object.keys(totals).sort().map(ccy =>
+            '<span class="po-selection-amount">' +
+            (PO_CCY_SYMBOLS[ccy] || ccy + ' ') +
+            totals[ccy].toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) +
+            '</span>'
+        ).join('');
+    chip.style.display = '';
+}
 
 /* ── Page tab switching (Purchase Orders / Overheads) — client-side ── */
 function switchPOPageTab(tab) {
@@ -459,6 +687,13 @@ function switchPOPageTab(tab) {
     if (statusTabs) statusTabs.style.display = (tab === 'overheads') ? 'none' : '';
     const opoStatusTabs = document.getElementById('opo-status-tabs');
     if (opoStatusTabs) opoStatusTabs.style.display = (tab === 'overheads') ? '' : 'none';
+    // The selection total belongs to the Purchase Orders table only.
+    if (tab === 'overheads') {
+        const chip = document.getElementById('po-selection-total');
+        if (chip) chip.style.display = 'none';
+    } else if (typeof updatePOSelectionTotal === 'function') {
+        updatePOSelectionTotal();
+    }
     // The status pills' sliding indicator can't measure itself while hidden —
     // nudge the global pill-slider to re-align whichever bar is now visible.
     window.dispatchEvent(new Event('resize'));
@@ -653,6 +888,9 @@ function recalculatePOTotal(poId, btn) {
             const totalCell = row.querySelector('td.text-right');
             const newTotal = parseFloat(data.total);
             totalCell.textContent = '\xa3' + newTotal.toFixed(2);
+            // Keep the row in sync with the selection grand total.
+            row.dataset.total = newTotal.toFixed(2);
+            updatePOSelectionTotal();
             if (newTotal !== 0) {
                 // No longer £0 — drop the recalc item; keep the rest of the kebab.
                 const item = btn.closest('.kebab-item');

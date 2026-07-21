@@ -1013,6 +1013,17 @@ document.addEventListener('DOMContentLoaded', function() {
                           '<strong class="target-over-amount">' + money(t.actual - t.target) + '</strong>'
                         : '<span>To target</span><strong>' + money(t.remaining) + '</strong>') +
                 '</div>' +
+                (t.pace_active
+                    ? '<div class="target-figure target-figure-pace">' +
+                          '<span><i class="bi bi-flag"></i> Expected by now (' + Math.round(t.pace_pct) + '%)</span>' +
+                          '<strong>' + money(t.pace_expected) + '</strong>' +
+                      '</div>' +
+                      '<div class="target-figure target-figure-pace-delta">' +
+                          '<span>' + (t.pace_delta >= 0 ? 'Ahead of pace' : 'Behind pace') + '</span>' +
+                          '<strong class="' + (t.pace_delta >= 0 ? 'is-ahead' : 'is-behind') + '">' +
+                              (t.pace_delta >= 0 ? '+' : '−') + money(Math.abs(t.pace_delta)) + '</strong>' +
+                      '</div>'
+                    : '') +
             '</div>' +
             (t.fit_days_target ? (function() {
                 const fdMet = t.fit_days >= t.fit_days_target;
@@ -1025,6 +1036,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     '</div>' +
                     '<div class="target-fitdays-track">' +
                         '<div class="target-fitdays-fill' + (fdMet ? ' is-met' : '') + '" style="width:' + fdPct + '%"></div>' +
+                        (t.pace_active
+                            ? '<span class="target-fitdays-pace" style="left:' + Math.min(t.pace_pct, 100) + '%" ' +
+                                  'title="Expected by now: ' + t.pace_fit_days_expected + ' days"></span>'
+                            : '') +
                     '</div>' +
                 '</div>';
             })() : '');
@@ -1044,8 +1059,37 @@ document.addEventListener('DOMContentLoaded', function() {
             segValues[0] = 1;
         }
 
+        // Marks where we *should* be on the ring given how far through the period
+        // we are — e.g. 58% of the way through July means the July target ring
+        // should be 58% filled by now.
+        const paceMarker = {
+            id: 'paceMarker',
+            afterDatasetsDraw(chart) {
+                // Once the target is met the ring is scaled to the actual, not the
+                // target, so a pro-rata angle would no longer line up.
+                if (!t.pace_active || met) return;
+                const arc = chart.getDatasetMeta(0).data[0];
+                if (!arc) return;
+                const angle = -Math.PI / 2 + (2 * Math.PI * Math.min(t.pace_pct, 100) / 100);
+                const cos = Math.cos(angle), sin = Math.sin(angle);
+                const r0 = arc.innerRadius - 3;
+                const r1 = arc.outerRadius + 3;
+                const g = chart.ctx;
+                g.save();
+                g.beginPath();
+                g.moveTo(arc.x + cos * r0, arc.y + sin * r0);
+                g.lineTo(arc.x + cos * r1, arc.y + sin * r1);
+                g.lineWidth = 2;
+                g.strokeStyle = cText;
+                g.lineCap = 'round';
+                g.stroke();
+                g.restore();
+            },
+        };
+
         new Chart(ctx, {
             type: 'doughnut',
+            plugins: [paceMarker],
             data: {
                 labels: segLabels,
                 datasets: [{

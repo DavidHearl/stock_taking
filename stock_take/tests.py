@@ -1741,3 +1741,250 @@ class FitDateConfirmedToggleTests(TestCase):
 		self.assertEqual(
 			self.client.get(reverse('set_order_fit_confirmed', args=[self.order.id])).status_code, 405
 		)
+
+
+class DashboardSalesCardTests(TestCase):
+	"""The sales cards read the fit calendar, not raw AnthillSale.sale_value.
+
+	Regression: every job fitting this week is still open (unbilled), so Anthill
+	holds no sale_value for it and the cards reported £0.
+	"""
+
+	def setUp(self):
+		from .models import FitAppointment
+		self.client = Client()
+		self.user = _create_user(is_superuser=True)
+		self.user.profile.role = _create_role(name='admin')
+		self.user.profile.save()
+		self.client.login(username='testuser', password='testpass123')
+
+		today = date.today()
+		self.week_start = today - timedelta(days=today.weekday())
+		self.order = _create_order(sale_number='500001', total_value_inc_vat=Decimal('12000.00'))
+		FitAppointment.objects.create(order=self.order, fit_date=self.week_start, fitter='R')
+		# The Anthill record exists but is unbilled — no value on it yet.
+		AnthillSale.objects.create(
+			anthill_activity_id='500001', contract_number='BFS-NR-500001',
+			customer_name='Open Job', status='open', fit_date=self.week_start,
+			sale_value=Decimal('0.00'),
+		)
+
+	def test_fit_jobs_values_an_unbilled_job_from_its_order(self):
+		from .dashboard_view import _fit_jobs
+
+		jobs = _fit_jobs(self.week_start, self.week_start + timedelta(days=6))
+		self.assertEqual([j['value'] for j in jobs], [12000.0])
+
+	def test_this_week_card_matches_the_targets_panel(self):
+		response = self.client.get(reverse('dashboard'))
+		self.assertEqual(response.status_code, 200)
+		self.assertEqual(response.context['this_week_sales'], '12,000')
+		this_week = next(
+			p for p in json.loads(response.context['targets_json']) if p['key'] == 'this_week'
+		)
+		self.assertEqual(this_week['actual'], 12000.0)
+
+	def test_week_report_matches_the_card(self):
+		response = self.client.get(reverse('dashboard_week_report'))
+		self.assertEqual(response.json()['total'], 12000.0)
+
+	def test_multi_day_appointments_count_once(self):
+		from .models import FitAppointment
+		from .dashboard_view import _fit_jobs
+
+		FitAppointment.objects.create(
+			order=self.order, fit_date=self.week_start + timedelta(days=1), fitter='R',
+		)
+		jobs = _fit_jobs(self.week_start, self.week_start + timedelta(days=6))
+		self.assertEqual(len(jobs), 1)
+		self.assertEqual(jobs[0]['date'], self.week_start)
+
+	def test_duplicate_order_rows_for_one_contract_count_once(self):
+		from .models import FitAppointment
+		from .dashboard_view import _fit_jobs
+
+		duplicate = _create_order(sale_number='500001', total_value_inc_vat=Decimal('12000.00'))
+		FitAppointment.objects.create(order=duplicate, fit_date=self.week_start, fitter='D')
+		jobs = _fit_jobs(self.week_start, self.week_start + timedelta(days=6))
+		self.assertEqual([j['value'] for j in jobs], [12000.0])
+
+	def test_billed_sale_without_a_calendar_entry_still_counts(self):
+		from .dashboard_view import _fit_jobs
+
+		AnthillSale.objects.create(
+			anthill_activity_id='500002', contract_number='BFS-NR-500002',
+			customer_name='Historic Job', status='completed', fit_date=self.week_start,
+			sale_value=Decimal('4000.00'),
+		)
+		jobs = _fit_jobs(self.week_start, self.week_start + timedelta(days=6))
+		self.assertEqual(sorted(j['value'] for j in jobs), [4000.0, 12000.0])
+
+	def test_a_calendar_job_is_not_double_counted_by_its_anthill_sale(self):
+		from .dashboard_view import _fit_jobs
+
+		AnthillSale.objects.filter(anthill_activity_id='500001').update(sale_value=Decimal('11500.00'))
+		jobs = _fit_jobs(self.week_start, self.week_start + timedelta(days=6))
+		self.assertEqual(len(jobs), 1)
+
+
+class CalendarPanelDuplicateOrderTests(TestCase):
+	"""A sale_number can have more than one Order row; only the one linked from
+	AnthillSale is canonical, and the calendar renders that one alone. The job
+	panel must therefore only offer the canonical order — dragging a duplicate
+	created an appointment the board immediately filtered out, so the drop
+	looked like it silently did nothing."""
+
+	def setUp(self):
+		self.client = Client()
+		self.user = _create_user(is_superuser=True)
+		self.client.login(username='testuser', password='testpass123')
+		Fitter.objects.create(code='R', name='Ross Middleton', active=True)
+		# Duplicate pair: the orphan keeps a stale empty order_date so it looks
+		# like a PFP job, while the canonical row has moved on.
+		self.orphan = _create_order(
+			sale_number='900001', customer_number='900001',
+			first_name='Dup', last_name='Licate', order_date=None,
+		)
+		self.canonical = _create_order(
+			sale_number='900001', customer_number='900001',
+			first_name='Dup', last_name='Licate', order_date=date(2026, 5, 1),
+		)
+		AnthillSale.objects.create(
+			anthill_activity_id='900001', customer_name='Dup Licate',
+			order=self.canonical,
+		)
+
+	def test_job_panel_offers_the_canonical_order_not_the_duplicate(self):
+		response = self.client.get(reverse('calendar_weekly'))
+		self.assertEqual(response.status_code, 200)
+		panel_ids = {
+			o.id for o in
+			list(response.context['pfp_orders']) + list(response.context['awaiting_orders'])
+		}
+		self.assertIn(self.canonical.id, panel_ids)
+		self.assertNotIn(self.orphan.id, panel_ids)
+
+	def test_dragging_a_duplicate_schedules_the_canonical_order(self):
+		from .models import FitAppointment
+		response = self.client.post(
+			reverse('create_provisional_appointment'),
+			data=json.dumps({
+				'type': 'order', 'id': self.orphan.id,
+				'fit_date': '2026-09-08', 'fitter': 'R', 'starts_pm': False,
+			}),
+			content_type='application/json',
+		)
+		self.assertTrue(json.loads(response.content)['success'])
+		appointment = FitAppointment.objects.get(order=self.canonical)
+		self.assertEqual(appointment.fit_date, date(2026, 9, 8))
+		self.assertTrue(appointment.is_provisional)
+		self.assertFalse(FitAppointment.objects.filter(order=self.orphan).exists())
+
+	def test_the_dragged_job_then_appears_on_the_calendar(self):
+		self.client.post(
+			reverse('create_provisional_appointment'),
+			data=json.dumps({
+				'type': 'order', 'id': self.orphan.id,
+				'fit_date': '2026-09-08', 'fitter': 'R', 'starts_pm': False,
+			}),
+			content_type='application/json',
+		)
+		response = self.client.get(reverse('calendar_weekly'), {'year': 2026, 'month': 9})
+		shown = {
+			entry['appt'].order_id
+			for week in response.context['month_weeks']
+			for lane in week['fitter_lanes']
+			for entry in lane['appts']
+		}
+		self.assertIn(self.canonical.id, shown)
+
+
+class PurchaseOrderListDateBandTests(TestCase):
+	"""The PO list rows carry a normalised ordered date + total so the page can
+	filter by date band and total the checked rows client-side."""
+
+	def setUp(self):
+		self.client = Client()
+		self.user = _create_user(is_superuser=True)
+		self.client.login(username='testuser', password='testpass123')
+		# ISO with a UTC offset — the most common shape in the live data.
+		self.iso_offset = PurchaseOrder.objects.create(
+			workguru_id=9101, display_number='PO9101', status='Approved',
+			supplier_name='Acme Timber', approved_date='2026-06-04T09:14:22+01:00',
+			issue_date='2026-05-01', total=Decimal('1250.00'), currency='GBP',
+		)
+		# UK day-first with dashes — the shape the first cut of the filter
+		# silently failed to parse, which is what broke the date band.
+		self.uk_dashed = PurchaseOrder.objects.create(
+			workguru_id=9102, display_number='PO9102', status='Approved',
+			supplier_name='Beta Boards', approved_date='21-07-2026',
+			issue_date='11/02/2026', total=Decimal('80.00'), currency='EUR',
+		)
+		# Never approved -> never ordered -> no ordered date.
+		self.never_approved = PurchaseOrder.objects.create(
+			workguru_id=9103, display_number='PO9103', status='Draft',
+			supplier_name='Gamma Glass', issue_date='01/03/2026',
+			total=Decimal('5.00'),
+		)
+
+	def _rows(self):
+		response = self.client.get(reverse('purchase_orders_list'))
+		self.assertEqual(response.status_code, 200)
+		return {po.workguru_id: po for po in response.context['purchase_orders']}
+
+	def test_ordered_date_parses_iso_with_offset(self):
+		self.assertEqual(self._rows()[9101].ordered_date_iso, '2026-06-04')
+
+	def test_ordered_date_parses_uk_day_first_dashed(self):
+		self.assertEqual(self._rows()[9102].ordered_date_iso, '2026-07-21')
+
+	def test_ordered_date_is_blank_when_never_approved(self):
+		"""It must not fall back to issue_date — an unapproved PO wasn't ordered."""
+		self.assertEqual(self._rows()[9103].ordered_date_iso, '')
+
+	def test_rows_expose_total_and_currency_for_the_selection_total(self):
+		html = self.client.get(reverse('purchase_orders_list')).content.decode()
+		self.assertIn('data-total="1250.00"', html)
+		self.assertIn('data-currency="EUR"', html)
+		self.assertIn('class="po-row-check"', html)
+
+
+class DateStrParsingTests(TestCase):
+	"""The legacy CharField date columns hold four different real-world shapes;
+	parse_date_str is the single place that reconciles them."""
+
+	def test_parses_every_shape_present_in_the_data(self):
+		from .date_utils import parse_date_str
+		cases = {
+			'2026-07-15T09:14:22+01:00': date(2026, 7, 15),
+			'2026-07-15T09:14:22.1234567+01:00': date(2026, 7, 15),
+			'2026-07-15': date(2026, 7, 15),
+			'21-07-2026': date(2026, 7, 21),
+			'21/07/2026': date(2026, 7, 21),
+		}
+		for raw, expected in cases.items():
+			self.assertEqual(parse_date_str(raw), expected, msg=raw)
+
+	def test_day_first_and_iso_are_not_confused(self):
+		"""Both '05-06-2026' and '2026-06-05' are unambiguous by year position."""
+		from .date_utils import parse_date_str
+		self.assertEqual(parse_date_str('05-06-2026'), date(2026, 6, 5))
+		self.assertEqual(parse_date_str('2026-06-05'), date(2026, 6, 5))
+
+	def test_unparseable_and_impossible_values_return_none(self):
+		from .date_utils import parse_date_str
+		for raw in ('', None, 'n/a', 'not a date', '31-02-2026', '2026-13-01'):
+			self.assertIsNone(parse_date_str(raw), msg=repr(raw))
+
+	def test_date_objects_pass_through(self):
+		from .date_utils import parse_date_str
+		self.assertEqual(parse_date_str(date(2026, 7, 15)), date(2026, 7, 15))
+		self.assertEqual(parse_date_str(datetime(2026, 7, 15, 9, 14)), date(2026, 7, 15))
+
+	def test_display_filters_use_the_shared_parser(self):
+		"""The DD-MM-YYYY shape used to fall through both filters unformatted."""
+		from .templatetags.custom_filters import format_date_str, date_for_input
+		self.assertEqual(format_date_str('21-07-2026'), '21/07/2026')
+		self.assertEqual(date_for_input('21-07-2026'), '2026-07-21')
+		self.assertEqual(format_date_str('2026-07-15T09:14:22+01:00'), '15/07/2026')
+		self.assertEqual(date_for_input('2026-07-15T09:14:22+01:00'), '2026-07-15')

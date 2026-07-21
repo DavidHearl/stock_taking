@@ -7,12 +7,13 @@ from django.conf import settings
 from .models import BoardsPO, Expense, Fitter, Order, OSDoor, PNXItem, PriceHistory, PurchaseInvoice, PurchaseInvoiceLineItem, PurchaseOrder, PurchaseOrderAttachment, PurchaseOrderInvoice, PurchaseOrderProduct, PurchaseOrderProject, ProductCustomerAllocation, RaumplusDraftOrder, StockItem, StockHistory, Supplier, SupplierContact, Timesheet, log_activity
 from .po_pdf_generator import generate_purchase_order_pdf
 from .pricing_utils import apply_invoice_price
+from .date_utils import date_str_to_iso, parse_date_str
 import logging
 import requests
 import json
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -358,15 +359,8 @@ def purchase_orders_list(request):
     def _expected_sort_key(po):
         """Parse expected_date (stored as a string in various formats).
         POs with no parseable date sort first, then oldest date first."""
-        raw = (po.expected_date or '').strip()
-        if not raw:
-            return (0, datetime.min)
-        for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f'):
-            try:
-                return (1, datetime.strptime(raw[:19], fmt))
-            except (ValueError, TypeError):
-                continue
-        return (0, datetime.min)
+        parsed = parse_date_str(po.expected_date)
+        return (1, parsed) if parsed else (0, date.min)
 
     approved_report_pos = sorted(approved_report_qs, key=_expected_sort_key)
 
@@ -487,6 +481,9 @@ def purchase_orders_list(request):
             info = alloc_map.get(po.pk)
         po.linked_order_info = info
         po.linked_invoices_list = po_invoice_map.get(po.pk, [])
+        # The ordered date IS the approved date — a PO that was never approved
+        # was never ordered, so it has no date and drops out of any date band.
+        po.ordered_date_iso = date_str_to_iso(po.approved_date)
 
     context = {
         'purchase_orders': po_list,

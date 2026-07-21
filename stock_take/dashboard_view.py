@@ -69,25 +69,191 @@ WEEKLY_SALES_TARGET = Decimal('35000')
 MONTHLY_SALES_TARGET = Decimal('150000')
 YEARLY_SALES_TARGET = Decimal('2000000')
 # Fit-days objective: distinct calendar days with at least one fit, per period.
+# How far ahead the "sales after date" card/report looks. Fits are scheduled at
+# most a few months out; this is a generous upper bound on the pipeline window.
+SALES_AFTER_HORIZON_DAYS = 730
 WEEKLY_FIT_DAYS_TARGET = 10
 MONTHLY_FIT_DAYS_TARGET = 40
 YEARLY_FIT_DAYS_TARGET = 520
 
 
-def _compute_sales_targets(today, prefixes=None):
+def _sale_payments_subquery():
+	"""Per-sale total of non-ignored payments, as a Subquery."""
+	return Subquery(
+		AnthillPayment.objects.filter(sale=OuterRef('pk'), ignored=False)
+		.values('sale')
+		.annotate(total=Sum('amount'))
+		.values('total'),
+		output_field=DecimalField(max_digits=14, decimal_places=2),
+	)
+
+
+def _fit_jobs(start, end, prefixes=None):
+	"""Fits in ``start``–``end``, one job per order, with what each is worth.
+
+	THE source of truth for "what is fitting, and what is it worth" — used by the
+	dashboard stat cards, their drill-down reports and the sales targets so none
+	of them can disagree. Two sources are merged, because neither is complete on
+	its own:
+
+	* The fit calendar (``FitAppointment`` → one job per order, collapsing
+	  multi-fitter / multi-day appointments) valued via ``_orders_financials``,
+	  exactly as the calendar and the weekly operations report do. This is the
+	  only source that values an open (unbilled) job — ``AnthillSale.sale_value``
+	  is 0/None until a job is billed, which is what zeroed the near-term cards.
+	* Billed Anthill sales whose fit isn't on the calendar. The calendar was only
+	  adopted part-way through, so historic fits exist solely in Anthill.
+
+	A sale already represented by a calendar job is never added twice.
+
+	Each job: ``{'order', 'sale_pk', 'sale_number', 'contract_number', 'customer',
+	'designer', 'order_date', 'date', 'value', 'paid', 'outstanding',
+	'estimated'}``, sorted by fit date.
+	"""
+	from .models import FitAppointment
+	from .customer_views import _orders_financials
+
+	window_appts = (
+		FitAppointment.objects
+		.filter(fit_date__gte=start, fit_date__lte=end, order__isnull=False)
+		.select_related('order', 'order__customer', 'order__designer')
+	)
+	# Keyed by contract, not by order row: a handful of contracts have duplicate
+	# Order records, and each one carries its own appointment — keying by order id
+	# would count that job (and its money) twice.
+	jobs_by_order = {}
+	for appt in window_appts:
+		order = appt.order
+		if not order:
+			continue
+		key = order.sale_number or f'order:{order.id}'
+		rec = jobs_by_order.get(key)
+		if rec is None:
+			jobs_by_order[key] = {'order': order, 'fit_date': appt.fit_date, 'order_ids': {order.id}}
+			continue
+		rec['order_ids'].add(order.id)
+		if appt.fit_date < rec['fit_date']:
+			rec['fit_date'] = appt.fit_date
+
+	# Anthill's record of each calendar job — the contract number (authoritative
+	# for location, the location field is dirty on some historic rows) and the
+	# sale pk the report links point at.
+	sale_numbers = [r['order'].sale_number for r in jobs_by_order.values() if r['order'].sale_number]
+	sale_meta = {}
+	if sale_numbers:
+		for row in (AnthillSale.objects
+					.filter(anthill_activity_id__in=sale_numbers)
+					.values('pk', 'anthill_activity_id', 'contract_number')):
+			key = row['anthill_activity_id']
+			if key not in sale_meta or (row['contract_number'] and not sale_meta[key]['contract_number']):
+				sale_meta[key] = {'pk': row['pk'], 'contract_number': row['contract_number'] or ''}
+	if prefixes:
+		prefs = tuple(p.upper() for p in prefixes)
+		jobs_by_order = {
+			key: rec for key, rec in jobs_by_order.items()
+			if (sale_meta.get(rec['order'].sale_number, {}).get('contract_number', '') or '').upper().startswith(prefs)
+		}
+
+	fin_by_sale = _orders_financials([r['order'] for r in jobs_by_order.values()])
+	jobs = []
+	covered_sale_numbers = set()
+	covered_order_ids = {oid for rec in jobs_by_order.values() for oid in rec['order_ids']}
+	for rec in jobs_by_order.values():
+		order = rec['order']
+		meta = sale_meta.get(order.sale_number, {})
+		fin = fin_by_sale.get(order.sale_number) if order.sale_number else None
+		if fin:
+			value = float(fin['sale_value'] or 0)
+			paid = min(max(float(fin['payments_total'] or 0), 0.0), value)
+			estimated = bool(fin.get('value_estimated'))
+		else:
+			value = float(order.total_value_inc_vat or 0)
+			paid = 0.0
+			estimated = True
+		customer = (
+			(order.customer.name if order.customer_id and getattr(order.customer, 'name', '') else '')
+			or ' '.join(p for p in [order.first_name, order.last_name] if p).strip()
+			or '-'
+		)
+		if order.sale_number:
+			covered_sale_numbers.add(order.sale_number)
+		jobs.append({
+			'order': order,
+			'sale_pk': meta.get('pk'),
+			'sale_number': order.sale_number or '',
+			'contract_number': meta.get('contract_number') or order.sale_number or '',
+			'customer': customer,
+			'designer': order.designer.name if order.designer_id and getattr(order.designer, 'name', '') else '-',
+			'order_date': order.order_date,
+			'date': rec['fit_date'],
+			'value': value,
+			'paid': paid,
+			'outstanding': max(value - paid, 0.0),
+			'estimated': estimated,
+		})
+
+	# Billed fits the calendar doesn't hold (pre-calendar history, or a job that
+	# was never booked in). Unbilled sales carry no value, so they'd contribute
+	# nothing and are left out.
+	legacy_qs = (
+		AnthillSale.objects
+		.filter(fit_date__gte=start, fit_date__lte=end, sale_value__gt=0)
+		.exclude(status__in=['cancelled', 'dead'])
+		.exclude(anthill_activity_id__in=covered_sale_numbers)
+		.exclude(order_id__in=covered_order_ids)
+		.annotate(total_paid=Coalesce(
+			_sale_payments_subquery(), Value(Decimal('0')),
+			output_field=DecimalField(max_digits=14, decimal_places=2),
+		))
+	)
+	legacy_qs = _apply_prefixes(legacy_qs, prefixes)
+	for s in legacy_qs.values('pk', 'order_id', 'anthill_activity_id', 'contract_number',
+							  'customer_name', 'assigned_to_name', 'activity_date',
+							  'fit_date', 'sale_value', 'discount', 'total_paid'):
+		value = float(s['sale_value'] or 0)
+		net = value - 2 * float(s['discount'] or 0)
+		paid = min(max(float(s['total_paid'] or 0), 0.0), max(net, 0.0))
+		jobs.append({
+			'order': None,
+			'sale_pk': s['pk'],
+			'sale_number': s['anthill_activity_id'] or '',
+			'contract_number': s['contract_number'] or s['anthill_activity_id'] or '',
+			'customer': s['customer_name'] or '-',
+			'designer': s['assigned_to_name'] or '-',
+			'order_date': s['activity_date'],
+			'date': s['fit_date'],
+			'value': value,
+			'paid': paid,
+			'outstanding': max(net - paid, 0.0),
+			'estimated': False,
+		})
+
+	jobs.sort(key=lambda j: j['date'])
+	return jobs
+
+
+def _jobs_in(jobs, start, end):
+	"""The subset of ``jobs`` whose fit date falls in ``start``–``end`` inclusive."""
+	return [j for j in jobs if start <= j['date'] <= end]
+
+
+def _jobs_total(jobs, start, end):
+	"""``(total value, job count)`` for the fits in ``start``–``end``."""
+	window = _jobs_in(jobs, start, end)
+	return sum(j['value'] for j in window), len(window)
+
+
+def _compute_sales_targets(today, prefixes=None, jobs=None):
 	"""Build the dashboard sales-target breakdowns for the periods around ``today``.
 
 	Returns a list of period dicts (last/this/next week, this month, this year),
 	each with target / actual / paid / outstanding / remaining / count / pct. The
 	monthly entry also carries a fit-days breakdown (distinct fit days vs target).
 
-	Fits come from the calendar (one job per order, collapsing multi-fitter and
-	multi-day appointments) and money from ``_orders_financials`` so the figures
-	match the calendar and the weekly operations report exactly.
+	``jobs`` — pre-fetched ``_fit_jobs`` covering the whole reporting span, so the
+	dashboard can build them once and share them with the stat cards.
 	"""
 	from calendar import monthrange
-	from .models import FitAppointment
-	from .customer_views import _orders_financials
 
 	this_week_start = today - timedelta(days=today.weekday())
 	this_week_end = this_week_start + timedelta(days=6)
@@ -105,57 +271,10 @@ def _compute_sales_targets(today, prefixes=None):
 	span_start = min(last_week_start, month_start, year_start)
 	span_end = max(week_after_end, month_end, year_end)
 
-	# One job per order, sourced from the calendar (FitAppointment), like the
-	# weekly operations report. Multi-fitter / multi-day appointments collapse to
-	# a single job so nothing is double-counted.
-	window_appts = (
-		FitAppointment.objects
-		.filter(fit_date__gte=span_start, fit_date__lte=span_end, order__isnull=False)
-		.select_related('order')
-	)
-	jobs_by_order = {}
-	for appt in window_appts:
-		order = appt.order
-		if not order:
-			continue
-		rec = jobs_by_order.get(order.id)
-		if rec is None:
-			jobs_by_order[order.id] = {'order': order, 'fit_date': appt.fit_date}
-		elif appt.fit_date < rec['fit_date']:
-			rec['fit_date'] = appt.fit_date
+	if jobs is None:
+		jobs = _fit_jobs(span_start, span_end, prefixes)
 
-	# Location scoping via the Anthill contract-number prefix (authoritative).
-	sale_numbers = [r['order'].sale_number for r in jobs_by_order.values() if r['order'].sale_number]
-	contract_by_sale = {}
-	if sale_numbers:
-		for row in (AnthillSale.objects
-					.filter(anthill_activity_id__in=sale_numbers)
-					.values('anthill_activity_id', 'contract_number')):
-			cn = row['contract_number'] or ''
-			if row['anthill_activity_id'] not in contract_by_sale or cn:
-				contract_by_sale[row['anthill_activity_id']] = cn
-	if prefixes:
-		prefs = tuple(p.upper() for p in prefixes)
-		jobs_by_order = {
-			oid: rec for oid, rec in jobs_by_order.items()
-			if (contract_by_sale.get(rec['order'].sale_number, '') or '').upper().startswith(prefs)
-		}
-
-	# Per-job financials — identical to the calendar / weekly report.
-	fin_by_sale = _orders_financials([r['order'] for r in jobs_by_order.values()])
-	jobs = []
-	for rec in jobs_by_order.values():
-		order = rec['order']
-		fin = fin_by_sale.get(order.sale_number) if order.sale_number else None
-		if fin:
-			value = float(fin['sale_value'] or 0)
-			paid = min(max(float(fin['payments_total'] or 0), 0.0), value)
-		else:
-			value = float(order.total_value_inc_vat or 0)
-			paid = 0.0
-		jobs.append({'date': rec['fit_date'], 'value': value, 'paid': paid})
-
-	def _breakdown(start, end, sales_target, fit_days_target):
+	def _breakdown(start, end, sales_target, fit_days_target, show_pace=False):
 		actual = paid = 0.0
 		count = 0
 		fit_dates = set()
@@ -168,6 +287,24 @@ def _compute_sales_targets(today, prefixes=None):
 		paid = min(paid, actual)
 		sales_target = float(sales_target)
 		fit_days = len(fit_dates)
+
+		# Pace: how far through the period we are today, and the pro-rata share of
+		# the objective we'd expect to have hit by now. Only meaningful while the
+		# period is in progress — a finished or future period has no "so far" —
+		# and only shown on the longer periods (``show_pace``); a week is short
+		# enough that pro-rata pace is noise.
+		total_days = (end - start).days + 1
+		if today < start:
+			elapsed_days = 0
+		elif today > end:
+			elapsed_days = total_days
+		else:
+			elapsed_days = (today - start).days + 1
+		pace_pct = round(elapsed_days / total_days * 100, 1) if total_days else 0.0
+		in_progress = show_pace and 0 < elapsed_days < total_days
+		expected = sales_target * elapsed_days / total_days if total_days else 0.0
+		expected_fit_days = fit_days_target * elapsed_days / total_days if total_days else 0.0
+
 		return {
 			'target': sales_target,
 			'actual': actual,
@@ -179,6 +316,12 @@ def _compute_sales_targets(today, prefixes=None):
 			'fit_days': fit_days,
 			'fit_days_target': fit_days_target,
 			'fit_days_pct': round(fit_days / fit_days_target * 100, 1) if fit_days_target else 0.0,
+			'pace_active': in_progress,
+			'pace_pct': pace_pct,
+			'pace_expected': round(expected, 2),
+			'pace_delta': round(actual - expected, 2),
+			'pace_fit_days_expected': round(expected_fit_days, 1),
+			'pace_fit_days_delta': round(fit_days - expected_fit_days, 1),
 		}
 
 	def _wk_range(s, e):
@@ -194,34 +337,24 @@ def _compute_sales_targets(today, prefixes=None):
 		{'key': 'week_after', 'label': 'In 2 Weeks', 'sublabel': _wk_range(week_after_start, week_after_end),
 		 **_breakdown(week_after_start, week_after_end, WEEKLY_SALES_TARGET, WEEKLY_FIT_DAYS_TARGET)},
 		{'key': 'this_month', 'label': 'This Month', 'sublabel': today.strftime('%B %Y'),
-		 **_breakdown(month_start, month_end, MONTHLY_SALES_TARGET, MONTHLY_FIT_DAYS_TARGET)},
+		 **_breakdown(month_start, month_end, MONTHLY_SALES_TARGET, MONTHLY_FIT_DAYS_TARGET, show_pace=True)},
 		{'key': 'this_year', 'label': 'This Year', 'sublabel': str(today.year),
-		 **_breakdown(year_start, year_end, YEARLY_SALES_TARGET, YEARLY_FIT_DAYS_TARGET)},
+		 **_breakdown(year_start, year_end, YEARLY_SALES_TARGET, YEARLY_FIT_DAYS_TARGET, show_pace=True)},
 	]
 
 	return periods
 
 
-def _get_monthly_sales_data(year, month, prefixes=None):
+def _get_monthly_sales_data(year, month, prefixes=None, jobs=None):
     """Calculate monthly sales stats for a given year/month using fit_date."""
     from calendar import monthrange
     first_day = datetime(year, month, 1).date()
     last_day = datetime(year, month, monthrange(year, month)[1]).date()
 
-    sales_qs = AnthillSale.objects.filter(
-        fit_date__gte=first_day,
-        fit_date__lte=last_day,
-        sale_value__gt=0,
-    ).exclude(status__in=['cancelled', 'dead'])
-    sales_qs = _apply_prefixes(sales_qs, prefixes)
-    agg = sales_qs.aggregate(
-        total=Sum('sale_value'),
-        count=Count('id'),
-    )
-    return {
-        'total': float(agg['total'] or 0),
-        'count': agg['count'] or 0,
-    }
+    if jobs is None:
+        jobs = _fit_jobs(first_day, last_day, prefixes)
+    total, count = _jobs_total(jobs, first_day, last_day)
+    return {'total': float(total), 'count': count}
 
 
 @login_required
@@ -233,56 +366,37 @@ def dashboard_sales_after(request):
     except (ValueError, TypeError):
         cutoff = datetime.now().date()
 
-    sales_qs = AnthillSale.objects.filter(
-        fit_date__gte=cutoff,
-        sale_value__gt=0,
-    ).exclude(status__in=['cancelled', 'dead'])
-    agg = sales_qs.aggregate(
-        total=Sum('sale_value'),
-        count=Count('id'),
-    )
+    profile = getattr(request.user, 'profile', None)
+    prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
+    rows = _build_sales_after_rows(cutoff, prefixes)
     return JsonResponse({
         'success': True,
-        'total': float(agg['total'] or 0),
-        'count': agg['count'] or 0,
+        'total': sum(r['sale_value'] for r in rows),
+        'count': len(rows),
     })
 
 
-def _build_sales_after_rows(cutoff):
-    """Return a list of sale row dicts for fit_date >= cutoff, with payment totals."""
-    qs = (
-        AnthillSale.objects
-        .filter(fit_date__gte=cutoff, sale_value__gt=0)
-        .exclude(status__in=['cancelled', 'dead'])
-        .annotate(payments_total=Coalesce(
-            Sum('payments__amount'), Value(Decimal('0')),
-            output_field=DecimalField(max_digits=14, decimal_places=2),
-        ))
-        .select_related('customer')
-        .order_by('fit_date')
-        .values(
-            'pk', 'anthill_activity_id', 'contract_number', 'customer_name',
-            'fit_date', 'activity_date', 'sale_value', 'assigned_to_name',
-            'payments_total', 'location',
-        )
-    )
-    rows = []
-    for s in qs:
-        sv = float(s['sale_value'] or 0)
-        paid = float(s['payments_total'] or 0)
-        remaining = max(sv - paid, 0)
-        rows.append({
-            'pk': s['pk'],
-            'customer': s['customer_name'] or '-',
-            'sale_number': s['contract_number'] or s['anthill_activity_id'] or '',
-            'order_date': s['activity_date'].strftime('%d/%m/%Y') if s['activity_date'] else '',
-            'fit_date': s['fit_date'].strftime('%d/%m/%Y') if s['fit_date'] else '',
-            'sale_value': sv,
-            'paid': paid,
-            'remaining': remaining,
-            'designer': s['assigned_to_name'] or '-',
-        })
-    return rows
+def _build_sales_after_rows(cutoff, prefixes=None, jobs=None):
+	"""Return a list of upcoming fit rows for fit_date >= cutoff, with payment totals.
+
+	Built off ``_fit_jobs`` so the report totals match the "Sales After" card.
+	"""
+	if jobs is None:
+		jobs = _fit_jobs(cutoff, cutoff + timedelta(days=SALES_AFTER_HORIZON_DAYS), prefixes)
+	rows = []
+	for j in _jobs_in(jobs, cutoff, cutoff + timedelta(days=SALES_AFTER_HORIZON_DAYS)):
+		rows.append({
+			'pk': j['sale_pk'],
+			'customer': j['customer'],
+			'sale_number': j['contract_number'],
+			'order_date': j['order_date'].strftime('%d/%m/%Y') if j['order_date'] else '',
+			'fit_date': j['date'].strftime('%d/%m/%Y'),
+			'sale_value': j['value'],
+			'paid': j['paid'],
+			'remaining': j['outstanding'],
+			'designer': j['designer'],
+		})
+	return rows
 
 
 @login_required
@@ -294,7 +408,9 @@ def dashboard_sales_after_report(request):
     except (ValueError, TypeError):
         cutoff = datetime.now().date()
 
-    rows = _build_sales_after_rows(cutoff)
+    profile = getattr(request.user, 'profile', None)
+    prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
+    rows = _build_sales_after_rows(cutoff, prefixes)
     total = sum(r['sale_value'] for r in rows)
     return JsonResponse({
         'success': True,
@@ -317,7 +433,9 @@ def dashboard_sales_after_pdf(request):
     except (ValueError, TypeError):
         cutoff = datetime.now().date()
 
-    rows = _build_sales_after_rows(cutoff)
+    profile = getattr(request.user, 'profile', None)
+    prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
+    rows = _build_sales_after_rows(cutoff, prefixes)
     buffer = generate_sales_after_pdf(rows, cutoff_date=cutoff)
     filename = f'Sales_After_{cutoff.strftime("%Y%m%d")}_{date_type.today().strftime("%Y%m%d")}.pdf'
     response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
@@ -382,36 +500,33 @@ def dashboard(request):
     scope_locations = [active_branch] if active_branch else selected_locations
     prefixes = _contract_prefixes_for_locations(scope_locations)
 
+    from calendar import monthrange
+
     # Get fits per week data (past 52 weeks + future 12 weeks to show scheduled fits)
     today = datetime.now().date()
     start_date = today - timedelta(weeks=52)
     future_date = today + timedelta(weeks=12)
 
-    # Get all AnthillSale records with fit dates in the range
-    sales_in_range = AnthillSale.objects.filter(
-        fit_date__gte=start_date,
-        fit_date__lte=future_date,
-        sale_value__gt=0,
-    ).exclude(status__in=['cancelled', 'dead'])
-    sales_in_range = _apply_prefixes(sales_in_range, prefixes)
-    sales_in_range = sales_in_range.values('fit_date', 'sale_value')
-    
-    # Create a dictionary of all weeks with default data
+    # Every sales figure on this page — cards, charts and targets — is sliced out
+    # of one job list so they can't disagree (see _fit_jobs). Fetched once for the
+    # widest span anything on the page needs.
+    # Reaches back past the 36-month sales chart and forward past the pipeline card.
+    fit_jobs = _fit_jobs(
+        (today.replace(day=1) - timedelta(days=1150)).replace(day=1),
+        max(future_date, today.replace(month=12, day=31), today + timedelta(days=SALES_AFTER_HORIZON_DAYS)),
+        prefixes,
+    )
+
+    # Fits per week
     weeks_data = {}
     current_date = start_date
     while current_date <= future_date:
         # Get Monday of the week
         week_start = current_date - timedelta(days=current_date.weekday())
-        weeks_data[week_start] = {'fits': 0, 'sales': Decimal('0.00')}
+        total, count = _jobs_total(fit_jobs, week_start, week_start + timedelta(days=6))
+        weeks_data[week_start] = {'fits': count, 'sales': Decimal(str(round(total, 2)))}
         current_date += timedelta(weeks=1)
-    
-    # Fill in actual data by iterating through AnthillSale records
-    for sale in sales_in_range:
-        week_start = sale['fit_date'] - timedelta(days=sale['fit_date'].weekday())
-        if week_start in weeks_data:
-            weeks_data[week_start]['fits'] += 1
-            weeks_data[week_start]['sales'] += sale['sale_value'] or Decimal('0.00')
-    
+
     # Convert to lists for Chart.js (sorted by week)
     sorted_weeks = sorted(weeks_data.items())
     
@@ -438,39 +553,26 @@ def dashboard(request):
             current_week_index = i
             break
     
-    # This week's fits scheduled (AnthillSale by fit_date — full Mon–Sun week)
+    # This week's fits scheduled (fit calendar — full Mon–Sun week)
     this_week_start = today - timedelta(days=today.weekday())
     this_week_end = this_week_start + timedelta(days=6)
-    this_week_sales_qs = AnthillSale.objects.filter(
-        fit_date__gte=this_week_start,
-        fit_date__lte=this_week_end,
-        sale_value__gt=0,
-    ).exclude(status__in=['cancelled', 'dead'])
-    this_week_sales_qs = _apply_prefixes(this_week_sales_qs, prefixes)
-    this_week_sales = this_week_sales_qs.aggregate(total=Sum('sale_value'))['total'] or Decimal('0.00')
+    this_week_total, _ = _jobs_total(fit_jobs, this_week_start, this_week_end)
+    this_week_sales = Decimal(str(round(this_week_total, 2)))
 
     # Last week for week-on-week comparison
     last_week_start = this_week_start - timedelta(days=7)
     last_week_end = last_week_start + timedelta(days=6)
-    last_week_sales_qs = AnthillSale.objects.filter(
-        fit_date__gte=last_week_start,
-        fit_date__lte=last_week_end,
-        sale_value__gt=0,
-    ).exclude(status__in=['cancelled', 'dead'])
-    last_week_sales_qs = _apply_prefixes(last_week_sales_qs, prefixes)
-    last_week_sales = last_week_sales_qs.aggregate(total=Sum('sale_value'))['total'] or Decimal('0.00')
+    last_week_total, _ = _jobs_total(fit_jobs, last_week_start, last_week_end)
+    last_week_sales = Decimal(str(round(last_week_total, 2)))
     week_delta = this_week_sales - last_week_sales
-    
-    # Sales after today (future pipeline — from AnthillSale.fit_date)
-    sales_after_qs = AnthillSale.objects.filter(
-        fit_date__gte=today,
-        sale_value__gt=0,
-    ).exclude(status__in=['cancelled', 'dead'])
-    sales_after_qs = _apply_prefixes(sales_after_qs, prefixes)
-    sales_after = sales_after_qs.aggregate(
-        total=Sum('sale_value'),
-        count=Count('id'),
-    )
+
+    # Sales after today (future pipeline — scheduled fits from today onwards)
+    sales_after_end = today + timedelta(days=SALES_AFTER_HORIZON_DAYS)
+    sales_after_total, sales_after_count = _jobs_total(fit_jobs, today, sales_after_end)
+    sales_after = {
+        'total': Decimal(str(round(sales_after_total, 2))),
+        'count': sales_after_count,
+    }
 
     # Get approved POs waiting to arrive
     pending_pos_qs = PurchaseOrder.objects.filter(
@@ -656,38 +758,18 @@ def dashboard(request):
             current_month_board_index = i
             break
 
-    # Monthly sales totals from AnthillSale - aggregate sale_value by fit_date month
-    # Using fit_date (not activity_date) so future scheduled fits appear in upcoming months
-    monthly_sales_qs = AnthillSale.objects.filter(
-        fit_date__gte=thirty_six_months_ago,
-        fit_date__lte=three_months_ahead,
-        sale_value__gt=0,
-    ).exclude(status__in=['cancelled', 'dead'])
-    monthly_sales_qs = _apply_prefixes(monthly_sales_qs, prefixes)
-    monthly_sales_data = (
-        monthly_sales_qs
-        .annotate(month=TruncMonth('fit_date'))
-        .values('month')
-        .annotate(total_sales=Sum('sale_value'))
-        .order_by('month')
-    )
-
+    # Monthly sales totals by fit_date month (not activity_date) so future
+    # scheduled fits appear in upcoming months.
     monthly_sales_months = {}
     temp_month = thirty_six_months_ago
     while temp_month <= three_months_ahead:
-        monthly_sales_months[temp_month] = Decimal('0.00')
+        month_last = temp_month.replace(day=monthrange(temp_month.year, temp_month.month)[1])
+        total, _count = _jobs_total(fit_jobs, temp_month, month_last)
+        monthly_sales_months[temp_month] = Decimal(str(round(total, 2)))
         if temp_month.month == 12:
             temp_month = temp_month.replace(year=temp_month.year + 1, month=1)
         else:
             temp_month = temp_month.replace(month=temp_month.month + 1)
-
-    for entry in monthly_sales_data:
-        month_key = entry['month']
-        if hasattr(month_key, 'date'):
-            month_key = month_key.date()
-        month_key = month_key.replace(day=1)
-        if month_key in monthly_sales_months:
-            monthly_sales_months[month_key] = entry['total_sales']
 
     sorted_sales_months = sorted(monthly_sales_months.items())
     monthly_sales_labels = [m.strftime('%b %Y') for m, _ in sorted_sales_months]
@@ -702,23 +784,19 @@ def dashboard(request):
             break
 
     # Current month sales data (by fit_date)
-    current_month_sales = _get_monthly_sales_data(today.year, today.month, prefixes)
+    current_month_sales = _get_monthly_sales_data(today.year, today.month, prefixes, fit_jobs)
 
     # Previous month for initial month-on-month delta
     prev_month_num = today.month - 1 if today.month > 1 else 12
     prev_month_year = today.year if today.month > 1 else today.year - 1
-    prev_month_sales = _get_monthly_sales_data(prev_month_year, prev_month_num, prefixes)
+    prev_month_sales = _get_monthly_sales_data(prev_month_year, prev_month_num, prefixes, fit_jobs)
     month_delta = Decimal(str(current_month_sales['total'])) - Decimal(str(prev_month_sales['total']))
 
-    # Average daily sale value — last 365 days total / 365
+    # Average daily sale value — last 365 days total / 365, built month by month
+    # exactly as the drill-down report does so the two always agree.
     one_year_ago = today - timedelta(days=365)
-    avg_12m_qs = AnthillSale.objects.filter(
-        fit_date__gte=one_year_ago,
-        fit_date__lte=today,
-        sale_value__gt=0,
-    ).exclude(status__in=['cancelled', 'dead'])
-    avg_12m_qs = _apply_prefixes(avg_12m_qs, prefixes)
-    avg_12m_total = avg_12m_qs.aggregate(total=Sum('sale_value'))['total'] or Decimal('0')
+    avg_12m_rows = _avg_monthly_rows(one_year_ago, today, prefixes, fit_jobs)
+    avg_12m_total = Decimal(str(round(sum(r['total'] for r in avg_12m_rows), 2)))
     avg_daily_sale = avg_12m_total / 365
 
     # Total outstanding balance: sum balance_payable directly from Anthill.
@@ -754,19 +832,10 @@ def dashboard(request):
             outstanding_debtor_customers.add(row['customer_id'] or row['customer_name'])
     outstanding_debtor_count = len(outstanding_debtor_customers)
 
-    # Remaining balance of fits scheduled this week
-    this_week_qs = (
-        AnthillSale.objects
-        .filter(fit_date__gte=this_week_start, fit_date__lte=this_week_end, sale_value__gt=0)
-        .exclude(status__in=['cancelled', 'dead'])
-        .annotate(total_paid=Coalesce(payments_subquery, Value(Decimal('0')), output_field=DecimalField(max_digits=14, decimal_places=2)))
-        .values('sale_value', 'discount', 'total_paid')
-    )
-    this_week_qs = _apply_prefixes(this_week_qs, prefixes)
-    expected_this_week = sum(
-        max((row['sale_value'] or Decimal('0')) - 2 * (row['discount'] or Decimal('0')) - (row['total_paid'] or Decimal('0')), Decimal('0'))
-        for row in this_week_qs
-    ) or Decimal('0')
+    # Remaining balance of fits scheduled this week (fit calendar)
+    expected_this_week = Decimal(str(round(
+        sum(j['outstanding'] for j in _jobs_in(fit_jobs, this_week_start, this_week_end)), 2
+    )))
 
     # ── Preview data for stat-card "Detailed" variant tables ──
 
@@ -790,18 +859,11 @@ def dashboard(request):
     )[:10]
 
     # Sales After: next 10 upcoming fits by date
-    sales_after_preview_qs = (
-        AnthillSale.objects
-        .filter(fit_date__gte=today, sale_value__gt=0)
-        .exclude(status__in=['cancelled', 'dead'])
-        .order_by('fit_date')
-    )
-    sales_after_preview_qs = _apply_prefixes(sales_after_preview_qs, prefixes)
     sales_after_preview = [
-        {'customer': s['customer_name'] or '-',
-         'fit_date': s['fit_date'].strftime('%d/%m') if s['fit_date'] else '',
-         'value': float(s['sale_value'] or 0)}
-        for s in sales_after_preview_qs.values('customer_name', 'fit_date', 'sale_value')[:10]
+        {'customer': j['customer'],
+         'fit_date': j['date'].strftime('%d/%m'),
+         'value': j['value']}
+        for j in _jobs_in(fit_jobs, today, sales_after_end)[:10]
     ]
 
     # Stock Value: top 10 items by total value (qty * cost)
@@ -812,56 +874,35 @@ def dashboard(request):
     )[:10]
 
     # Week Sales: this week's fits (up to 10)
-    week_preview_qs = (
-        AnthillSale.objects
-        .filter(fit_date__gte=this_week_start, fit_date__lte=this_week_end, sale_value__gt=0)
-        .exclude(status__in=['cancelled', 'dead'])
-        .order_by('fit_date')
-    )
-    week_preview_qs = _apply_prefixes(week_preview_qs, prefixes)
     week_preview = [
-        {'customer': s['customer_name'] or '-',
-         'fit_date': s['fit_date'].strftime('%a %d') if s['fit_date'] else '',
-         'value': float(s['sale_value'] or 0)}
-        for s in week_preview_qs.values('customer_name', 'fit_date', 'sale_value')[:10]
+        {'customer': j['customer'],
+         'fit_date': j['date'].strftime('%a %d'),
+         'value': j['value']}
+        for j in _jobs_in(fit_jobs, this_week_start, this_week_end)[:10]
     ]
 
     # Monthly Sales: this month's fits (up to 10)
-    from calendar import monthrange
     month_start = today.replace(day=1)
     month_end = today.replace(day=monthrange(today.year, today.month)[1])
-    monthly_preview_qs = (
-        AnthillSale.objects
-        .filter(fit_date__gte=month_start, fit_date__lte=month_end, sale_value__gt=0)
-        .exclude(status__in=['cancelled', 'dead'])
-        .order_by('fit_date')
-    )
-    monthly_preview_qs = _apply_prefixes(monthly_preview_qs, prefixes)
     monthly_preview = [
-        {'customer': s['customer_name'] or '-',
-         'fit_date': s['fit_date'].strftime('%d/%m') if s['fit_date'] else '',
-         'value': float(s['sale_value'] or 0)}
-        for s in monthly_preview_qs.values('customer_name', 'fit_date', 'sale_value')[:10]
+        {'customer': j['customer'],
+         'fit_date': j['date'].strftime('%d/%m'),
+         'value': j['value']}
+        for j in _jobs_in(fit_jobs, month_start, month_end)[:10]
     ]
 
     # Avg Sale: last 6 months breakdown
-    from django.db.models.functions import TruncMonth as _TruncMonth
-    avg_preview_qs = AnthillSale.objects.filter(
-        fit_date__gte=today - timedelta(days=180), fit_date__lte=today, sale_value__gt=0,
-    ).exclude(status__in=['cancelled', 'dead'])
-    avg_preview_qs = _apply_prefixes(avg_preview_qs, prefixes)
-    avg_monthly = (
-        avg_preview_qs.annotate(month=_TruncMonth('fit_date'))
-        .values('month')
-        .annotate(count=Count('id'), total=Sum('sale_value'))
-        .order_by('-month')
-    )
-    avg_preview = [
-        {'month': (m['month'].date() if hasattr(m['month'], 'date') else m['month']).strftime('%b %Y'),
-         'count': m['count'],
-         'avg': round(float(m['total'] or 0) / m['count'], 0) if m['count'] else 0}
-        for m in avg_monthly
-    ][:6]
+    avg_preview = []
+    _m = month_start
+    for _ in range(6):
+        _data = _get_monthly_sales_data(_m.year, _m.month, prefixes, fit_jobs)
+        if _data['count']:
+            avg_preview.append({
+                'month': _m.strftime('%b %Y'),
+                'count': _data['count'],
+                'avg': round(_data['total'] / _data['count'], 0),
+            })
+        _m = (_m - timedelta(days=1)).replace(day=1)
 
     # ── Workflow stages grouped by role ──
     from .models import WorkflowStage, OrderWorkflowProgress
@@ -931,7 +972,7 @@ def dashboard(request):
     # Weekly pies for last / this / next week, plus this month (with fit-days) and
     # this year. Sourced from the fit calendar via _compute_sales_targets so the
     # figures match the calendar and weekly operations report exactly.
-    targets_data = _compute_sales_targets(today, prefixes)
+    targets_data = _compute_sales_targets(today, prefixes, fit_jobs)
 
     context = {
         'branch_tabs': branch_tabs,
@@ -2992,22 +3033,48 @@ def dashboard_outstanding_pdf(request):
     return response
 
 
-def _build_fit_sales_rows(qs):
-    """Shared row builder for fit-date-based sales reports (week / monthly)."""
-    rows = []
-    for s in qs.values('pk', 'anthill_activity_id', 'contract_number', 'customer_name',
-                        'fit_date', 'activity_date', 'sale_value', 'assigned_to_name'):
-        sv = float(s['sale_value'] or 0)
-        rows.append({
-            'pk': s['pk'],
-            'customer': s['customer_name'] or '-',
-            'sale_number': s['contract_number'] or s['anthill_activity_id'] or '',
-            'order_date': s['activity_date'].strftime('%d/%m/%Y') if s['activity_date'] else '',
-            'fit_date': s['fit_date'].strftime('%d/%m/%Y') if s['fit_date'] else '',
-            'sale_value': sv,
-            'designer': s['assigned_to_name'] or '-',
-        })
-    return rows
+def _avg_monthly_rows(start, end, prefixes=None, jobs=None):
+	"""Month-by-month fits/value between ``start`` and ``end`` for the average card.
+
+	Months are clipped to the requested window, so a part-month at either edge
+	counts only its own days.
+	"""
+	from calendar import monthrange
+	if jobs is None:
+		jobs = _fit_jobs(start, end, prefixes)
+	rows = []
+	cursor = start.replace(day=1)
+	while cursor <= end:
+		month_end = cursor.replace(day=monthrange(cursor.year, cursor.month)[1])
+		window = _jobs_in(jobs, max(cursor, start), min(month_end, end))
+		if window:
+			total = sum(j['value'] for j in window)
+			rows.append({
+				'month': cursor.strftime('%B %Y'),
+				'count': len(window),
+				'total': total,
+				'avg': round(total / len(window), 0),
+			})
+		cursor = (month_end + timedelta(days=1))
+	return rows
+
+
+def _fit_period_rows(start, end, prefixes=None, jobs=None):
+	"""Row list for a fit-date sales report (week / monthly) covering the period."""
+	if jobs is None:
+		jobs = _fit_jobs(start, end, prefixes)
+	return [
+		{
+			'pk': j['sale_pk'],
+			'customer': j['customer'],
+			'sale_number': j['contract_number'],
+			'order_date': j['order_date'].strftime('%d/%m/%Y') if j['order_date'] else '',
+			'fit_date': j['date'].strftime('%d/%m/%Y'),
+			'sale_value': j['value'],
+			'designer': j['designer'],
+		}
+		for j in _jobs_in(jobs, start, end)
+	]
 
 
 @login_required
@@ -3018,14 +3085,7 @@ def dashboard_week_report(request):
     today = datetime.now().date()
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=6)
-    qs = (
-        AnthillSale.objects
-        .filter(fit_date__gte=week_start, fit_date__lte=week_end, sale_value__gt=0)
-        .exclude(status__in=['cancelled', 'dead'])
-        .order_by('fit_date')
-    )
-    qs = _apply_prefixes(qs, prefixes)
-    rows = _build_fit_sales_rows(qs)
+    rows = _fit_period_rows(week_start, week_end, prefixes)
     total = sum(r['sale_value'] for r in rows)
     return JsonResponse({
         'success': True,
@@ -3047,14 +3107,7 @@ def dashboard_week_pdf(request):
     today = datetime.now().date()
     week_start = today - timedelta(days=today.weekday())
     week_end = week_start + timedelta(days=6)
-    qs = (
-        AnthillSale.objects
-        .filter(fit_date__gte=week_start, fit_date__lte=week_end, sale_value__gt=0)
-        .exclude(status__in=['cancelled', 'dead'])
-        .order_by('fit_date')
-    )
-    qs = _apply_prefixes(qs, prefixes)
-    rows = _build_fit_sales_rows(qs)
+    rows = _fit_period_rows(week_start, week_end, prefixes)
     title = f"This Week\u2019s Fits  {week_start.strftime('%d %b')} \u2013 {week_end.strftime('%d %b %Y')}"
     buffer = generate_fit_sales_pdf(rows, title=title)
     filename = f'Fits_Week_{week_start.strftime("%Y%m%d")}.pdf'
@@ -3076,14 +3129,7 @@ def dashboard_monthly_report(request):
         return JsonResponse({'error': 'Invalid year/month'}, status=400)
     first_day = datetime(year, month, 1).date()
     last_day = datetime(year, month, monthrange(year, month)[1]).date()
-    qs = (
-        AnthillSale.objects
-        .filter(fit_date__gte=first_day, fit_date__lte=last_day, sale_value__gt=0)
-        .exclude(status__in=['cancelled', 'dead'])
-        .order_by('fit_date')
-    )
-    qs = _apply_prefixes(qs, prefixes)
-    rows = _build_fit_sales_rows(qs)
+    rows = _fit_period_rows(first_day, last_day, prefixes)
     total = sum(r['sale_value'] for r in rows)
     return JsonResponse({
         'success': True,
@@ -3109,14 +3155,7 @@ def dashboard_monthly_pdf(request):
         year, month = datetime.now().year, datetime.now().month
     first_day = datetime(year, month, 1).date()
     last_day = datetime(year, month, monthrange(year, month)[1]).date()
-    qs = (
-        AnthillSale.objects
-        .filter(fit_date__gte=first_day, fit_date__lte=last_day, sale_value__gt=0)
-        .exclude(status__in=['cancelled', 'dead'])
-        .order_by('fit_date')
-    )
-    qs = _apply_prefixes(qs, prefixes)
-    rows = _build_fit_sales_rows(qs)
+    rows = _fit_period_rows(first_day, last_day, prefixes)
     title = f'Monthly Fits \u2014 {first_day.strftime("%B %Y")}'
     buffer = generate_fit_sales_pdf(rows, title=title)
     filename = f'Fits_{first_day.strftime("%Y_%m")}.pdf'
@@ -3128,36 +3167,11 @@ def dashboard_monthly_pdf(request):
 @login_required
 def dashboard_avg_report(request):
     """JSON endpoint — last 365-day monthly breakdown for the average sale value card."""
-    from django.db.models.functions import TruncMonth
     profile = getattr(request.user, 'profile', None)
     prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
     today = datetime.now().date()
     one_year_ago = today - timedelta(days=365)
-    qs = (
-        AnthillSale.objects
-        .filter(fit_date__gte=one_year_ago, fit_date__lte=today, sale_value__gt=0)
-        .exclude(status__in=['cancelled', 'dead'])
-    )
-    qs = _apply_prefixes(qs, prefixes)
-    monthly = (
-        qs.annotate(month=TruncMonth('fit_date'))
-        .values('month')
-        .annotate(count=Count('id'), total=Sum('sale_value'))
-        .order_by('month')
-    )
-    rows = []
-    for m in monthly:
-        month_dt = m['month']
-        if hasattr(month_dt, 'date'):
-            month_dt = month_dt.date()
-        total = float(m['total'] or 0)
-        count = m['count'] or 0
-        rows.append({
-            'month': month_dt.strftime('%B %Y'),
-            'count': count,
-            'total': total,
-            'avg': round(total / count, 0) if count else 0,
-        })
+    rows = _avg_monthly_rows(one_year_ago, today, prefixes)
     grand_total = sum(r['total'] for r in rows)
     grand_count = sum(r['count'] for r in rows)
     return JsonResponse({
@@ -3174,37 +3188,12 @@ def dashboard_avg_report(request):
 def dashboard_avg_pdf(request):
     """Download the 12-month average sale breakdown as a PDF."""
     from .pdf_generator import generate_avg_sales_pdf
-    from django.db.models.functions import TruncMonth
     from datetime import date as date_type
     profile = getattr(request.user, 'profile', None)
     prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
     today = datetime.now().date()
     one_year_ago = today - timedelta(days=365)
-    qs = (
-        AnthillSale.objects
-        .filter(fit_date__gte=one_year_ago, fit_date__lte=today, sale_value__gt=0)
-        .exclude(status__in=['cancelled', 'dead'])
-    )
-    qs = _apply_prefixes(qs, prefixes)
-    monthly = (
-        qs.annotate(month=TruncMonth('fit_date'))
-        .values('month')
-        .annotate(count=Count('id'), total=Sum('sale_value'))
-        .order_by('month')
-    )
-    rows = []
-    for m in monthly:
-        month_dt = m['month']
-        if hasattr(month_dt, 'date'):
-            month_dt = month_dt.date()
-        total = float(m['total'] or 0)
-        count = m['count'] or 0
-        rows.append({
-            'month': month_dt.strftime('%B %Y'),
-            'count': count,
-            'total': total,
-            'avg': round(total / count, 0) if count else 0,
-        })
+    rows = _avg_monthly_rows(one_year_ago, today, prefixes)
     grand_total = sum(r['total'] for r in rows)
     grand_count = sum(r['count'] for r in rows)
     period = f'{one_year_ago.strftime("%d %b %Y")} \u2013 {today.strftime("%d %b %Y")}'

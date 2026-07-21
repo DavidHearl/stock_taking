@@ -834,12 +834,19 @@ def load_order_indicators_ajax(request):
                 })
 
             # Tag orders in this batch that are short for at least one SKU.
+            # has_short stays the order-level "something is short" flag (row
+            # highlight + tooltip); the per-category flags let the Accessories
+            # and Glass columns report their own stock position independently.
             for acc in batch_accs:
                 sn = acc['order__sale_number']
                 key = (acc['sku'], sn)
                 if key in short_order_qtys and sn in indicators:
                     indicators[sn]['has_short'] = True
                     indicators[sn]['short_items'] = short_items_by_order.get(sn, [])
+                    if acc['sku'].upper().startswith('GLS'):
+                        indicators[sn]['has_glass_short'] = True
+                    else:
+                        indicators[sn]['has_acc_short'] = True
     # ------------------------------------------------
 
     # ---------- Per-category status (Boards / Accessories / OS Doors / Glass) ----------
@@ -913,9 +920,10 @@ def load_order_indicators_ajax(request):
         non_glass_ordered = (o.acc_ordered or 0) - (o.glass_ordered or 0)
         if o.accessories_not_required:
             ind['cat_accessories'] = 'na'
-        elif ind.get('has_short'):
+        elif ind.get('has_acc_short'):
             # BOM has been generated but one or more items are short — distinct
-            # from 'missing' (nothing generated at all).
+            # from 'missing' (nothing generated at all). Glass shortages are
+            # reported by the Glass column, not here.
             ind['cat_accessories'] = 'short'
         elif non_glass_total > 0:
             ind['cat_accessories'] = 'ordered' if non_glass_ordered >= non_glass_total else 'added'
@@ -944,12 +952,23 @@ def load_order_indicators_ajax(request):
         else:
             ind['cat_os_doors'] = 'none'
 
-        # Glass
-        if o.glass_not_required:
-            ind['cat_glass'] = 'na'
-        elif (o.glass_total or 0) > 0:
-            ind['cat_glass'] = 'ordered' if (o.glass_ordered or 0) >= o.glass_total else 'added'
-        elif processed:
+        # Glass — actual glass lines on the order win over the flag. Note that
+        # Order.glass_not_required defaults to True and is only ever cleared from
+        # the validator screen, so it must not short-circuit this: doing so made
+        # every row report N/A regardless of the glass actually on the order.
+        # Glass is normally taken from stock rather than ordered per job, so an
+        # unordered glass line is only a problem if the stock isn't there:
+        #   ordered -> already on a PO / marked ordered
+        #   short   -> stock + incoming won't cover it
+        #   ok      -> covered by stock, nothing to do
+        if (o.glass_total or 0) > 0:
+            if (o.glass_ordered or 0) >= o.glass_total:
+                ind['cat_glass'] = 'ordered'
+            elif ind.get('has_glass_short'):
+                ind['cat_glass'] = 'short'
+            else:
+                ind['cat_glass'] = 'ok'
+        elif o.glass_not_required or processed:
             # Order worked on but no glass present → assume not required.
             ind['cat_glass'] = 'na'
         else:
@@ -12083,6 +12102,13 @@ def calendar_view(request):
     pfp_orders = []
     _seen_pfp_sales = set()
     for _o in _pfp_candidates:
+        # Orphan duplicates carry a stale (usually empty) order_date, so they
+        # look like PFP jobs even when the canonical order is well past PFP and
+        # sometimes already scheduled. Dragging one created its appointment on
+        # the orphan, which the calendar then filtered out above — the job
+        # silently never appeared. Only offer the canonical order.
+        if _is_orphan_duplicate(_o):
+            continue
         if _o.sale_number:
             if _o.sale_number in _seen_pfp_sales:
                 continue
@@ -12107,6 +12133,8 @@ def calendar_view(request):
     awaiting_orders = []
     _seen_await_sales = set()
     for _o in _await_candidates:
+        if _is_orphan_duplicate(_o):
+            continue
         if _o.sale_number:
             if _o.sale_number in _seen_await_sales:
                 continue
@@ -13315,6 +13343,20 @@ def create_provisional_appointment(request):
 
         if item_type == 'order':
             order = get_object_or_404(Order, id=item_id)
+            # A sale_number can have more than one Order row; only the one
+            # linked from AnthillSale is canonical, and the calendar renders
+            # that one alone. Scheduling against a duplicate would create an
+            # appointment the board filters out, so the drop would look like it
+            # silently did nothing. Always resolve to the canonical order.
+            if order.sale_number:
+                _canonical = (
+                    AnthillSale.objects
+                    .filter(anthill_activity_id=order.sale_number, order__isnull=False)
+                    .values_list('order_id', flat=True)
+                    .first()
+                )
+                if _canonical and _canonical != order.id:
+                    order = Order.objects.get(id=_canonical)
             appt = FitAppointment.objects.filter(order=order).order_by('id').first()
             if appt:
                 appt.fit_date = fit_date

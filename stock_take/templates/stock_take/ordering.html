@@ -1367,6 +1367,26 @@
         .catch(err => setSyncStatus('error', err.toString()));
     }
 
+	// Anthill reports values in abbreviated form ("3.01k", "£1.2m") — expand to a number
+	function parseAnthillValue(raw) {
+		if (raw === null || raw === undefined) return null;
+		const str = String(raw).trim();
+		const match = str.match(/-?[\d,]*\.?\d+/);
+		if (!match) return null;
+		let num = parseFloat(match[0].replace(/,/g, ''));
+		if (isNaN(num)) return null;
+		if (/k/i.test(str)) num *= 1000;
+		else if (/m/i.test(str)) num *= 1000000;
+		return num;
+	}
+
+	// Standard display format for Anthill order values, e.g. "£3,010"
+	function formatAnthillValue(raw) {
+		const num = parseAnthillValue(raw);
+		if (num === null) return '';
+		return '£' + num.toLocaleString('en-GB', { maximumFractionDigits: 0 });
+	}
+
     function parseAnthillHtml() {
         const html = document.getElementById('anthillHtmlInput').value.trim();
         const errorEl = document.getElementById('anthillParseError');
@@ -1496,7 +1516,7 @@
                     <td class="col-cat js-cat-accessories">${catIcon(null)}</td>
                     <td class="col-cat js-cat-os_doors">${catIcon(null)}</td>
                     <td class="col-cat js-cat-glass">${catIcon(null)}</td>
-                    <td class="col-value">${escHtml(o.totalValue || o.total_value || '')}</td>
+                    <td class="col-value">${escHtml(formatAnthillValue(o.totalValue || o.total_value || ''))}</td>
                     <td>${escHtml(o.fitDate || o.fit_date || '')}</td>
                     <td class="col-links">${linksHtml}</td>
                     <td class="col-action">${actionBtn}</td>
@@ -1610,10 +1630,10 @@
         // Sale value (total value ex VAT) — add 20% VAT for the inc VAT field
         const valueInput = document.querySelector('#add-order-form [name="total_value_inc_vat"]');
         if (valueInput && data.totalValue) {
-            const numVal = parseFloat(data.totalValue.replace(/[^\d.\-]/g, ''));
-            if (!isNaN(numVal)) {
-                valueInput.value = (numVal * 1.2).toFixed(2);
-            }
+			const numVal = parseAnthillValue(data.totalValue);
+			if (numVal !== null) {
+				valueInput.value = (numVal * 1.2).toFixed(2);
+			}
         }
 
         // Designer (assigned to) — try to select in dropdown
@@ -1673,6 +1693,7 @@
     function catIcon(status) {
         switch (status) {
             case 'ordered': return '<span class="badge badge-sm badge-success" title="On order / from stock">Ordered</span>';
+            case 'ok':      return '<span class="badge badge-sm badge-success" title="Covered by stock &ndash; nothing to order">OK</span>';
             case 'added':   return '<span class="badge badge-sm badge-info" title="BOM generated &ndash; not yet ordered">Added</span>';
             case 'short':   return '<span class="badge badge-sm badge-warning" title="BOM generated but items are short">Short</span>';
             case 'missing': return '<span class="badge badge-sm badge-danger" title="Required but nothing generated yet">Missing</span>';
