@@ -77,11 +77,32 @@ Example: a "pending" badge uses `background: var(--warning-subtle); color: var(-
 
 | Token | Value | Use |
 |---|---|---|
+| `--radius-xs` | 4px | Checkboxes only — `--radius-sm` on a 16px box renders a full circle |
 | `--radius-sm` | 9px | Buttons, inputs, tabs, small controls, swatches |
 | `--radius-md` | 14px | Cards, panels |
 | `--radius-lg` | 18px | Large containers, modals |
 | `--radius-pill` | = `--radius-sm` (8px) | Status badges & pills — squared off to read as rectangular buttons (no longer fully rounded) |
 | `--radius-round` | 999px | Genuinely round elements only: toggle-switch tracks and circular dots/indicators. Use this, not `--radius-pill`, when the shape must stay a circle or stadium. |
+
+### Checkboxes
+
+There is exactly one checkbox style, defined on the bare `input[type="checkbox"]`
+selector in `styles.css` — 16px, `--radius-xs` corners, tick drawn with `::after`,
+plus hover / checked / indeterminate / focus / disabled states.
+
+**Never restyle a checkbox in a page CSS file.** To change its colour, set the
+`--checkbox-color` custom property on the instance; that drives the hover border,
+the checked fill and the focus ring together:
+
+```css
+.receive-product-item input[type="checkbox"] {
+	--checkbox-color: var(--success-color);
+}
+```
+
+Setting `width`/`height`/`border-radius`/`appearance` per page is what caused
+checkboxes to drift into circles and mismatched sizes — don't reintroduce it.
+`accent-color` also does nothing here, since the base style sets `appearance: none`.
 
 ### Shadows
 

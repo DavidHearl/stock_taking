@@ -23,6 +23,7 @@ from .claim_views import claim_service, claim_upload, claim_delete, claim_api_up
 from .gallery_views import gallery, gallery_upload, gallery_delete, gallery_update, gallery_customer_orders, gallery_rotate
 from .upload_views import fitter_upload, upload_staging_publish, upload_staging_reject
 from .schedule_views import fitter_schedule
+from .install_step_views import book_order_fit_date, set_order_fit_confirmed, set_order_stock_payment
 from .cad_views import cad_db_upload, cad_db_download, cad_db_status
 from .profile_views import user_profile, user_profile_save, user_change_password
 from .xero_views import xero_connect, xero_callback, xero_disconnect, xero_status, xero_api_test, xero_create_customer, xero_customer_search, xero_check_contact, xero_gl_codes, xero_save_gl_codes
@@ -521,6 +522,9 @@ urlpatterns = [
     path('fit-board/confirm-appointment/<int:appointment_id>/', views.confirm_fit_appointment, name='confirm_fit_appointment'),
     path('fit-board/refresh-anthill/', views.refresh_anthill_fit_dates, name='refresh_anthill_fit_dates'),
     path('fit-board/bulk-import/', views.bulk_import_fit_dates, name='bulk_import_fit_dates'),
+    path('api/order/<int:order_id>/book-fit-date/', book_order_fit_date, name='book_order_fit_date'),
+    path('api/order/<int:order_id>/stock-payment/', set_order_stock_payment, name='set_order_stock_payment'),
+    path('api/order/<int:order_id>/fit-confirmed/', set_order_fit_confirmed, name='set_order_fit_confirmed'),
     path('calendar/provisional-appointment/', views.create_provisional_appointment, name='create_provisional_appointment'),
     path('calendar/block/create/', views.create_calendar_block, name='create_calendar_block'),
     path('calendar/block/<int:block_id>/delete/', views.delete_calendar_block, name='delete_calendar_block'),

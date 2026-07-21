@@ -7558,6 +7558,49 @@ def _build_order_context(order, request):
             and workflow_progress.current_stage.name == 'Upload Fit Photos'):
         stage_criteria_met = stage_criteria_met and fit_photos_uploaded
 
+    # ── "Arrange Install Date & Take Stock Payment" stage actions ──
+    # The two boxes on that stage card are derived from real data rather than
+    # ticked by hand:
+    #   * the stock payment is a non-ignored payment explicitly typed as a stock
+    #     payment — the deposit taken at point of sale must not count, so a plain
+    #     date comparison isn't enough. Plenty of payments never reach Atlas that
+    #     way though, so the user can also just tick the box (stock_payment_confirmed);
+    #   * the install date is booked once the order has a *confirmed* (non
+    #     provisional) fit appointment. A job merely dragged onto the calendar is
+    #     still provisional and doesn't count.
+    install_fit_appointment = None
+    install_fit_date_booked = False
+    install_payment_taken = False
+    install_payment_recorded = False
+    install_fitter_choices = []
+    install_fitter_display = ''
+    if (workflow_progress.current_stage
+            and workflow_progress.current_stage.name == 'Arrange Install Date & Take Stock Payment'):
+        from .models import AnthillPayment
+        install_fit_appointment = order.fit_appointments.order_by('id').first()
+        install_fit_date_booked = bool(
+            install_fit_appointment and not install_fit_appointment.is_provisional
+        )
+        # Fitter list comes from the Fitter table, same as the fit board —
+        # FitAppointment.FITTER_CHOICES is stale and misses codes in live use.
+        install_fitter_choices = [
+            (f.code, f.name)
+            for f in Fitter.objects.filter(active=True).exclude(code='').order_by('name')
+        ]
+        if install_fit_appointment:
+            install_fitter_display = dict(install_fitter_choices).get(
+                install_fit_appointment.fitter, install_fit_appointment.fitter
+            )
+        sale_ids = list(order.anthill_sale.values_list('id', flat=True))
+        if sale_ids:
+            install_payment_recorded = AnthillPayment.objects.filter(
+                sale_id__in=sale_ids, ignored=False, payment_type__icontains='stock'
+            ).exists()
+        install_payment_taken = install_payment_recorded or order.stock_payment_confirmed
+        stage_criteria_met = (
+            stage_criteria_met and install_fit_date_booked and install_payment_taken
+        )
+
     phases = [('enquiry', 'Enquiry'), ('lead', 'Lead'), ('sale', 'Sale')]
     # Count active orders sitting at each stage (for the workflow management modal)
     from django.db.models import Count as _StageCount
@@ -7967,6 +8010,12 @@ def _build_order_context(order, request):
         'task_completions': task_completions,
         'stage_criteria_met': stage_criteria_met,
         'fit_photos_uploaded': fit_photos_uploaded,
+        'install_fit_date_booked': install_fit_date_booked,
+        'install_payment_taken': install_payment_taken,
+        'install_payment_recorded': install_payment_recorded,
+        'install_fit_appointment': install_fit_appointment,
+        'install_fitter_choices': install_fitter_choices,
+        'install_fitter_display': install_fitter_display,
         'phases': phases,
         'stages_by_phase': stages_by_phase,
         'installation_timesheets': installation_timesheets,

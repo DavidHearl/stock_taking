@@ -1552,3 +1552,192 @@ class MatchInvoicesInboxTests(TestCase):
 		self.assertIn('Ignored one', visible.content.decode())
 		hidden = self.client.get(reverse('match_invoices_inbox_fragment'))
 		self.assertNotIn('Ignored one', hidden.content.decode())
+
+
+class BookOrderFitDateTests(TestCase):
+	"""Booking a fit date from the sale page's install-date workflow step."""
+
+	def setUp(self):
+		from .models import Fitter
+		self.client = Client()
+		self.user = _create_user(is_superuser=True)
+		self.client.login(username='testuser', password='testpass123')
+		self.order = _create_order()
+		Fitter.objects.create(code='R', name='Ross Middleton', active=True)
+
+	def _post(self, **payload):
+		return self.client.post(
+			reverse('book_order_fit_date', args=[self.order.id]),
+			data=json.dumps(payload), content_type='application/json',
+		)
+
+	def test_creates_confirmed_appointment_and_syncs_order(self):
+		from .models import FitAppointment
+		response = self._post(fit_date='2026-09-01', fitter='R')
+		self.assertEqual(response.status_code, 200)
+		appointment = FitAppointment.objects.get(order=self.order)
+		self.assertEqual(appointment.fit_date, date(2026, 9, 1))
+		# Booking here is deliberate, unlike a calendar drag.
+		self.assertFalse(appointment.is_provisional)
+		self.order.refresh_from_db()
+		self.assertEqual(self.order.fit_date, date(2026, 9, 1))
+
+	def test_confirms_and_moves_an_existing_provisional_appointment(self):
+		from .models import FitAppointment
+		appointment = FitAppointment.objects.create(
+			order=self.order, fit_date=date(2026, 8, 1), fitter='R', is_provisional=True,
+		)
+		self._post(fit_date='2026-09-15', fitter='R')
+		appointment.refresh_from_db()
+		self.assertEqual(appointment.fit_date, date(2026, 9, 15))
+		self.assertFalse(appointment.is_provisional)
+		self.assertEqual(FitAppointment.objects.filter(order=self.order).count(), 1)
+
+	def test_allows_a_legacy_fitter_code_already_on_the_appointment(self):
+		"""Codes predating the current Fitter roster must not block a re-book."""
+		from .models import FitAppointment
+		FitAppointment.objects.create(
+			order=self.order, fit_date=date(2026, 8, 1), fitter='K', is_provisional=True,
+		)
+		response = self._post(fit_date='2026-09-15', fitter='K')
+		self.assertEqual(response.status_code, 200)
+
+	def test_rejects_missing_date_unknown_fitter_and_get(self):
+		from .models import FitAppointment
+		self.assertEqual(self._post(fitter='R').status_code, 400)
+		self.assertEqual(self._post(fit_date='not-a-date', fitter='R').status_code, 400)
+		self.assertEqual(self._post(fit_date='2026-09-01', fitter='Z').status_code, 400)
+		self.assertEqual(
+			self.client.get(reverse('book_order_fit_date', args=[self.order.id])).status_code, 405
+		)
+		self.assertFalse(FitAppointment.objects.filter(order=self.order).exists())
+
+
+class StockPaymentOverrideTests(TestCase):
+	"""The stock payment tick is a manual override, not a hard gate."""
+
+	def setUp(self):
+		self.client = Client()
+		self.user = _create_user(is_superuser=True)
+		self.client.login(username='testuser', password='testpass123')
+		self.order = _create_order()
+
+	def _post(self, confirmed):
+		return self.client.post(
+			reverse('set_order_stock_payment', args=[self.order.id]),
+			data=json.dumps({'confirmed': confirmed}), content_type='application/json',
+		)
+
+	def test_ticking_and_unticking_persists(self):
+		self.assertEqual(self._post(True).status_code, 200)
+		self.order.refresh_from_db()
+		self.assertTrue(self.order.stock_payment_confirmed)
+		self._post(False)
+		self.order.refresh_from_db()
+		self.assertFalse(self.order.stock_payment_confirmed)
+
+	def test_get_is_rejected(self):
+		self.assertEqual(
+			self.client.get(reverse('set_order_stock_payment', args=[self.order.id])).status_code, 405
+		)
+
+	def test_manual_tick_satisfies_the_step_without_a_recorded_payment(self):
+		"""No stock payment row exists, so the override is the only thing ticking it."""
+		from .models import AnthillPayment, AnthillSale, OrderWorkflowProgress, WorkflowStage
+		from .views import _build_order_context
+		stage = WorkflowStage.objects.create(
+			name='Arrange Install Date & Take Stock Payment', phase='sale',
+			role='customer-support', description='', order=1,
+		)
+		OrderWorkflowProgress.objects.create(order=self.order, current_stage=stage)
+		AnthillSale.objects.create(anthill_activity_id='426201', order=self.order)
+
+		request = RequestFactory().get('/')
+		request.user = self.user
+		request.session = self.client.session
+
+		context = _build_order_context(self.order, request)
+		self.assertFalse(context['install_payment_taken'])
+
+		self._post(True)
+		context = _build_order_context(Order.objects.get(id=self.order.id), request)
+		self.assertTrue(context['install_payment_taken'])
+		# Still flagged as not actually recorded, so the tick stays editable.
+		self.assertFalse(context['install_payment_recorded'])
+
+	def test_a_recorded_stock_payment_ticks_it_without_the_override(self):
+		from .models import AnthillPayment, AnthillSale, OrderWorkflowProgress, WorkflowStage
+		from .views import _build_order_context
+		stage = WorkflowStage.objects.create(
+			name='Arrange Install Date & Take Stock Payment', phase='sale',
+			role='customer-support', description='', order=1,
+		)
+		OrderWorkflowProgress.objects.create(order=self.order, current_stage=stage)
+		sale = AnthillSale.objects.create(anthill_activity_id='426202', order=self.order)
+		AnthillPayment.objects.create(sale=sale, payment_type='Stock Payment', amount=Decimal('500'))
+
+		request = RequestFactory().get('/')
+		request.user = self.user
+		request.session = self.client.session
+		context = _build_order_context(self.order, request)
+		self.assertTrue(context['install_payment_taken'])
+		self.assertTrue(context['install_payment_recorded'])
+
+
+class FitDateConfirmedToggleTests(TestCase):
+	"""The install-date tick is the calendar's provisional flag, both ways."""
+
+	def setUp(self):
+		from .models import FitAppointment
+		self.client = Client()
+		self.user = _create_user(is_superuser=True)
+		self.client.login(username='testuser', password='testpass123')
+		self.order = _create_order()
+		self.appointment = FitAppointment.objects.create(
+			order=self.order, fit_date=date(2026, 9, 1), fitter='R', is_provisional=True,
+		)
+
+	def _post(self, confirmed):
+		return self.client.post(
+			reverse('set_order_fit_confirmed', args=[self.order.id]),
+			data=json.dumps({'confirmed': confirmed}), content_type='application/json',
+		)
+
+	def test_ticking_confirms_the_calendar_date(self):
+		self.assertEqual(self._post(True).status_code, 200)
+		self.appointment.refresh_from_db()
+		self.assertFalse(self.appointment.is_provisional)
+
+	def test_unticking_puts_it_back_to_provisional(self):
+		self.appointment.is_provisional = False
+		self.appointment.save()
+		self.assertEqual(self._post(False).status_code, 200)
+		self.appointment.refresh_from_db()
+		self.assertTrue(self.appointment.is_provisional)
+
+	def test_the_tick_reflects_the_appointment(self):
+		from .models import OrderWorkflowProgress, WorkflowStage
+		from .views import _build_order_context
+		stage = WorkflowStage.objects.create(
+			name='Arrange Install Date & Take Stock Payment', phase='sale',
+			role='customer-support', description='', order=1,
+		)
+		OrderWorkflowProgress.objects.create(order=self.order, current_stage=stage)
+		request = RequestFactory().get('/')
+		request.user = self.user
+		request.session = self.client.session
+
+		self.assertFalse(_build_order_context(self.order, request)['install_fit_date_booked'])
+		self._post(True)
+		self.assertTrue(_build_order_context(self.order, request)['install_fit_date_booked'])
+
+	def test_cannot_confirm_without_an_appointment(self):
+		self.appointment.delete()
+		response = self._post(True)
+		self.assertEqual(response.status_code, 400)
+		self.assertIn('Book a fit date first', response.json()['error'])
+
+	def test_get_is_rejected(self):
+		self.assertEqual(
+			self.client.get(reverse('set_order_fit_confirmed', args=[self.order.id])).status_code, 405
+		)

@@ -2520,6 +2520,30 @@
                     <span><i class="bi bi-box-seam"></i> All Items Ordered</span>
                 </label>
                 {% endif %}
+                {% if workflow_progress.current_stage.name == 'Arrange Install Date & Take Stock Payment' %}
+				<div class="wf-step-actions">
+					<div class="wf-step-action {% if install_payment_taken %}is-done{% endif %}" id="wfStockPaymentRow">
+						<label class="wf-step-check">
+							<input type="checkbox" id="wfStockPaymentTick"
+								   {% if install_payment_taken %}checked{% endif %}
+								   {% if install_payment_recorded %}disabled title="A stock payment is already recorded against this sale"{% else %}title="Tick if the stock payment has been taken"{% endif %}
+								   onchange="setStockPaymentConfirmed(this)">
+							<span class="wf-step-action-label">Stock Payment</span>
+						</label>
+						<button type="button" class="wf-step-btn" onclick="openAddManualModal()">Add Payment</button>
+					</div>
+					<div class="wf-step-action {% if install_fit_date_booked %}is-done{% endif %}" id="wfFitDateRow">
+						<label class="wf-step-check">
+							<input type="checkbox" id="wfFitDateTick"
+								   {% if install_fit_date_booked %}checked{% endif %}
+								   {% if install_fit_appointment %}title="Untick to put the calendar date back to provisional"{% else %}disabled title="Book a fit date first"{% endif %}
+								   onchange="setFitDateConfirmed(this)">
+							<span class="wf-step-action-label">Install Date</span>
+						</label>
+						<button type="button" class="wf-step-btn" onclick="openModal('bookFitDateModal')">Book Fit Date</button>
+					</div>
+				</div>
+                {% endif %}
                 {% if workflow_progress.current_stage.name == 'Upload Fit Photos' %}
                 <label class="wf-order-action wf-photo-action {% if fit_photos_uploaded %}is-done{% endif %}" for="wfFitPhotoInput">
                     <input type="checkbox" {% if fit_photos_uploaded %}checked{% endif %} disabled>
@@ -3372,6 +3396,150 @@ function filterSaleInvoices(query) {
         </div>
     </div>
 </div>
+
+<!-- Modal: Book Fit Date — only the install-date workflow step opens this -->
+{% if order and workflow_progress.current_stage.name == 'Arrange Install Date & Take Stock Payment' %}
+<div class="modal" id="bookFitDateModal">
+    <div class="modal-overlay" onclick="closeModal('bookFitDateModal')"></div>
+    <div class="modal-content modal--sm">
+        <div class="modal-header">
+            <h3>Book Fit Date</h3>
+            <button type="button" class="modal-close" onclick="closeModal('bookFitDateModal')">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+            <div class="wf-fit-current">
+                {% if install_fit_appointment %}
+                <i class="bi bi-calendar3"></i>
+                <span>Currently on the calendar:
+                    <strong>{{ install_fit_appointment.fit_date|date:'d M Y' }}</strong>
+                    &middot; {{ install_fitter_display }}
+                    {% if install_fit_appointment.is_provisional %}<span class="wf-fit-provisional">provisional</span>{% endif %}
+                </span>
+                {% else %}
+                <i class="bi bi-calendar-x"></i>
+                <span>Nothing on the calendar for this order yet.</span>
+                {% endif %}
+            </div>
+            <div class="form-group">
+                <label for="bookFitDate">Fit Date</label>
+                <input id="bookFitDate" type="date"
+                       value="{% if install_fit_appointment %}{{ install_fit_appointment.fit_date|date:'Y-m-d' }}{% elif order.fit_date %}{{ order.fit_date|date:'Y-m-d' }}{% endif %}">
+            </div>
+            <div class="form-group">
+                <label for="bookFitFitter">Fitter</label>
+                <select id="bookFitFitter">
+                    <option value="">Select fitter...</option>
+                    {% for code, label in install_fitter_choices %}
+                    <option value="{{ code }}" {% if install_fit_appointment.fitter == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                    {% if install_fit_appointment and install_fitter_display == install_fit_appointment.fitter %}
+                    <option value="{{ install_fit_appointment.fitter }}" selected>{{ install_fit_appointment.fitter }}</option>
+                    {% endif %}
+                </select>
+            </div>
+            <div id="bookFitMsg" class="wf-fit-msg"></div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeModal('bookFitDateModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveBookedFitDate()">Save Fit Date</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const BOOK_FIT_URL = "{% url 'book_order_fit_date' order.id %}";
+    const STOCK_PAYMENT_URL = "{% url 'set_order_stock_payment' order.id %}";
+    const FIT_CONFIRMED_URL = "{% url 'set_order_fit_confirmed' order.id %}";
+
+    // The tick *is* the calendar's provisional flag — unticking drops the date
+    // back to provisional, ticking confirms it, exactly as the fit board does.
+    window.setFitDateConfirmed = function (checkbox) {
+        const row = document.getElementById('wfFitDateRow');
+        const confirmed = checkbox.checked;
+        row.classList.toggle('is-done', confirmed);
+        fetch(FIT_CONFIRMED_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}',
+            },
+            body: JSON.stringify({ confirmed: confirmed }),
+        })
+            .then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+            .then(({ ok, data }) => {
+                if (!ok || !data.success) throw new Error(data.error || '');
+                setTimeout(() => location.reload(), 600);
+            })
+            .catch(err => {
+                checkbox.checked = !confirmed;
+                row.classList.toggle('is-done', !confirmed);
+                showAlert(err.message || 'Could not update the install date', 'danger');
+            });
+    };
+
+    // Manual override — the tick is normally derived from a recorded stock
+    // payment, but the step must stay completable when one was never entered.
+    window.setStockPaymentConfirmed = function (checkbox) {
+        const row = document.getElementById('wfStockPaymentRow');
+        const confirmed = checkbox.checked;
+        row.classList.toggle('is-done', confirmed);
+        fetch(STOCK_PAYMENT_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}',
+            },
+            body: JSON.stringify({ confirmed: confirmed }),
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) throw new Error();
+                setTimeout(() => location.reload(), 600);
+            })
+            .catch(() => {
+                checkbox.checked = !confirmed;
+                row.classList.toggle('is-done', !confirmed);
+                showAlert('Could not update the stock payment', 'danger');
+            });
+    };
+    // Preserved as-is — the half-day start is set on the calendar, so booking a
+    // date here must not silently reset it.
+    const BOOK_FIT_STARTS_PM = {% if install_fit_appointment.starts_pm %}true{% else %}false{% endif %};
+
+    window.saveBookedFitDate = function () {
+        const msg = document.getElementById('bookFitMsg');
+        const fitDate = document.getElementById('bookFitDate').value;
+        if (!fitDate) {
+            msg.textContent = 'Pick a fit date first.';
+            return;
+        }
+        msg.textContent = 'Saving...';
+        fetch(BOOK_FIT_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}',
+            },
+            body: JSON.stringify({
+                fit_date: fitDate,
+                fitter: document.getElementById('bookFitFitter').value,
+                starts_pm: BOOK_FIT_STARTS_PM,
+            }),
+        })
+            .then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+            .then(({ ok, data }) => {
+                if (!ok) {
+                    msg.textContent = data.error || 'Could not save the fit date.';
+                    return;
+                }
+                window.location.reload();
+            })
+            .catch(() => { msg.textContent = 'Could not save the fit date.'; });
+    };
+})();
+</script>
+{% endif %}
 
 <!-- Modal: Open Remedial -->
 {% if order %}

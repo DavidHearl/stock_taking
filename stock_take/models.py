@@ -535,6 +535,7 @@ class Order(models.Model):
     glass_not_required = models.BooleanField(default=True, help_text='Glass does not need to be validated for this order')
     raumplus_required = models.BooleanField(default=False, help_text='Raumplus items need to be validated for this order')
     all_items_ordered = models.BooleanField(default=False, help_text='Manual confirmation that all items have been ordered')
+    stock_payment_confirmed = models.BooleanField(default=False, help_text='Manual confirmation that the stock payment has been taken, for payments not recorded against the sale in Atlas')
     workguru_id = models.CharField(max_length=20, blank=True, help_text='WorkGuru Project ID')
     original_csv = models.FileField(upload_to='order_csvs/', blank=True, null=True, help_text='Original uploaded CSV file')
     processed_csv = models.FileField(upload_to='order_csvs/', blank=True, null=True, help_text='Processed CSV with substitutions applied')
