@@ -520,6 +520,7 @@ urlpatterns = [
     path('fit-board/delete-appointment/<int:appointment_id>/', views.delete_fit_appointment, name='delete_fit_appointment'),
     path('fit-board/move-appointment/<int:appointment_id>/', views.move_fit_appointment, name='move_fit_appointment'),
     path('fit-board/confirm-appointment/<int:appointment_id>/', views.confirm_fit_appointment, name='confirm_fit_appointment'),
+    path('fit-board/set-provisional/<int:appointment_id>/', views.set_fit_appointment_provisional, name='set_fit_appointment_provisional'),
     path('fit-board/refresh-anthill/', views.refresh_anthill_fit_dates, name='refresh_anthill_fit_dates'),
     path('fit-board/bulk-import/', views.bulk_import_fit_dates, name='bulk_import_fit_dates'),
     path('api/order/<int:order_id>/book-fit-date/', book_order_fit_date, name='book_order_fit_date'),

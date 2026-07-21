@@ -68,7 +68,9 @@ def _apply_prefixes(qs, prefixes, field='contract_number'):
 WEEKLY_SALES_TARGET = Decimal('35000')
 MONTHLY_SALES_TARGET = Decimal('150000')
 YEARLY_SALES_TARGET = Decimal('2000000')
-# Fit-days objective: distinct calendar days with at least one fit, per period.
+# Fit-days objective: total fit days worked, per period — each job contributes its
+# own fit duration (coversheet ``fit_days``, else the appointment's ``fit_duration``),
+# so two jobs on the same day count as two days and a 2-day job counts as two.
 # How far ahead the "sales after date" card/report looks. Fits are scheduled at
 # most a few months out; this is a generous upper bound on the pipeline window.
 SALES_AFTER_HORIZON_DAYS = 730
@@ -86,6 +88,21 @@ def _sale_payments_subquery():
 		.values('total'),
 		output_field=DecimalField(max_digits=14, decimal_places=2),
 	)
+
+
+def _coversheet_fit_days(sale_numbers):
+	"""``{anthill_activity_id: fit_days}`` for the sales whose coversheet sets one."""
+	from .models import SaleCoverSheet
+
+	sale_numbers = [s for s in sale_numbers if s]
+	if not sale_numbers:
+		return {}
+	return {
+		row['sale__anthill_activity_id']: float(row['fit_days'])
+		for row in (SaleCoverSheet.objects
+					.filter(sale__anthill_activity_id__in=sale_numbers, fit_days__isnull=False)
+					.values('sale__anthill_activity_id', 'fit_days'))
+	}
 
 
 def _fit_jobs(start, end, prefixes=None):
@@ -108,7 +125,7 @@ def _fit_jobs(start, end, prefixes=None):
 
 	Each job: ``{'order', 'sale_pk', 'sale_number', 'contract_number', 'customer',
 	'designer', 'order_date', 'date', 'value', 'paid', 'outstanding',
-	'estimated'}``, sorted by fit date.
+	'estimated', 'fit_days'}``, sorted by fit date.
 	"""
 	from .models import FitAppointment
 	from .customer_views import _orders_financials
@@ -127,13 +144,24 @@ def _fit_jobs(start, end, prefixes=None):
 		if not order:
 			continue
 		key = order.sale_number or f'order:{order.id}'
+		try:
+			duration = float(appt.fit_duration or 1)
+		except (TypeError, ValueError):
+			duration = 1.0
 		rec = jobs_by_order.get(key)
 		if rec is None:
-			jobs_by_order[key] = {'order': order, 'fit_date': appt.fit_date, 'order_ids': {order.id}}
+			jobs_by_order[key] = {
+				'order': order, 'fit_date': appt.fit_date, 'order_ids': {order.id},
+				'duration': duration,
+			}
 			continue
 		rec['order_ids'].add(order.id)
 		if appt.fit_date < rec['fit_date']:
 			rec['fit_date'] = appt.fit_date
+		# One job, many appointments (one per fitter, sometimes duplicate order
+		# rows). The job lasts as long as its longest booking — summing would
+		# count the same days once per fitter.
+		rec['duration'] = max(rec['duration'], duration)
 
 	# Anthill's record of each calendar job — the contract number (authoritative
 	# for location, the location field is dirty on some historic rows) and the
@@ -153,6 +181,11 @@ def _fit_jobs(start, end, prefixes=None):
 			key: rec for key, rec in jobs_by_order.items()
 			if (sale_meta.get(rec['order'].sale_number, {}).get('contract_number', '') or '').upper().startswith(prefs)
 		}
+
+	# Coversheet ``fit_days`` is the authoritative length of a job — the value shown
+	# and edited on the sale detail page, which the fit calendar also prefers over
+	# the appointment's own duration. Fall back to the appointment when unset.
+	coversheet_fit_days = _coversheet_fit_days(sale_numbers)
 
 	fin_by_sale = _orders_financials([r['order'] for r in jobs_by_order.values()])
 	jobs = []
@@ -190,6 +223,7 @@ def _fit_jobs(start, end, prefixes=None):
 			'paid': paid,
 			'outstanding': max(value - paid, 0.0),
 			'estimated': estimated,
+			'fit_days': coversheet_fit_days.get(order.sale_number, rec['duration']),
 		})
 
 	# Billed fits the calendar doesn't hold (pre-calendar history, or a job that
@@ -207,9 +241,13 @@ def _fit_jobs(start, end, prefixes=None):
 		))
 	)
 	legacy_qs = _apply_prefixes(legacy_qs, prefixes)
-	for s in legacy_qs.values('pk', 'order_id', 'anthill_activity_id', 'contract_number',
-							  'customer_name', 'assigned_to_name', 'activity_date',
-							  'fit_date', 'sale_value', 'discount', 'total_paid'):
+	legacy_rows = list(legacy_qs.values('pk', 'order_id', 'anthill_activity_id', 'contract_number',
+										'customer_name', 'assigned_to_name', 'activity_date',
+										'fit_date', 'sale_value', 'discount', 'total_paid'))
+	# No calendar booking to measure, so the coversheet is the only length on
+	# record; a job with neither counts as the standard single day.
+	legacy_fit_days = _coversheet_fit_days([r['anthill_activity_id'] for r in legacy_rows if r['anthill_activity_id']])
+	for s in legacy_rows:
 		value = float(s['sale_value'] or 0)
 		net = value - 2 * float(s['discount'] or 0)
 		paid = min(max(float(s['total_paid'] or 0), 0.0), max(net, 0.0))
@@ -226,6 +264,7 @@ def _fit_jobs(start, end, prefixes=None):
 			'paid': paid,
 			'outstanding': max(net - paid, 0.0),
 			'estimated': False,
+			'fit_days': legacy_fit_days.get(s['anthill_activity_id'], 1.0),
 		})
 
 	jobs.sort(key=lambda j: j['date'])
@@ -247,8 +286,8 @@ def _compute_sales_targets(today, prefixes=None, jobs=None):
 	"""Build the dashboard sales-target breakdowns for the periods around ``today``.
 
 	Returns a list of period dicts (last/this/next week, this month, this year),
-	each with target / actual / paid / outstanding / remaining / count / pct. The
-	monthly entry also carries a fit-days breakdown (distinct fit days vs target).
+	each with target / actual / paid / outstanding / remaining / count / pct, plus a
+	fit-days breakdown (total fit days worked vs target).
 
 	``jobs`` — pre-fetched ``_fit_jobs`` covering the whole reporting span, so the
 	dashboard can build them once and share them with the stat cards.
@@ -277,16 +316,19 @@ def _compute_sales_targets(today, prefixes=None, jobs=None):
 	def _breakdown(start, end, sales_target, fit_days_target, show_pace=False):
 		actual = paid = 0.0
 		count = 0
-		fit_dates = set()
+		# Days worked, not days touched: every job contributes its own length, so
+		# three one-day fits on the same date are three fit days. Counting distinct
+		# calendar dates instead capped a month at 31 against a 40-day objective.
+		fit_days = 0.0
 		for j in jobs:
 			if start <= j['date'] <= end:
 				actual += j['value']
 				paid += j['paid']
 				count += 1
-				fit_dates.add(j['date'])
+				fit_days += j.get('fit_days') or 1.0
 		paid = min(paid, actual)
 		sales_target = float(sales_target)
-		fit_days = len(fit_dates)
+		fit_days = round(fit_days, 1)
 
 		# Pace: how far through the period we are today, and the pro-rata share of
 		# the objective we'd expect to have hit by now. Only meaningful while the

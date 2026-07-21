@@ -19,157 +19,209 @@
 <div id="appointmentDetailModal" class="modal">
     <div class="modal-overlay" onclick="closeModal('appointmentDetailModal')"></div>
     <div class="modal-content modal--md">
-        <div class="modal-header">
-            <h3 id="detailCustomerName">Appointment</h3>
-            <button type="button" class="modal-close" onclick="closeModal('appointmentDetailModal')">&times;</button>
-        </div>
-        <div class="modal-body">
-            <!-- Quick links -->
-            <div class="detail-links">
-                <a id="detailOrderLink" href="#" class="detail-link-btn" target="_blank">View Sale</a>
-                <a id="detailAnthillLink" href="#" class="detail-link-btn detail-link-anthill" target="_blank">
-                    <i class="bi bi-box-arrow-up-right"></i> Open in Anthill
-                </a>
-            </div>
+		<div class="modal-header detail-header">
+			<div class="detail-header-title">
+				<h3 id="detailCustomerName">Appointment</h3>
+				<span class="detail-header-sub" id="detailHeaderSub"></span>
+			</div>
+			<div class="detail-header-actions">
+				<a id="detailOrderLink" href="#" class="detail-link-btn" target="_blank" title="Open the sale in Atlas">
+					<i class="bi bi-receipt"></i><span>View Sale</span>
+				</a>
+				<a id="detailAnthillLink" href="#" class="detail-link-btn detail-link-anthill" target="_blank" title="Open the order in Anthill">
+					<i class="bi bi-box-arrow-up-right"></i><span>Anthill</span>
+				</a>
+				<button type="button" class="modal-close" onclick="closeModal('appointmentDetailModal')">&times;</button>
+			</div>
+		</div>
+		<div class="modal-body detail-body">
+			<!-- Provisional warning banner -->
+			<div class="detail-banner" id="detailProvisionalBanner" style="display:none;">
+				<i class="bi bi-exclamation-triangle-fill detail-banner-icon"></i>
+				<div class="detail-banner-text">
+					<strong>Provisional fit date</strong>
+					<span>This date is pencilled in only — the job stays on the scheduling list until it's confirmed.</span>
+				</div>
+				<button type="button" class="btn btn-success detail-banner-btn" onclick="setDetailProvisional(false)">
+					<i class="bi bi-check2-circle"></i> Confirm Fit
+				</button>
+			</div>
 
-            <!-- Section: Financials -->
-            <div class="detail-section-label">Financials</div>
-            <div class="detail-grid">
-                <div class="detail-row">
-                    <label>Sale Value</label>
-                    <span id="detailSaleValue" class="detail-val-money">-</span>
-                </div>
-                <div class="detail-row">
-                    <label>Paid</label>
-                    <span id="detailPaid" class="detail-val-money detail-val-paid">-</span>
-                </div>
-            </div>
-            <div class="detail-fin-wrap" id="detailPaymentBar" style="display:none;">
-                <div class="detail-fin-track-outer">
-                    <div class="detail-fin-track">
-                        <div class="detail-fin-fill" id="detailPaymentFill"></div>
-                    </div>
-                    <div class="detail-fin-mile fb-mile-45">
-                        <div class="detail-fin-mile-tick"></div>
-                        <span class="detail-fin-mile-label">45%</span>
-                    </div>
-                    <div class="detail-fin-mile fb-mile-90">
-                        <div class="detail-fin-mile-tick"></div>
-                        <span class="detail-fin-mile-label">90%</span>
-                    </div>
-                    <div class="detail-fin-mile fb-mile-100">
-                        <div class="detail-fin-mile-tick"></div>
-                        <span class="detail-fin-mile-label">100%</span>
-                    </div>
-                </div>
-                <span id="detailOutstanding" class="detail-fin-remaining">-</span>
-            </div>
+			<!-- Section: Fit Assignment -->
+			<section class="detail-section">
+				<div class="detail-section-head">
+					<span class="detail-section-label">Fit Assignment</span>
+					<button type="button" class="detail-edit-toggle" id="fitEditToggle" onclick="toggleFitEdit()">
+						<i class="bi bi-pencil"></i> Edit
+					</button>
+				</div>
+				<div class="detail-section-body">
+					<div class="detail-edit-list" id="fitEditList">
+						<div class="detail-edit-row">
+							<label for="detailFitterSelect">Fitter</label>
+							<div class="detail-edit-control">
+								<span class="detail-edit-value" id="detailFitterValue">-</span>
+								<select id="detailFitterSelect" class="modal-select detail-edit-input" onchange="syncDetailEditValue('Fitter')">
+									{% for code, name in fitters %}
+									<option value="{{ code }}">{{ name }} ({{ code }})</option>
+									{% endfor %}
+								</select>
+							</div>
+						</div>
+						<div class="detail-edit-row">
+							<label for="detailFitDate">Fit Date</label>
+							<div class="detail-edit-control">
+								<span class="detail-edit-value" id="detailFitDateValue">-</span>
+								<input type="date" id="detailFitDate" class="modal-select detail-edit-input" onchange="syncDetailEditValue('FitDate')">
+							</div>
+						</div>
+						<div class="detail-edit-row">
+							<label for="detailFitDuration">Duration</label>
+							<div class="detail-edit-control">
+								<span class="detail-edit-value" id="detailFitDurationValue">-</span>
+								<div class="detail-edit-input cs-fit-days-wrap cal-dur-slider">
+									<input type="range" id="detailFitDuration" min="0.5" max="5" step="0.5" value="1" oninput="syncDetailEditValue('FitDuration')">
+									<div class="cs-fit-days-scale"><span>0.5</span><span>1</span><span>1.5</span><span>2</span><span>2.5</span><span>3</span><span>3.5</span><span>4</span><span>4.5</span><span>5</span></div>
+									<div class="cs-fit-days-value">Selected: <strong id="detailFitDurationSel">1</strong> day(s)</div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<!-- Confirmed / provisional conversion -->
+					<div class="detail-status-row">
+						<div class="detail-status-current">
+							<label>Date Status</label>
+							<span class="detail-status-pill" id="detailStatusPill">Confirmed</span>
+						</div>
+						<button type="button" class="detail-status-btn" id="detailStatusToggle" onclick="toggleDetailProvisional()">
+							<i class="bi bi-arrow-left-right"></i> <span id="detailStatusToggleLabel">Make provisional</span>
+						</button>
+					</div>
+				</div>
+			</section>
 
-            <!-- Section: Customer & Order -->
-            <div class="detail-section-label">Customer &amp; Order</div>
-            <div class="detail-grid">
-                <div class="detail-row">
-                    <label>Contract Number</label>
-                    <span id="detailContractNumber">-</span>
-                </div>
-                <div class="detail-row">
-                    <label>Customer No.</label>
-                    <span id="detailCustomerNumber">-</span>
-                </div>
-                <div class="detail-row">
-                    <label>Designer</label>
-                    <span id="detailDesigner">-</span>
-                </div>
-                <div class="detail-row">
-                    <label>Order Date</label>
-                    <span id="detailOrderDate">-</span>
-                </div>
-                <div class="detail-row">
-                    <label>Address</label>
-                    <span id="detailAddress">-</span>
-                </div>
-                <div class="detail-row">
-                    <label>Postcode</label>
-                    <span id="detailPostcode">-</span>
-                </div>
-            </div>
+			<!-- Section: Financials -->
+			<section class="detail-section">
+				<div class="detail-section-head">
+					<span class="detail-section-label">Financials</span>
+				</div>
+				<div class="detail-section-body">
+					<div class="detail-grid">
+						<div class="detail-row">
+							<label>Sale Value</label>
+							<span id="detailSaleValue" class="detail-val-money">-</span>
+						</div>
+						<div class="detail-row">
+							<label>Paid</label>
+							<span id="detailPaid" class="detail-val-money detail-val-paid">-</span>
+						</div>
+					</div>
+					<div class="detail-fin-wrap" id="detailPaymentBar" style="display:none;">
+						<div class="detail-fin-track-outer">
+							<div class="detail-fin-track">
+								<div class="detail-fin-fill" id="detailPaymentFill"></div>
+							</div>
+							<div class="detail-fin-mile fb-mile-45">
+								<div class="detail-fin-mile-tick"></div>
+								<span class="detail-fin-mile-label">45%</span>
+							</div>
+							<div class="detail-fin-mile fb-mile-90">
+								<div class="detail-fin-mile-tick"></div>
+								<span class="detail-fin-mile-label">90%</span>
+							</div>
+							<div class="detail-fin-mile fb-mile-100">
+								<div class="detail-fin-mile-tick"></div>
+								<span class="detail-fin-mile-label">100%</span>
+							</div>
+						</div>
+						<span id="detailOutstanding" class="detail-fin-remaining">-</span>
+					</div>
+				</div>
+			</section>
 
-            <!-- Section: Purchase Orders -->
-            <div class="detail-section-label">Purchase Orders</div>
-            <div class="detail-po-list" id="detailPoList">
-                <span class="detail-po-empty">No linked purchase orders.</span>
-            </div>
+			<!-- Section: Customer & Order -->
+			<section class="detail-section">
+				<div class="detail-section-head">
+					<span class="detail-section-label">Customer &amp; Order</span>
+				</div>
+				<div class="detail-section-body">
+					<div class="detail-grid">
+						<div class="detail-row">
+							<label>Contract Number</label>
+							<span id="detailContractNumber">-</span>
+						</div>
+						<div class="detail-row">
+							<label>Customer No.</label>
+							<span id="detailCustomerNumber">-</span>
+						</div>
+						<div class="detail-row">
+							<label>Designer</label>
+							<span id="detailDesigner">-</span>
+						</div>
+						<div class="detail-row">
+							<label>Order Date</label>
+							<span id="detailOrderDate">-</span>
+						</div>
+						<div class="detail-row">
+							<label>Address</label>
+							<span id="detailAddress">-</span>
+						</div>
+						<div class="detail-row">
+							<label>Postcode</label>
+							<span id="detailPostcode">-</span>
+						</div>
+					</div>
+				</div>
+			</section>
 
-            <!-- Section: Fit Assignment -->
-            <div class="detail-section-head">
-                <span class="detail-section-label">Fit Assignment</span>
-                <button type="button" class="detail-edit-toggle" id="fitEditToggle" onclick="toggleFitEdit()">
-                    <i class="bi bi-pencil"></i> Edit
-                </button>
-            </div>
-            <div class="detail-edit-list" id="fitEditList">
-                <div class="detail-edit-row">
-                    <label for="detailFitterSelect">Fitter</label>
-                    <div class="detail-edit-control">
-                        <span class="detail-edit-value" id="detailFitterValue">-</span>
-                        <select id="detailFitterSelect" class="modal-select detail-edit-input" onchange="syncDetailEditValue('Fitter')">
-                            {% for code, name in fitters %}
-                            <option value="{{ code }}">{{ name }} ({{ code }})</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                </div>
-                <div class="detail-edit-row">
-                    <label for="detailFitDate">Fit Date</label>
-                    <div class="detail-edit-control">
-                        <span class="detail-edit-value" id="detailFitDateValue">-</span>
-                        <input type="date" id="detailFitDate" class="modal-select detail-edit-input" onchange="syncDetailEditValue('FitDate')">
-                    </div>
-                </div>
-                <div class="detail-edit-row">
-                    <label for="detailFitDuration">Duration</label>
-                    <div class="detail-edit-control">
-                        <span class="detail-edit-value" id="detailFitDurationValue">-</span>
-                        <div class="detail-edit-input cs-fit-days-wrap cal-dur-slider">
-                            <input type="range" id="detailFitDuration" min="0.5" max="5" step="0.5" value="1" oninput="syncDetailEditValue('FitDuration')">
-                            <div class="cs-fit-days-scale"><span>0.5</span><span>1</span><span>1.5</span><span>2</span><span>2.5</span><span>3</span><span>3.5</span><span>4</span><span>4.5</span><span>5</span></div>
-                            <div class="cs-fit-days-value">Selected: <strong id="detailFitDurationSel">1</strong> day(s)</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+			<!-- Section: Purchase Orders -->
+			<section class="detail-section">
+				<div class="detail-section-head">
+					<span class="detail-section-label">Purchase Orders</span>
+				</div>
+				<div class="detail-section-body">
+					<div class="detail-po-list" id="detailPoList">
+						<span class="detail-po-empty">No linked purchase orders.</span>
+					</div>
+				</div>
+			</section>
 
-            <!-- Section: Completion Status -->
-            <div class="detail-section-label">Completion Status</div>
-            <div class="detail-checks">
-                <div class="detail-check-item">
-                    <label for="detail-interior">Interior</label>
-                    <input type="checkbox" id="detail-interior" onchange="updateDetailStatus('interior', this.checked)">
-                </div>
-                <div class="detail-check-item">
-                    <label for="detail-door">Doors</label>
-                    <input type="checkbox" id="detail-door" onchange="updateDetailStatus('door', this.checked)">
-                </div>
-                <div class="detail-check-item">
-                    <label for="detail-accessories">Accessories</label>
-                    <input type="checkbox" id="detail-accessories" onchange="updateDetailStatus('accessories', this.checked)">
-                </div>
-                <div class="detail-check-item">
-                    <label for="detail-materials">Materials</label>
-                    <input type="checkbox" id="detail-materials" onchange="updateDetailStatus('materials', this.checked)">
-                </div>
-                <div class="detail-check-item">
-                    <label for="detail-paperwork">Paperwork</label>
-                    <input type="checkbox" id="detail-paperwork" onchange="updateDetailStatus('paperwork', this.checked)">
-                </div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn btn-danger cal-footer-left" onclick="deleteDetailAppointment()">Remove</button>
-            <button type="button" id="detailConfirmBtn" class="btn btn-success" style="display:none;" onclick="confirmDetailAppointment()"><i class="bi bi-check2-circle"></i> Confirm Fit</button>
-            <button type="button" class="btn btn-secondary" onclick="closeModal('appointmentDetailModal')">Close</button>
-            <button type="button" class="btn btn-primary" onclick="saveDetailMove()">Save Changes</button>
-        </div>
+			<!-- Section: Completion Status -->
+			<section class="detail-section">
+				<div class="detail-section-head">
+					<span class="detail-section-label">Completion Status</span>
+				</div>
+				<div class="detail-section-body">
+					<div class="detail-checks">
+						<div class="detail-check-item">
+							<label for="detail-interior">Interior</label>
+							<input type="checkbox" id="detail-interior" onchange="updateDetailStatus('interior', this.checked)">
+						</div>
+						<div class="detail-check-item">
+							<label for="detail-door">Doors</label>
+							<input type="checkbox" id="detail-door" onchange="updateDetailStatus('door', this.checked)">
+						</div>
+						<div class="detail-check-item">
+							<label for="detail-accessories">Accessories</label>
+							<input type="checkbox" id="detail-accessories" onchange="updateDetailStatus('accessories', this.checked)">
+						</div>
+						<div class="detail-check-item">
+							<label for="detail-materials">Materials</label>
+							<input type="checkbox" id="detail-materials" onchange="updateDetailStatus('materials', this.checked)">
+						</div>
+						<div class="detail-check-item">
+							<label for="detail-paperwork">Paperwork</label>
+							<input type="checkbox" id="detail-paperwork" onchange="updateDetailStatus('paperwork', this.checked)">
+						</div>
+					</div>
+				</div>
+			</section>
+		</div>
+		<div class="modal-footer">
+			<button type="button" class="btn btn-danger cal-footer-left" onclick="deleteDetailAppointment()">Remove</button>
+			<button type="button" class="btn btn-secondary" onclick="closeModal('appointmentDetailModal')">Close</button>
+			<button type="button" class="btn btn-primary" onclick="saveDetailMove()">Save Changes</button>
+		</div>
     </div>
 </div>
 
@@ -1507,10 +1559,14 @@ function selectAppointmentFromCard(el) {
     document.getElementById('detail-materials').checked = d.materials === 'true';
     document.getElementById('detail-paperwork').checked = d.paperwork === 'true';
 
-    // Provisional (dragged, not yet confirmed) appointments can be confirmed,
-    // which drops the job off the "needs scheduling" side panel.
-    const confirmBtn = document.getElementById('detailConfirmBtn');
-    if (confirmBtn) confirmBtn.style.display = (d.provisional === 'true') ? '' : 'none';
+	// Provisional (pencilled-in) vs confirmed fit date.
+	setDetailProvisionalUI(d.provisional === 'true');
+
+	// Header strapline — contract number + fit date at a glance
+	const subBits = [];
+	if (d.contractNumber || d.saleNumber) subBits.push('Contract ' + (d.contractNumber || d.saleNumber));
+	if (d.fitDate) subBits.push(d.fitDate);
+	document.getElementById('detailHeaderSub').textContent = subBits.join(' · ');
 
     openModal('appointmentDetailModal');
 }
@@ -1523,20 +1579,17 @@ function renderDetailPos(posJson) {
     let pos = [];
     try { pos = JSON.parse(posJson || '[]'); } catch (e) { pos = []; }
     if (!pos.length) { wrap.innerHTML = '<span class="detail-po-empty">No linked purchase orders.</span>'; return; }
-    const groups = {}, order = [];
-    pos.forEach(po => {
-        const key = (po.supplier || '').trim() || 'Other';
-        if (!groups[key]) { groups[key] = []; order.push(key); }
-        groups[key].push(po);
-    });
-    wrap.innerHTML = order.map(supplier => {
-        const rows = groups[supplier].map(po => {
-            const status = po.status || 'Draft';
-            const cls = 'po-status-' + status.toLowerCase().replace(/[^a-z]+/g, '-');
-            return `<div class="detail-po-row"><span class="detail-po-num">${escapeHtml(po.number)}</span><span class="detail-po-status ${cls}">${escapeHtml(status)}</span></div>`;
-        }).join('');
-        return `<div class="detail-po-group"><div class="detail-po-group-label">${escapeHtml(supplier)}</div>${rows}</div>`;
-    }).join('');
+	// One row per PO: supplier · number · status
+	wrap.innerHTML = pos.map(po => {
+		const supplier = (po.supplier || '').trim() || 'Other';
+		const status = po.status || 'Draft';
+		const cls = 'po-status-' + status.toLowerCase().replace(/[^a-z]+/g, '-');
+		return `<div class="detail-po-row">`
+			+ `<span class="detail-po-supplier">${escapeHtml(supplier)}</span>`
+			+ `<span class="detail-po-num">${escapeHtml(po.number)}</span>`
+			+ `<span class="detail-po-status ${cls}">${escapeHtml(status)}</span>`
+			+ `</div>`;
+	}).join('');
 }
 
 function escapeHtml(s) {
@@ -1590,12 +1643,42 @@ function deleteDetailAppointment() {
     .catch(() => alert('Error removing'));
 }
 
-function confirmDetailAppointment() {
-    if (!selectedAppointmentId) return;
-    fetch(`/fit-board/confirm-appointment/${selectedAppointmentId}/`, {
-        method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token }}' }
-    }).then(r => r.json()).then(data => { if (data.success) location.reload(); else alert(data.error || 'Confirm failed'); })
-    .catch(() => alert('Error confirming'));
+// ── Provisional / confirmed fit date ────────────────────────────
+let _detailIsProvisional = false;
+
+function setDetailProvisionalUI(isProvisional) {
+	_detailIsProvisional = !!isProvisional;
+	const banner = document.getElementById('detailProvisionalBanner');
+	const pill = document.getElementById('detailStatusPill');
+	const toggleLabel = document.getElementById('detailStatusToggleLabel');
+	if (banner) banner.style.display = _detailIsProvisional ? '' : 'none';
+	if (pill) {
+		pill.textContent = _detailIsProvisional ? 'Provisional' : 'Confirmed';
+		pill.classList.toggle('is-provisional', _detailIsProvisional);
+		pill.classList.toggle('is-confirmed', !_detailIsProvisional);
+	}
+	if (toggleLabel) toggleLabel.textContent = _detailIsProvisional ? 'Confirm fit date' : 'Make provisional';
+}
+
+function toggleDetailProvisional() {
+	setDetailProvisional(!_detailIsProvisional);
+}
+
+/* Convert the selected appointment between a confirmed and a provisional fit
+   date. Reloads so the calendar card styling and the "needs scheduling" side
+   panel both reflect the change. */
+function setDetailProvisional(isProvisional) {
+	if (!selectedAppointmentId) return;
+	const btn = document.getElementById('detailStatusToggle');
+	if (btn) btn.disabled = true;
+	fetch(`/fit-board/set-provisional/${selectedAppointmentId}/`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}' },
+		body: JSON.stringify({ provisional: !!isProvisional })
+	}).then(r => r.json()).then(data => {
+		if (data.success) { location.reload(); }
+		else { if (btn) btn.disabled = false; alert(data.error || 'Could not change the fit date status'); }
+	}).catch(() => { if (btn) btn.disabled = false; alert('Error changing fit date status'); });
 }
 
 function saveDetailMove() {

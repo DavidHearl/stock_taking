@@ -13296,6 +13296,38 @@ def confirm_fit_appointment(request, appointment_id):
         return JsonResponse({'success': False, 'error': str(e)})
 
 
+@login_required
+def set_fit_appointment_provisional(request, appointment_id):
+	"""Switch an existing fit appointment between provisional and confirmed.
+
+	The calendar detail modal lets a booked fit be downgraded back to a
+	provisional (pencilled-in) date as well as confirmed, so a date that was
+	agreed and then wobbled doesn't have to be deleted and re-dragged. POST
+	body: ``{"provisional": true|false}``.
+	"""
+	if request.method != 'POST':
+		return JsonResponse({'success': False, 'error': 'POST required'})
+	try:
+		import json
+		try:
+			data = json.loads(request.body or b'{}')
+		except ValueError:
+			data = {}
+		provisional = bool(data.get('provisional'))
+		appointment = get_object_or_404(FitAppointment, id=appointment_id)
+		if appointment.is_provisional != provisional:
+			appointment.is_provisional = provisional
+			appointment.save(update_fields=['is_provisional'])
+		return JsonResponse({
+			'success': True,
+			'appointment_id': appointment.id,
+			'is_provisional': appointment.is_provisional,
+		})
+	except Exception as e:
+		logger.error(f'Error setting provisional flag on appointment {appointment_id}: {e}')
+		return JsonResponse({'success': False, 'error': str(e)})
+
+
 def _order_fit_duration(order):
     """Whole-day calendar span for an order's fit, derived from the sale
     coversheet ``fit_days`` (rounded up so a 1.5-day job spans 2 day cells).

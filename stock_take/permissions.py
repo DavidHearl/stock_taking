@@ -114,6 +114,7 @@ URL_TO_PAGE = {
     'delete_fit_appointment': 'fit_board',
     'move_fit_appointment': 'fit_board',
     'confirm_fit_appointment': 'fit_board',
+    'set_fit_appointment_provisional': 'fit_board',
     'timesheets': 'timesheets',
     'workflow': 'workflow',
 
