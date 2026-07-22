@@ -7726,7 +7726,9 @@ def _build_order_context(order, request):
                 item.stock_quantity = None
             code = item_codes.get(item)
             item.colour_image_url = colour_image_map.get(code) if code else None
-        items.sort(key=lambda x: x.sort_key)
+        # Group rows by part description (all "Board" together, etc.), then keep the
+        # existing standard-first / width ordering within each part-description group.
+        items.sort(key=lambda x: ((x.partdesc or '').strip().lower(), x.sort_key))
         return items, total
 
     # Batch-lookup all PurchaseOrders needed for the boards PO list and the two standalone
