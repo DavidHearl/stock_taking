@@ -371,9 +371,15 @@ class Command(BaseCommand):
                                     old_rec.anthill_payment_id = pid
                                     old_rec.save(update_fields=['anthill_payment_id'])
 
+                            # Key on invoice too: one Xero batch PaymentID can be
+                            # applied to several invoices (e.g. a single payment
+                            # split across INV-1306 and INV-1307). Keying on the
+                            # PaymentID alone collapses those allocations into one
+                            # row, losing all but the last invoice's share.
                             obj, created = AnthillPayment.objects.update_or_create(
                                 sale=sale,
                                 anthill_payment_id=pid,
+                                xero_invoice_id=inv['invoice_id'],
                                 defaults=defaults,
                             )
                         else:
@@ -578,9 +584,13 @@ class Command(BaseCommand):
                                     'user_name': '',
                                 }
                                 if pid:
+                                    # See main pass: key on the invoice too so a
+                                    # batch PaymentID spanning several invoices
+                                    # isn't collapsed into a single row.
                                     obj, created = AnthillPayment.objects.update_or_create(
                                         sale=sale,
                                         anthill_payment_id=pid,
+                                        xero_invoice_id=inv['invoice_id'],
                                         defaults=defaults,
                                     )
                                 else:

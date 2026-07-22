@@ -2727,7 +2727,19 @@ def product_search(request):
         Q(sku__icontains=q) |
         Q(name__icontains=q) |
         Q(description__icontains=q)
-    ).order_by('name')[:20]
+    )
+
+    # When adding products to a PO that already has a supplier set, restrict the
+    # results to that supplier's items so you don't scroll past unrelated stock.
+    # Falls back to searching all items when no supplier_id is passed.
+    supplier_id = request.GET.get('supplier_id', '').strip()
+    if supplier_id:
+        try:
+            items = items.filter(supplier__workguru_id=int(supplier_id))
+        except (ValueError, TypeError):
+            pass
+
+    items = items.order_by('name')[:20]
 
     results = []
     for item in items:

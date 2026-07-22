@@ -175,6 +175,11 @@
                         <button type="button" class="btn btn-sm btn-outline-primary" onclick="openSearchPaymentsModal('xero')">
                             <i class="bi bi-cloud"></i> Search Xero
                         </button>
+                        {% if xero_payments %}
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="matchPaymentHeaderBtn" onclick="openReconcileModal()" style="display:none;">
+                            <i class="bi bi-arrow-left-right"></i> Match Payment
+                        </button>
+                        {% endif %}
                         <button type="button" class="btn btn-sm btn-success" onclick="openAddManualModal()">
                             <i class="bi bi-plus-lg"></i> Add Payment
                         </button>
@@ -316,7 +321,7 @@
                                             <i class="bi {% if p.ignored %}bi-eye{% else %}bi-eye-slash{% endif %}"></i> {% if p.ignored %}Include in calculations{% else %}Exclude from calculations{% endif %}
                                         </button>
                                         <div class="kebab-separator"></div>
-                                        <button class="kebab-item danger" onclick="deleteManualPayment({{ p.pk }})">
+                                        <button class="kebab-item danger" onclick="deleteManualPayment({{ p.pk }}, '{{ p.payment_type|default:''|escapejs }}', '{{ p.date|date:'d/m/Y'|default:'' }}', {{ p.amount|default:0 }})">
                                             <i class="bi bi-trash"></i> Delete payment
                                         </button>
                                         {% else %}
@@ -613,6 +618,71 @@
                 </div>
             </dialog>
 
+            <!-- Match a manual payment against one or more existing Xero payments -->
+            <dialog id="reconcileModal">
+                <div class="manual-modal-header">
+                    <div class="manual-modal-title">
+                        <i class="bi bi-arrow-left-right text-accent"></i>
+                        <span>Match Manual Payment to Xero</span>
+                    </div>
+                    <button class="manual-modal-close" onclick="closeReconcileModal()"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="manual-modal-body">
+                    <div class="match-confirm-label">Manual payment to clear</div>
+                    <div id="reconcileManualPicker"></div>
+                    <div class="reconcile-hint">Select the Xero payment(s) that together make up this manual figure.</div>
+                    <div id="reconcileXeroList" class="reconcile-xero-list"></div>
+                    <div class="reconcile-total-bar">
+                        <span class="reconcile-total-label">Selected total</span>
+                        <span class="reconcile-total-value"><span id="reconcileSelectedTotal">£0.00</span> <span class="reconcile-total-target" id="reconcileTargetTotal"></span></span>
+                        <span id="reconcileMatchState" class="reconcile-state"></span>
+                    </div>
+                    <div class="match-confirm-warning">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <span>The manual entry is deleted; the Xero payments are kept as the record. This cannot be undone.</span>
+                    </div>
+                    <div class="sale-modal-footer">
+                        <button type="button" class="btn btn-sm btn-primary" id="reconcileConfirmBtn" onclick="confirmReconcile()" disabled>
+                            <i class="bi bi-check-lg"></i> Match Payment
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="closeReconcileModal()">Cancel</button>
+                        <span id="reconcileMsg" class="sale-modal-msg"></span>
+                    </div>
+                </div>
+            </dialog>
+
+            <!-- Confirm deleting a manual payment -->
+            <dialog id="deleteManualModal">
+                <div class="manual-modal-header">
+                    <div class="manual-modal-title">
+                        <i class="bi bi-trash text-danger"></i>
+                        <span>Delete Payment</span>
+                    </div>
+                    <button class="manual-modal-close" onclick="closeDeleteManualModal()"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <div class="manual-modal-body">
+                    <div class="match-confirm-label">Deleting manual payment</div>
+                    <div class="match-confirm-card">
+                        <span class="match-confirm-name">
+                            <span id="deleteManualType"></span>
+                            <span class="match-confirm-meta" id="deleteManualDate"></span>
+                        </span>
+                        <span class="match-confirm-amount" id="deleteManualAmount"></span>
+                    </div>
+                    <div class="match-confirm-warning">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <span>This permanently removes the manual payment and updates the balance. This cannot be undone.</span>
+                    </div>
+                    <div class="sale-modal-footer">
+                        <button type="button" class="btn btn-sm btn-danger" id="deleteManualBtn" onclick="confirmDeleteManualPayment()">
+                            <i class="bi bi-trash"></i> Delete Payment
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="closeDeleteManualModal()">Cancel</button>
+                        <span id="deleteManualMsg" class="sale-modal-msg"></span>
+                    </div>
+                </div>
+            </dialog>
+
             <!-- Search Payments Modal (Xero or Anthill, toggled by mode) -->
             <dialog id="searchPaymentsModal">
                 <div class="manual-modal-header">
@@ -705,6 +775,17 @@
             const XERO_SEARCH_URL = "{% url 'xero_search_invoices' sale.pk %}";
             const XERO_LINK_URL = "{% url 'xero_link_invoice' sale.pk %}";
             const XERO_MATCH_URL = "{% url 'xero_match_manual_payment' sale.pk %}";
+            const RECONCILE_URL = "{% url 'reconcile_manual_payment' sale.pk %}";
+            // The customer's Xero payments (as displayed above), used to match a
+            // manual placeholder against one or more real Xero payments.
+            const XERO_PAYMENTS_DATA = [
+            {% for p in xero_payments %}{ pk: {{ p.pk }}, invoice: "{{ p.xero_invoice_number|default:''|escapejs }}", reference: "{{ p.payment_type|default:''|escapejs }}", date: "{{ p.date|date:'d/m/Y'|default:'' }}", amount: {{ p.display_amount|default:0 }}, sale: "{{ p.sale.contract_number|default:p.sale.anthill_activity_id|default:''|escapejs }}", thisSale: {% if p.belongs_to_current %}true{% else %}false{% endif %} }{% if not forloop.last %},{% endif %}
+            {% endfor %}];
+            // Every manual placeholder for this customer (across all their sales)
+            // that can be matched to Xero payments.
+            const MANUAL_PAYMENTS_DATA = [
+            {% for p in manual_payments %}{ pk: {{ p.pk }}, type: "{{ p.payment_type|default:''|escapejs }}", date: "{{ p.date|date:'d/m/Y'|default:'' }}", amount: {{ p.amount|default:0 }}, sale: "{{ p.sale.contract_number|default:p.sale.anthill_activity_id|default:''|escapejs }}", thisSale: {% if p.belongs_to_current %}true{% else %}false{% endif %} },
+            {% endfor %}];
             const CUSTOMER_XERO_LINK_URL = {% if sale.customer %}"{% url 'customer_xero_link' sale.customer.pk %}"{% else %}null{% endif %};
             const SALE_MERGE_URL = "{% url 'sale_merge' sale.pk %}";
             const DELETE_MANUAL_BASE = "/sale/{{ sale.pk }}/payments/";
@@ -1345,8 +1426,40 @@
                 });
             }
 
-            function deleteManualPayment(paymentPk) {
-                if (!confirm('Delete this manual payment?')) return;
+            // Deleting a manual payment is irreversible and shifts the balance,
+            // so confirm through the standard modal rather than a native prompt.
+            let _pendingDeleteManual = null;
+
+            function deleteManualPayment(paymentPk, type, dateStr, amount) {
+                _pendingDeleteManual = paymentPk;
+                document.getElementById('deleteManualType').textContent = type || 'Manual';
+                document.getElementById('deleteManualDate').textContent = dateStr ? '· ' + dateStr : '';
+                document.getElementById('deleteManualAmount').textContent = '£' + (parseFloat(amount) || 0).toFixed(2);
+                const msg = document.getElementById('deleteManualMsg');
+                msg.textContent = '';
+                msg.className = 'sale-modal-msg';
+                const btn = document.getElementById('deleteManualBtn');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-trash"></i> Delete Payment';
+                document.getElementById('deleteManualModal').showModal();
+            }
+
+            function closeDeleteManualModal() {
+                _pendingDeleteManual = null;
+                const m = document.getElementById('deleteManualModal');
+                if (m && m.open) m.close();
+            }
+
+            function confirmDeleteManualPayment() {
+                if (_pendingDeleteManual == null) return;
+                const paymentPk = _pendingDeleteManual;
+                const btn = document.getElementById('deleteManualBtn');
+                const msg = document.getElementById('deleteManualMsg');
+                btn.disabled = true;
+                btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Deleting…';
+                msg.textContent = '';
+                msg.className = 'sale-modal-msg';
+
                 fetch(DELETE_MANUAL_BASE + paymentPk + '/delete/', {
                     method: 'POST',
                     headers: {'X-CSRFToken': CSRF_TOKEN},
@@ -1356,9 +1469,27 @@
                     if (data.success) {
                         const row = document.getElementById('manual-row-' + paymentPk);
                         if (row) row.remove();
+                        closeDeleteManualModal();
+                        // Balance/totals are recomputed server-side.
+                        location.reload();
+                    } else {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="bi bi-trash"></i> Delete Payment';
+                        msg.textContent = data.error || 'Delete failed';
+                        msg.className = 'sale-modal-msg text-danger';
                     }
+                })
+                .catch(err => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-trash"></i> Delete Payment';
+                    msg.textContent = 'Error: ' + err.message;
+                    msg.className = 'sale-modal-msg text-danger';
                 });
             }
+
+            document.getElementById('deleteManualModal').addEventListener('click', function(e) {
+                if (e.target === this) closeDeleteManualModal();
+            });
 
             function deleteXeroPayment(paymentPk) {
                 if (!confirm('Delete this Xero payment record? This removes it from the local database only (Xero is not affected). Use this when a payment was incorrectly matched to this sale.')) return;
@@ -1790,6 +1921,185 @@
             // Close on backdrop click, matching the other modals on this page.
             document.getElementById('matchConfirmModal').addEventListener('click', function(e) {
                 if (e.target === this) closeMatchConfirmModal();
+            });
+
+            // Match a manual placeholder against several existing Xero payments.
+            // A manual figure entered before Xero synced can cover the combined
+            // value of more than one Xero payment; ticking those payments until
+            // the running total matches lets the manual be cleared without the
+            // money being double-counted.
+            let _reconcileManual = null;
+
+            // The header "Match Payment" button only makes sense when there's a
+            // manual placeholder on this sale to clear and Xero payments to match
+            // it against — reveal it once we know both exist.
+            (function initMatchPaymentButton() {
+                const btn = document.getElementById('matchPaymentHeaderBtn');
+                if (btn && MANUAL_PAYMENTS_DATA.length && XERO_PAYMENTS_DATA.length) {
+                    btn.style.display = '';
+                }
+            })();
+
+            function reconcileManualMeta(m) {
+                return [m.date, m.thisSale ? 'this sale' : m.sale].filter(Boolean).join(' · ');
+            }
+
+            function renderReconcileManualCard(m) {
+                const meta = reconcileManualMeta(m);
+                return '<div class="match-confirm-card">'
+                    + '<span class="match-confirm-name">' + escHtml(m.type || 'Manual')
+                    + '<span class="match-confirm-meta">' + escHtml(meta) + '</span></span>'
+                    + '<span class="match-confirm-amount">£' + (parseFloat(m.amount) || 0).toFixed(2) + '</span>'
+                    + '</div>';
+            }
+
+            function onReconcileManualChange() {
+                const sel = document.getElementById('reconcileManualSelect');
+                const m = MANUAL_PAYMENTS_DATA[parseInt(sel.value)] || MANUAL_PAYMENTS_DATA[0];
+                _reconcileManual = { pk: m.pk, amount: parseFloat(m.amount) || 0 };
+                // Re-run the auto-selection against the newly chosen manual's value.
+                autoSelectReconcile();
+            }
+
+            // Tick a Xero payment (or nothing) that already equals the manual's
+            // value, so an obvious 1:1 match is pre-selected on open. Combined
+            // matches across several payments are still ticked by hand.
+            function autoSelectReconcile() {
+                const target = _reconcileManual ? _reconcileManual.amount : 0;
+                const boxes = document.querySelectorAll('.reconcile-check');
+                boxes.forEach(cb => { cb.checked = false; });
+                for (const cb of boxes) {
+                    const amt = XERO_PAYMENTS_DATA[parseInt(cb.dataset.idx)].amount || 0;
+                    if (Math.abs(amt - target) <= 0.01) { cb.checked = true; break; }
+                }
+                updateReconcileTotal();
+            }
+
+            function openReconcileModal() {
+                if (!MANUAL_PAYMENTS_DATA.length) return;
+
+                // One manual → show it as a fixed card; several → let the user pick
+                // (including manual payments on the customer's other sales).
+                const picker = document.getElementById('reconcileManualPicker');
+                if (MANUAL_PAYMENTS_DATA.length === 1) {
+                    const m = MANUAL_PAYMENTS_DATA[0];
+                    _reconcileManual = { pk: m.pk, amount: parseFloat(m.amount) || 0 };
+                    picker.innerHTML = renderReconcileManualCard(m);
+                } else {
+                    let opts = '';
+                    MANUAL_PAYMENTS_DATA.forEach((m, i) => {
+                        const where = m.thisSale ? '' : (m.sale ? ' · ' + m.sale : '');
+                        const label = (m.type || 'Manual') + ' — £' + (parseFloat(m.amount) || 0).toFixed(2) + (m.date ? ' (' + m.date + ')' : '') + where;
+                        opts += '<option value="' + i + '">' + escHtml(label) + '</option>';
+                    });
+                    picker.innerHTML = '<select id="reconcileManualSelect" class="sale-modal-select" onchange="onReconcileManualChange()">' + opts + '</select>';
+                    const first = MANUAL_PAYMENTS_DATA[0];
+                    _reconcileManual = { pk: first.pk, amount: parseFloat(first.amount) || 0 };
+                }
+
+                const msg = document.getElementById('reconcileMsg');
+                msg.textContent = '';
+                msg.className = 'sale-modal-msg';
+
+                const list = document.getElementById('reconcileXeroList');
+                if (!XERO_PAYMENTS_DATA.length) {
+                    list.innerHTML = '<p class="reconcile-empty"><i class="bi bi-inbox"></i> No Xero payments to match against.</p>';
+                } else {
+                    let html = '';
+                    XERO_PAYMENTS_DATA.forEach((x, i) => {
+                        const meta = [x.invoice, x.date, x.thisSale ? 'this sale' : x.sale].filter(Boolean).join(' · ');
+                        html += '<label class="reconcile-xero-row">';
+                        html += '<input type="checkbox" class="reconcile-check" data-idx="' + i + '" onchange="updateReconcileTotal()">';
+                        html += '<span class="reconcile-xero-detail">';
+                        html += '<span class="reconcile-xero-type">' + escHtml(x.reference || 'Payment') + '</span>';
+                        html += '<span class="reconcile-xero-meta">' + escHtml(meta) + '</span>';
+                        html += '</span>';
+                        html += '<span class="reconcile-xero-amount">£' + (x.amount || 0).toFixed(2) + '</span>';
+                        html += '</label>';
+                    });
+                    list.innerHTML = html;
+                }
+
+                autoSelectReconcile();
+                document.getElementById('reconcileModal').showModal();
+            }
+
+            function updateReconcileTotal() {
+                const checked = document.querySelectorAll('.reconcile-check:checked');
+                let total = 0;
+                checked.forEach(cb => { total += XERO_PAYMENTS_DATA[parseInt(cb.dataset.idx)].amount || 0; });
+                document.getElementById('reconcileSelectedTotal').textContent = '£' + total.toFixed(2);
+
+                const target = _reconcileManual ? _reconcileManual.amount : 0;
+                document.getElementById('reconcileTargetTotal').textContent = 'of £' + target.toFixed(2);
+                // Mirror the server tolerance: a penny per selected payment.
+                const tol = 0.01 * Math.max(checked.length, 1);
+                const matches = checked.length > 0 && Math.abs(total - target) <= tol;
+
+                const state = document.getElementById('reconcileMatchState');
+                if (!checked.length) {
+                    state.textContent = '';
+                    state.className = 'reconcile-state';
+                } else if (matches) {
+                    state.innerHTML = '<i class="bi bi-check-circle-fill"></i> Matches';
+                    state.className = 'reconcile-state reconcile-state--ok';
+                } else {
+                    const diff = total - target;
+                    state.textContent = (diff > 0 ? '+£' : '−£') + Math.abs(diff).toFixed(2);
+                    state.className = 'reconcile-state reconcile-state--off';
+                }
+                document.getElementById('reconcileConfirmBtn').disabled = !matches;
+            }
+
+            function closeReconcileModal() {
+                _reconcileManual = null;
+                const m = document.getElementById('reconcileModal');
+                if (m && m.open) m.close();
+            }
+
+            function confirmReconcile() {
+                if (!_reconcileManual) return;
+                const pks = [];
+                document.querySelectorAll('.reconcile-check:checked').forEach(cb => {
+                    pks.push(XERO_PAYMENTS_DATA[parseInt(cb.dataset.idx)].pk);
+                });
+                if (!pks.length) return;
+
+                const btn = document.getElementById('reconcileConfirmBtn');
+                const msg = document.getElementById('reconcileMsg');
+                btn.disabled = true;
+                btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Matching…';
+                msg.textContent = '';
+                msg.className = 'sale-modal-msg';
+
+                fetch(RECONCILE_URL, {
+                    method: 'POST',
+                    headers: {'X-CSRFToken': CSRF_TOKEN, 'Content-Type': 'application/json'},
+                    body: JSON.stringify({ payment_pk: _reconcileManual.pk, xero_payment_pks: pks }),
+                })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.success) {
+                        // Balances are recomputed server-side; reload to reflect
+                        // the removed manual entry and updated totals.
+                        location.reload();
+                    } else {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="bi bi-check-lg"></i> Match Payment';
+                        msg.textContent = result.error || 'Match failed';
+                        msg.className = 'sale-modal-msg text-danger';
+                    }
+                })
+                .catch(err => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-check-lg"></i> Match Payment';
+                    msg.textContent = 'Error: ' + err.message;
+                    msg.className = 'sale-modal-msg text-danger';
+                });
+            }
+
+            document.getElementById('reconcileModal').addEventListener('click', function(e) {
+                if (e.target === this) closeReconcileModal();
             });
 
             function linkAllAvailableXero(btn) {

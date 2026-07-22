@@ -2450,6 +2450,9 @@ function markProductsDirty() {
 
 /* ── Product Search ─────────────────────────────── */
 let searchTimeout = null;
+// This PO's supplier (WorkGuru id). When set, product search only returns this
+// supplier's stock items. Empty string when the PO has no supplier yet.
+const PO_SUPPLIER_ID = '{{ purchase_order.supplier_id|default:""|escapejs }}';
 
 function searchProducts(query) {
     const resultsDiv = document.getElementById('product-search-results');
@@ -2460,7 +2463,11 @@ function searchProducts(query) {
 
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => {
-        const url = '{% url "product_search" %}?q=' + encodeURIComponent(query);
+        // Scope the search to this PO's supplier so only their items show.
+        let url = '{% url "product_search" %}?q=' + encodeURIComponent(query);
+        if (PO_SUPPLIER_ID) {
+            url += '&supplier_id=' + encodeURIComponent(PO_SUPPLIER_ID);
+        }
         fetch(url)
             .then(res => res.json())
             .then(data => {

@@ -36,8 +36,10 @@ def payments_list(request):
     # Location filter — match the user's selected showroom(s) (same behaviour as
     # the Invoices list). Falls back to showing all when no location is set.
     profile = getattr(request.user, 'profile', None)
+    selected_locations = profile_locations(profile)
+    location_filter = ', '.join(selected_locations)
     loc_filter = location_q(
-        profile_locations(profile), 'sale__location', 'location', lookup='icontains'
+        selected_locations, 'sale__location', 'location', lookup='icontains'
     )
     if loc_filter:
         qs = qs.filter(loc_filter)

@@ -2842,8 +2842,11 @@ def _import_xero_invoice_payments(sale, invoice_id):
 			}
 
 			if pid:
+				# Key on the invoice too: one Xero batch PaymentID can be applied
+				# to several invoices, and keying on the PaymentID alone would
+				# overwrite the earlier invoice's row when the next is linked.
 				AnthillPayment.objects.update_or_create(
-					sale=sale, anthill_payment_id=pid, defaults=defaults)
+					sale=sale, anthill_payment_id=pid, xero_invoice_id=inv_id, defaults=defaults)
 			else:
 				AnthillPayment.objects.update_or_create(
 					sale=sale, xero_invoice_id=inv_id, date=date, defaults=defaults)
@@ -2981,6 +2984,112 @@ def xero_match_manual_payment(request, pk):
 		'message': f'Matched {manual_label} to {inv_number} — manual entry removed',
 		'payments_created': created_count,
 		'removed_payment_pk': int(payment_pk),
+	})
+
+
+@login_required
+@require_POST
+def reconcile_manual_payment(request, pk):
+	"""Reconcile a manual placeholder against one or more existing Xero payments.
+
+	A manual payment entered before the Xero records synced can end up standing
+	in for the combined value of several Xero payments (e.g. a deposit and a
+	balance recorded as a single manual figure). Xero is the source of truth, so
+	once the manual's value is fully accounted for by the selected Xero payments
+	the manual row is removed to stop the money being counted twice.
+
+	Unlike ``xero_match_manual_payment`` this matches against Xero payments that
+	are already imported (nothing is fetched or created) and supports selecting
+	several of them, so a many-Xero → one-manual overlap can be cleared.
+
+	Expects JSON body: {"payment_pk": int, "xero_payment_pks": [int, ...]}
+	"""
+	sale = get_object_or_404(AnthillSale.objects.select_related('customer'), pk=pk)
+
+	try:
+		data = json.loads(request.body)
+	except (json.JSONDecodeError, ValueError):
+		return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+	payment_pk = data.get('payment_pk')
+	xero_pks = data.get('xero_payment_pks') or []
+	if not payment_pk or not isinstance(xero_pks, list) or not xero_pks:
+		return JsonResponse({
+			'success': False,
+			'error': 'payment_pk and at least one xero_payment_pks are required',
+		}, status=400)
+
+	# De-duplicate the selection so a repeated pk can't inflate the total.
+	try:
+		xero_pks = list({int(x) for x in xero_pks})
+	except (TypeError, ValueError):
+		return JsonResponse({'success': False, 'error': 'xero_payment_pks must be integers'}, status=400)
+
+	# The manual placeholder may sit on any of this customer's sales — payments
+	# are listed customer-wide, so a manual on sale B can be reconciled against
+	# Xero payments recorded on sale A. Scope by customer, not the URL's sale.
+	manual_qs = AnthillPayment.objects.filter(pk=payment_pk, source='manual').select_related('sale')
+	if sale.customer_id:
+		manual_qs = manual_qs.filter(sale__customer_id=sale.customer_id)
+	else:
+		manual_qs = manual_qs.filter(sale=sale)
+	manual = manual_qs.first()
+	if not manual:
+		return JsonResponse({'success': False, 'error': 'Manual payment not found for this customer'}, status=404)
+	if manual.amount is None:
+		return JsonResponse({'success': False, 'error': 'Manual payment has no amount to match'}, status=400)
+
+	# The Xero payments are shown customer-wide, so accept any belonging to this
+	# sale's customer (fall back to this sale when there is no customer record).
+	xero_qs = AnthillPayment.objects.filter(pk__in=xero_pks).exclude(source='manual')
+	if sale.customer_id:
+		xero_qs = xero_qs.filter(sale__customer_id=sale.customer_id)
+	else:
+		xero_qs = xero_qs.filter(sale=sale)
+	selected = list(xero_qs)
+	if len(selected) != len(xero_pks):
+		return JsonResponse({
+			'success': False,
+			'error': 'One or more selected Xero payments could not be found for this customer',
+		}, status=400)
+
+	# Compare against the un-split (full) value shown on the customer-wide list.
+	def _display_value(p):
+		return p.full_amount if p.full_amount is not None else (p.amount or Decimal('0'))
+
+	selected_total = sum((_display_value(p) for p in selected), Decimal('0'))
+	# Allow a penny of rounding per selected payment (rounding accumulates across
+	# a multi-payment sum).
+	tolerance = MANUAL_MATCH_TOLERANCE * len(selected)
+	if abs(Decimal(manual.amount) - selected_total) > tolerance:
+		return JsonResponse({
+			'success': False,
+			'error': f'Amounts do not match — manual payment is £{manual.amount} but the '
+			         f'{len(selected)} selected Xero payment(s) total £{selected_total}.',
+		}, status=400)
+
+	manual_label = f'{manual.payment_type or "Manual"} £{manual.amount}'
+	matched_pks = [p.pk for p in selected]
+	manual_sale = manual.sale
+	try:
+		with transaction.atomic():
+			manual.delete()
+			# Recalculate the sale the manual actually belonged to (may differ
+			# from the sale in the URL when matching cross-sale).
+			_recalculate_sale_financials(manual_sale)
+	except Exception as e:
+		logger.exception('reconcile_manual_payment failed for sale %s, manual %s', pk, payment_pk)
+		return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
+	logger.info(
+		'Reconciled manual payment %s (%s) on sale %s against %d Xero payment(s): %s',
+		payment_pk, manual_label, sale.pk, len(selected), matched_pks,
+	)
+	return JsonResponse({
+		'success': True,
+		'message': f'Matched {manual_label} to {len(selected)} Xero payment(s) — manual entry removed',
+		'removed_payment_pk': int(payment_pk),
+		'matched_xero_pks': matched_pks,
 	})
 
 
