@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static custom_filters %}
 
 {% block title %}{{ supplier.name }} - Supplier{% endblock %}
 
@@ -29,7 +29,7 @@
             <span class="supplier-active-badge inactive">Inactive</span>
             {% endif %}
             <span id="summary-payment-badge">
-                {% if supplier.payment_method %}<span class="supplier-payment-badge {{ supplier.payment_method }}">{{ supplier.get_payment_method_display }}</span>{% endif %}
+                {% if supplier.payment_method %}<span class="badge {{ supplier.payment_method|badge_class:'supplier_payment' }}">{{ supplier.get_payment_method_display }}</span>{% endif %}
             </span>
         </div>
         <div class="supplier-detail-actions">
@@ -62,7 +62,7 @@
         <div class="supplier-stat-tile">
             <span class="supplier-stat-label">Payment Method</span>
             <span class="supplier-stat-value view-val">
-                {% if supplier.payment_method %}<span class="supplier-payment-badge {{ supplier.payment_method }}">{{ supplier.get_payment_method_display }}</span>{% else %}<span class="po-payment-unset">Not set</span>{% endif %}
+                {% if supplier.payment_method %}<span class="badge {{ supplier.payment_method|badge_class:'supplier_payment' }}">{{ supplier.get_payment_method_display }}</span>{% else %}<span class="po-payment-unset">Not set</span>{% endif %}
             </span>
             <select class="supplier-quick-select edit-val" data-field="payment_method" style="display:none;">
                 <option value="" {% if not supplier.payment_method %}selected{% endif %}>Not set</option>
@@ -353,7 +353,7 @@
                         <td>{{ po.expected_date|default:"-" }}</td>
                         <td class="text-right">£{{ po.total|floatformat:2 }}</td>
                         <td>
-                            <span class="po-status {% if po.status == 'Draft' %}draft{% elif po.status == 'Sent' %}sent{% elif po.status == 'Received' %}received{% elif po.status == 'Approved' %}approved{% elif po.status == 'Cancelled' %}cancelled{% endif %}">
+                            <span class="badge {{ po.status|badge_class:'po' }}">
                                 {{ po.status|default:"Draft" }}
                             </span>
                         </td>
@@ -466,13 +466,13 @@ function saveSupplier() {
                     } else if (field === 'payment_method') {
                         const label = (result.saved && result.saved.payment_method_display) ? result.saved.payment_method_display : '';
                         viewVal.innerHTML = input.value
-                            ? '<span class="supplier-payment-badge ' + input.value + '">' + label + '</span>'
+                            ? '<span class="badge ' + badgeClass(input.value, 'supplier_payment') + '">' + label + '</span>'
                             : '<span class="po-payment-unset">Not set</span>';
                         // Keep the header badge (next to the name) in sync too.
                         const badgeWrap = document.getElementById('summary-payment-badge');
                         if (badgeWrap) {
                             badgeWrap.innerHTML = input.value
-                                ? '<span class="supplier-payment-badge ' + input.value + '">' + label + '</span>'
+                                ? '<span class="badge ' + badgeClass(input.value, 'supplier_payment') + '">' + label + '</span>'
                                 : '';
                         }
                     } else if (field === 'website') {

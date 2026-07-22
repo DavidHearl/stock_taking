@@ -30,7 +30,7 @@
         <div class="po-detail-title">
             <h1>{{ purchase_order.display_number }}</h1>
             <div class="po-detail-meta">
-                <span class="po-status {% if purchase_order.status == 'Draft' %}draft{% elif purchase_order.status == 'Approved' %}approved{% elif purchase_order.status == 'Received' %}received{% elif purchase_order.status == 'Partially Received' %}partially-received{% elif purchase_order.status == 'Cancelled' %}cancelled{% endif %}">
+                <span class="badge {{ purchase_order.status|badge_class:'po' }}">
                     {{ purchase_order.status }}
                 </span>
                 <span class="po-type-badge {{ purchase_order.po_type }}" id="po-type-badge">{% if purchase_order.po_type == 'fitter' %}<i class="bi bi-person-gear"></i> Fitter PO{% else %}<i class="bi bi-building"></i> Supplier PO{% endif %}</span>
@@ -265,7 +265,7 @@
                         <span class="field-label">Payment</span>
                         <span class="field-value">
                             {% if supplier_obj.payment_method %}
-                            <span class="supplier-payment-badge {{ supplier_obj.payment_method }}">{{ supplier_obj.get_payment_method_display }}</span>
+                            <span class="badge {{ supplier_obj.payment_method|badge_class:'supplier_payment' }}">{{ supplier_obj.get_payment_method_display }}</span>
                             {% else %}
                             <span class="po-payment-unset">Not set</span>
                             {% endif %}
@@ -378,11 +378,11 @@
 
         {% if boards_po %}
         <div class="po-boards-meta">
-            <span class="po-boards-badge {% if boards_po.boards_ordered %}ordered{% else %}not-ordered{% endif %}">
+            <span class="badge {% if boards_po.boards_ordered %}badge-success{% else %}badge-warning{% endif %}">
                 <i class="bi bi-{% if boards_po.boards_ordered %}check-circle{% else %}clock{% endif %}"></i>
                 {% if boards_po.boards_ordered %}Ordered{% else %}Not Ordered{% endif %}
             </span>
-            <span class="po-boards-badge {% if boards_po.boards_received %}received{% else %}pending{% endif %}">
+            <span class="badge {% if boards_po.boards_received %}badge-success{% else %}badge-warning{% endif %}">
                 <i class="bi bi-{% if boards_po.boards_received %}box-seam{% else %}hourglass-split{% endif %}"></i>
                 {% if boards_po.boards_received %}All Received{% else %}Pending{% endif %}
             </span>
@@ -996,9 +996,9 @@
                         <td class="text-right">£{{ door.cost_price|floatformat:2 }}</td>
                         <td>
                             {% if door.is_fully_received %}
-                            <span class="pnx-status-badge received"><i class="bi bi-check-circle"></i> Received</span>
+                            <span class="badge badge-success"><i class="bi bi-check-circle"></i> Received</span>
                             {% else %}
-                            <span class="pnx-status-badge pending"><i class="bi bi-clock"></i> Pending</span>
+                            <span class="badge badge-warning"><i class="bi bi-clock"></i> Pending</span>
                             {% endif %}
                         </td>
                     </tr>
@@ -1031,7 +1031,7 @@
                         <td><a href="{% url 'purchase_order_detail' rpo.workguru_id %}" class="po-project-link">{{ rpo.display_number }}</a></td>
                         <td>{{ rpo.supplier_name|default:"-" }}</td>
                         <td>
-                            <span class="po-status {% if rpo.status == 'Draft' %}draft{% elif rpo.status == 'Approved' %}approved{% elif rpo.status == 'Received' %}received{% elif rpo.status == 'Partially Received' %}partially-received{% elif rpo.status == 'Cancelled' %}cancelled{% endif %}">
+                            <span class="badge {{ rpo.status|badge_class:'po' }}">
                                 {{ rpo.status }}
                             </span>
                         </td>
@@ -1386,8 +1386,8 @@
                             <td>{{ pinv.date|date:"d/m/Y"|default:"—" }}</td>
                             <td class="text-right">£{{ pinv.total|floatformat:2 }}</td>
                             <td class="text-right">£{{ pinv.amount_outstanding|floatformat:2 }}</td>
-                            <td><span class="pinv-status {{ pinv.status|lower }}">{{ pinv.status }}</span></td>
-                            <td><span class="pinv-payment {{ pinv.payment_status }}">{{ pinv.get_payment_status_display }}</span></td>
+                            <td><span class="badge {{ pinv.status|badge_class:'pinv' }}">{{ pinv.status }}</span></td>
+                            <td><span class="badge {{ pinv.payment_status|badge_class:'pinv_payment' }}">{{ pinv.get_payment_status_display }}</span></td>
                             <td class="text-center">
                                 <button class="btn btn-sm btn-danger" onclick="unlinkPurchaseInvoice({{ pinv.id }})" title="Unlink">
                                     <i class="bi bi-x-lg"></i>
@@ -3439,7 +3439,7 @@ function searchPurchaseInvoices(input) {
                         + (inv.supplier_name ? ` &mdash; ${escHtmlPo(inv.supplier_name)}` : '')
                         + (inv.date ? ` <span style="opacity:.6;font-size:.78rem;">${escHtmlPo(inv.date)}</span>` : '')
                         + ` &nbsp;<span style="font-weight:600;">£${parseFloat(inv.total).toFixed(2)}</span>`
-                        + ` <span class="pinv-payment ${inv.payment_status}" style="font-size:.72rem;">${inv.payment_status}</span>`;
+                        + ` <span class="badge ${badgeClass(inv.payment_status, 'pinv_payment')}" style="font-size:.72rem;">${inv.payment_status}</span>`;
                     item.onclick = () => linkPurchaseInvoice(inv.id, inv);
                     dd.appendChild(item);
                 });
@@ -3519,8 +3519,8 @@ function addPurchaseInvoiceRow(inv) {
         <td>${escHtmlPo(inv.date)}</td>
         <td style="text-align:right;">£${parseFloat(inv.total).toFixed(2)}</td>
         <td style="text-align:right;">£${parseFloat(inv.amount_outstanding).toFixed(2)}</td>
-        <td><span class="pinv-status ${inv.status.toLowerCase()}">${escHtmlPo(inv.status)}</span></td>
-        <td><span class="pinv-payment ${inv.payment_status}">${escHtmlPo(paymentLabels[inv.payment_status] || inv.payment_status)}</span></td>
+        <td><span class="badge ${badgeClass(inv.status, 'pinv')}">${escHtmlPo(inv.status)}</span></td>
+        <td><span class="badge ${badgeClass(inv.payment_status, 'pinv_payment')}">${escHtmlPo(paymentLabels[inv.payment_status] || inv.payment_status)}</span></td>
         <td style="text-align:center;">
             <button class="btn btn-sm btn-danger" onclick="unlinkPurchaseInvoice(${inv.id})" title="Unlink">
                 <i class="bi bi-x-lg"></i>

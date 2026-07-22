@@ -45,6 +45,55 @@ def price_2_4(value):
     decimals = (decimals + '00')[:max(2, len(decimals))]
     return f'{integer}.{decimals}'
 
+# Status/category string → global .badge-* colour variant. One map per domain
+# context so the same word can differ by domain if ever needed. Mirrored in JS
+# (window.badgeClass in static/js/script.js) for pills rendered client-side —
+# keep the two in sync. Unknown keys fall back to badge-neutral.
+_BADGE_STATUS_MAP = {
+	'po': {
+		'draft': 'badge-neutral', 'sent': 'badge-primary', 'received': 'badge-success',
+		'partially-received': 'badge-warning', 'approved': 'badge-primary', 'cancelled': 'badge-danger',
+	},
+	'opo': {
+		'draft': 'badge-neutral', 'approved': 'badge-primary', 'invoiced': 'badge-warning',
+		'paid': 'badge-success', 'cancelled': 'badge-danger',
+	},
+	'po_boards': {
+		'ordered': 'badge-success', 'not-ordered': 'badge-warning',
+		'received': 'badge-success', 'pending': 'badge-warning',
+	},
+	'pnx': {'received': 'badge-success', 'pending': 'badge-warning'},
+	'pinv': {'draft': 'badge-neutral', 'approved': 'badge-primary', 'paid': 'badge-success', 'void': 'badge-danger'},
+	'pinv_payment': {'paid': 'badge-success', 'partial': 'badge-warning', 'unpaid': 'badge-danger'},
+	'invoice': {'draft': 'badge-neutral', 'approved': 'badge-primary', 'sent': 'badge-success'},
+	'lead': {
+		'new': 'badge-primary', 'contacted': 'badge-warning', 'qualified': 'badge-purple',
+		'proposal': 'badge-info', 'converted': 'badge-success', 'lost': 'badge-neutral',
+	},
+	'enq': {'new': 'badge-info', 'contacted': 'badge-warning', 'converted': 'badge-success', 'closed': 'badge-neutral'},
+	'sale': {'required': 'badge-warning', 'short': 'badge-danger', 'ordered': 'badge-primary', 'validated': 'badge-success'},
+	'supplier_payment': {
+		'account': 'badge-success', 'card': 'badge-info', 'direct_debit': 'badge-purple',
+		'bank_transfer': 'badge-primary', 'proforma': 'badge-warning',
+	},
+	'payment_source': {'xero': 'badge-info', 'manual': 'badge-purple'},
+}
+
+
+@register.filter
+def badge_class(value, context):
+	"""Map a status/category string to a global .badge-* colour variant.
+
+	Usage: <span class="badge {{ obj.status|badge_class:'po' }}">{{ obj.status }}</span>
+	Case/whitespace-insensitive; unknown values fall back to badge-neutral so a
+	pill always has a defined colour."""
+	mapping = _BADGE_STATUS_MAP.get(context, {})
+	key = (str(value) if value is not None else '').strip().lower()
+	# Try the key as-is, then with spaces normalised to hyphens (e.g. the PO
+	# status "Partially Received" → "partially-received").
+	return mapping.get(key) or mapping.get(key.replace(' ', '-'), 'badge-neutral')
+
+
 @register.filter
 def currency_symbol(code):
     """Return the symbol for a currency code (GBP -> £, EUR -> €, USD -> $)."""

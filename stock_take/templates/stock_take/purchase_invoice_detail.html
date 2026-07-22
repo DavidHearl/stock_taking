@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static humanize %}
+{% load static humanize custom_filters %}
 
 {% block title %}{{ invoice.invoice_number }} – Purchase Invoice{% endblock %}
 {% block page_title %}<a href="{% url 'purchase_invoices_list' %}" class="pinv-title-back" title="Back to Purchase Invoices"><i class="bi bi-arrow-left"></i></a>{{ invoice.invoice_number }}{% endblock %}
@@ -17,16 +17,16 @@
     <div class="pinv-detail-title-row">
         <div>
             <h2 class="pinv-detail-number" id="detail-number">{{ invoice.invoice_number }}</h2>
-            <span class="pinv-status {{ invoice.status|lower }}" id="detail-status-badge">{{ invoice.status }}</span>
+            <span class="badge {{ invoice.status|badge_class:'pinv' }}" id="detail-status-badge">{{ invoice.status }}</span>
             {% if invoice.payment_status == 'paid' %}
-            <span class="pinv-payment paid">Paid</span>
+            <span class="badge badge-success pinv-payment">Paid</span>
             {% elif invoice.payment_status == 'partial' %}
-            <span class="pinv-payment partial">Partial</span>
+            <span class="badge badge-warning pinv-payment">Partial</span>
             {% else %}
-            <span class="pinv-payment unpaid">Unpaid</span>
+            <span class="badge badge-danger pinv-payment">Unpaid</span>
             {% endif %}
             {% if invoice.parent_invoice %}
-            <span class="pinv-status draft pinv-fs-078">
+            <span class="badge badge-neutral pinv-fs-078">
                 Amendment of <a href="{% url 'purchase_invoice_detail' invoice.parent_invoice.id %}" class="pinv-link-inherit">{{ invoice.parent_invoice.invoice_number }}</a>
             </span>
             {% endif %}
@@ -647,7 +647,7 @@
                 <td class="text-secondary pinv-fs-085">{{ amend.amendment_reason|default:"—" }}</td>
                 <td>{{ amend.date|date:"d/m/Y"|default:"—" }}</td>
                 <td class="text-right pinv-fw-600"><span class="pinv-cur">{{ invoice.currency|default:"GBP"|yesno:"€,£" }}</span>{{ amend.total|floatformat:2 }}</td>
-                <td><span class="pinv-status {{ amend.status|lower }}">{{ amend.status }}</span></td>
+                <td><span class="badge {{ amend.status|badge_class:'pinv' }}">{{ amend.status }}</span></td>
                 <td><a href="{% url 'purchase_invoice_detail' amend.id %}" class="pinv-btn-sm">View</a></td>
             </tr>
             {% endfor %}
@@ -786,7 +786,7 @@ function saveHeader() {
             document.getElementById('view-notes').textContent    = data.notes        || '—';
             document.getElementById('detail-number').textContent = data.invoice_number;
             document.getElementById('detail-status-badge').textContent  = data.status;
-            document.getElementById('detail-status-badge').className    = 'pinv-status ' + data.status.toLowerCase();
+            document.getElementById('detail-status-badge').className    = 'badge ' + badgeClass(data.status, 'pinv');
             document.getElementById('invoice-paid').innerHTML  = _curSpan() + parseFloat(data.amount_paid).toFixed(2);
             document.getElementById('invoice-total').innerHTML = _curSpan() + parseFloat(data.total).toFixed(2);
             document.getElementById('invoice-outstanding').innerHTML = _curSpan() + parseFloat(data.amount_outstanding).toFixed(2);
@@ -847,7 +847,7 @@ function setCurrency(code) {
 function updatePaymentBadge(status) {
     document.querySelectorAll('.pinv-payment').forEach(el => el.remove());
     const badge = document.createElement('span');
-    badge.className = 'pinv-payment ' + status;
+    badge.className = 'badge ' + badgeClass(status, 'pinv_payment') + ' pinv-payment';
     const labels = { paid: 'Paid', partial: 'Partial', unpaid: 'Unpaid' };
     badge.textContent = labels[status] || status;
     document.querySelector('.pinv-detail-title-row > div').appendChild(badge);

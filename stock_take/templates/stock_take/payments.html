@@ -12,30 +12,170 @@
 
 {% block content %}
 
-<form method="get" class="pay-toolbar">
-    <div class="pay-search">
-        <i class="bi bi-search"></i>
-        <input type="text" name="q" value="{{ search_query }}" placeholder="Search customer, contract, type, status…" autocomplete="off">
-    </div>
-    {% if source_filter and source_filter != 'all' %}<input type="hidden" name="source" value="{{ source_filter }}">{% endif %}
-
-    <div class="pay-filter-pills">
-        <a href="?source=all{% if search_query %}&q={{ search_query }}{% endif %}" class="pay-pill {% if source_filter == 'all' %}active{% endif %}">All</a>
-        <a href="?source=xero{% if search_query %}&q={{ search_query }}{% endif %}" class="pay-pill {% if source_filter == 'xero' %}active{% endif %}">Xero</a>
-        <a href="?source=manual{% if search_query %}&q={{ search_query }}{% endif %}" class="pay-pill {% if source_filter == 'manual' %}active{% endif %}">Manual</a>
+<div class="pay-bar">
+    <div class="tab-nav-pills" data-pill-slider data-cross-page-tabs="#pay-body">
+        <a href="{% url 'payments_list' %}" class="tab-button {% if view != 'reconcile' %}active{% endif %}">Payments{% if view != 'reconcile' and total_payments %} <span class="tab-count">{{ total_payments|intcomma }}</span>{% endif %}</a>
+        <a href="{% url 'payments_list' %}?view=reconcile" class="tab-button {% if view == 'reconcile' %}active{% endif %}">Reconcile{% if view == 'reconcile' and reconcile_count %} <span class="tab-count">{{ reconcile_count }}</span>{% endif %}</a>
     </div>
 
-    <div class="pay-stats">
-        <div class="pay-stat">
-            <span class="lbl">Payments</span>
-            <span class="val">{{ total_payments|intcomma }}</span>
+    {% if view == 'reconcile' %}
+    <form method="get" class="pay-bar-controls">
+        <input type="hidden" name="view" value="reconcile">
+        <div class="pay-search">
+            <i class="bi bi-search"></i>
+            <input type="text" name="q" value="{{ search_query }}" placeholder="Search customer or contract…" autocomplete="off">
         </div>
-        <div class="pay-stat">
-            <span class="lbl">Total Paid</span>
-            <span class="val">£{{ total_amount|floatformat:2|intcomma }}</span>
+    </form>
+    {% else %}
+    <form method="get" class="pay-bar-controls">
+        {% if source_filter and source_filter != 'all' %}<input type="hidden" name="source" value="{{ source_filter }}">{% endif %}
+        <div class="pay-search">
+            <i class="bi bi-search"></i>
+            <input type="text" name="q" value="{{ search_query }}" placeholder="Search customer, contract, type, status…" autocomplete="off">
         </div>
+        <div class="pay-filter-pills">
+            <a href="?source=all{% if search_query %}&q={{ search_query }}{% endif %}" class="pay-pill {% if source_filter == 'all' %}active{% endif %}">All</a>
+            <a href="?source=xero{% if search_query %}&q={{ search_query }}{% endif %}" class="pay-pill {% if source_filter == 'xero' %}active{% endif %}">Xero</a>
+            <a href="?source=manual{% if search_query %}&q={{ search_query }}{% endif %}" class="pay-pill {% if source_filter == 'manual' %}active{% endif %}">Manual</a>
+        </div>
+    </form>
+    {% endif %}
+</div>
+
+<div id="pay-body" class="tab-glide-in">
+
+{% if view == 'reconcile' %}
+
+{% for group in reconcile_groups %}
+<div class="pay-recon-group">
+    <div class="pay-recon-group-head">
+        <span class="pay-recon-stage">{{ group.stage_name }}</span>
+        {% if group.stage_phase %}<span class="pay-recon-phase">{{ group.stage_phase|title }}</span>{% endif %}
+        <span class="pay-recon-group-count">{{ group.count }} customer{{ group.count|pluralize }}</span>
     </div>
-</form>
+    <div class="pay-table-wrap">
+        <table class="table pay-table pay-recon-table">
+            <thead>
+                <tr>
+                    <th class="pay-recon-caret-col"></th>
+                    <th>Showroom</th>
+                    <th>Customer</th>
+                    <th class="num">Sales</th>
+                    <th class="num">Total Value</th>
+                    <th class="num">Total Paid</th>
+                    <th class="num">Difference</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in group.rows %}
+                <tr class="pay-recon-row" data-pk="{{ r.row_id }}">
+                    <td class="pay-recon-caret-col"><i class="bi bi-chevron-right pay-recon-caret"></i></td>
+                    <td>{{ r.showroom|default:"-" }}</td>
+                    <td>
+                        {% if r.customer_id %}<a class="pay-link" href="{% url 'customer_detail' r.customer_id %}">{{ r.customer_name }}</a>{% else %}{{ r.customer_name }}{% endif %}
+                    </td>
+                    <td class="num">{{ r.sale_count }}</td>
+                    <td class="num">£{{ r.total_value|floatformat:2|intcomma }}</td>
+                    <td class="num">£{{ r.total_paid|floatformat:2|intcomma }}</td>
+                    <td class="num pay-amount {% if r.status == 'overpaid' %}pay-pos{% else %}pay-neg{% endif %}">£{{ r.difference|floatformat:2|intcomma }}</td>
+                    <td>
+                        {% if r.status == 'overpaid' %}
+                        <span class="pay-recon-badge over">Overpaid</span>
+                        {% else %}
+                        <span class="pay-recon-badge under">Underpaid</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr class="pay-recon-detail" data-detail-pk="{{ r.row_id }}" hidden>
+                    <td colspan="8">
+                        <div class="pay-recon-panel">
+                            <div class="pay-recon-payments">
+                                <div class="pay-recon-sub">Sales &amp; payments ({{ r.sale_count }})</div>
+                                {% for s in r.sales %}
+                                <div class="pay-recon-sale">
+                                    <div class="prs-head">
+                                        <a class="pay-link" href="{% url 'sale_detail' s.pk %}">{{ s.contract_number|default:s.anthill_activity_id|default:"Sale" }}</a>
+                                        <span class="prs-figs">£{{ s.paid|floatformat:2|intcomma }} / £{{ s.sale_value|floatformat:2|intcomma }}</span>
+                                        <span class="prs-right">
+                                            {% if s.anthill_activity_id %}<a class="prs-anthill-btn" href="https://sliderobes.anthillcrm.com/system/Orders/ViewOrder.aspx?OrderID={{ s.anthill_activity_id }}" target="_blank" rel="noopener" title="View sale in Anthill"><i class="bi bi-box-arrow-up-right"></i> Anthill</a>{% endif %}
+                                            {% if s.balance > 0 %}<span class="prs-bal under">£{{ s.abs_balance|floatformat:2|intcomma }} owed</span>{% elif s.balance < 0 %}<span class="prs-bal over">£{{ s.abs_balance|floatformat:2|intcomma }} over</span>{% else %}<span class="prs-bal ok">balanced</span>{% endif %}
+                                        </span>
+                                    </div>
+                                    <div class="prs-pays">
+                                        {% for p in s.payments %}
+                                        <div class="pay-recon-pay {% if p.ignored %}is-ignored{% endif %}">
+                                            <span class="rp-date">{% if p.date %}{{ p.date|date:"d M Y" }}{% else %}—{% endif %}</span>
+                                            <span class="rp-type">{{ p.type }}</span>
+                                            <span class="pay-source {% if p.source == 'xero' %}xero{% endif %}">{{ p.source }}</span>
+                                            <span class="rp-amount">£{{ p.amount|floatformat:2|intcomma }}</span>
+                                            <span class="rp-actions">
+                                                <button type="button" class="pay-recon-mini" data-recon-action="toggle-ignore" data-url="{% url 'toggle_payment_ignored' s.pk p.id %}">{% if p.ignored %}Un-ignore{% else %}Ignore{% endif %}</button>
+                                                {% if p.source != 'xero' %}
+                                                <button type="button" class="pay-recon-mini danger" data-recon-action="delete-manual" data-url="{% url 'delete_manual_payment' s.pk p.id %}">Delete</button>
+                                                {% endif %}
+                                            </span>
+                                        </div>
+                                        {% empty %}
+                                        <div class="pay-recon-none">No payments on this sale.</div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            <div class="pay-recon-tools">
+                                <div class="pay-recon-sub">Reconcile</div>
+                                <p class="pay-recon-hint">
+                                    {% if r.status == 'overpaid' %}
+                                    Overpaid by <strong>£{{ r.difference|floatformat:2|intcomma }}</strong> across {{ r.sale_count }} sale{{ r.sale_count|pluralize }}. Move payments to the sale they belong to, remove a duplicate, or add a negative adjustment.
+                                    {% else %}
+                                    Underpaid by <strong>£{{ r.difference|floatformat:2|intcomma }}</strong> across {{ r.sale_count }} sale{{ r.sale_count|pluralize }}. Add the missing payment to the right sale, or search Xero to piece it together.
+                                    {% endif %}
+                                </p>
+                                <div class="pay-recon-add">
+                                    <select class="pay-recon-sale-select" aria-label="Apply to sale">
+                                        {% for s in r.sales %}
+                                        <option value="{{ s.pk }}" data-add-url="{% url 'add_manual_payment' s.pk %}" data-showroom="{{ s.showroom }}">{{ s.contract_number|default:s.anthill_activity_id|default:"Sale" }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <select class="pay-recon-type" aria-label="Payment type">
+                                        <option value="Deposit">Deposit</option>
+                                        <option value="Stock">Stock</option>
+                                        <option value="Final Payment" selected>Final Payment</option>
+                                    </select>
+                                    <input type="text" class="pay-recon-amount" value="{% if r.status == 'overpaid' %}-{{ r.difference }}{% else %}{{ r.difference }}{% endif %}" aria-label="Amount">
+                                    <button type="button" class="btn btn-sm btn-primary" data-recon-action="add-adjustment">Add payment</button>
+                                </div>
+                                <div class="pay-recon-actions">
+                                    {% if r.customer_id %}
+                                    <button type="button" class="btn btn-sm btn-secondary" data-recon-action="search-xero" data-xero-search-url="{% url 'customer_xero_search' r.customer_id %}" data-xero-link-url="{% url 'customer_xero_link' r.customer_id %}">
+                                        <i class="bi bi-search"></i> Search Xero
+                                    </button>
+                                    <a class="btn btn-sm btn-outline-secondary" href="{% url 'customer_manage_payments' r.customer_id %}">
+                                        <i class="bi bi-sliders"></i> Manage &amp; distribute
+                                    </a>
+                                    {% endif %}
+                                </div>
+                                <div class="pay-xero-results" hidden></div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% empty %}
+<div class="pay-table-wrap">
+    <div class="pay-empty">
+        <i class="bi bi-check2-circle"></i>
+        <p>Everything reconciles{% if location_filter %} for {{ location_filter }}{% endif %} — no under- or over-payments.</p>
+    </div>
+</div>
+{% endfor %}
+
+{% else %}
 
 <div class="pay-table-wrap">
     <table class="table pay-table">
@@ -73,7 +213,7 @@
                 <td>{{ p.user_name|default:"-" }}</td>
                 <td>{{ p.updated_at|date:"d M Y" }}</td>
                 <td>
-                    {% if p.status %}<span class="pay-status {% if p.status|lower == 'confirmed' or p.status|lower == 'paid' %}ok{% endif %}">{{ p.status }}</span>{% else %}-{% endif %}
+                    {% if p.status %}<span class="badge {% if p.status|lower == 'confirmed' or p.status|lower == 'paid' %}badge-success{% else %}badge-neutral{% endif %}">{{ p.status }}</span>{% else %}-{% endif %}
                 </td>
                 <td>{{ p.sale.contract_number|default:"-" }}</td>
                 <td><span class="pay-source {% if p.source == 'xero' %}xero{% endif %}">{{ p.source|default:"manual" }}</span></td>
@@ -104,4 +244,15 @@
 </div>
 {% endif %}
 
+{% endif %}
+
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+{% if view == 'reconcile' %}
+<script>window.PAY_CSRF = "{{ csrf_token }}";</script>
+<script src="{% static 'js/payments.js' %}"></script>
+{% endif %}
 {% endblock %}

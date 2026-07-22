@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static %}
+{% load static custom_filters %}
 
 {% block title %}Website Enquiries{% endblock %}
 
@@ -110,7 +110,7 @@
                 <td><span class="enq-source">{{ enq.source|default:"—" }}</span></td>
                 <td><span class="enq-date">{{ enq.received_at|date:"d/m/Y H:i" }}</span></td>
                 <td>
-                    <button class="enq-status {{ enq.status }}" onclick="cycleStatus(event, {{ enq.pk }}, '{{ enq.status }}')">
+                    <button class="badge {{ enq.status|badge_class:'enq' }} enq-status" onclick="cycleStatus(event, {{ enq.pk }}, '{{ enq.status }}')">
                         {{ enq.get_status_display }}
                     </button>
                 </td>
@@ -359,7 +359,7 @@ function cycleStatus(event, id, currentStatus) {
     const nextStatus = STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length];
     updateEnquiry(id, { status: nextStatus }, function(data) {
         const btn = event.target.closest('.enq-status');
-        btn.className = 'enq-status ' + data.status;
+        btn.className = 'badge ' + badgeClass(data.status, 'enq') + ' enq-status';
         btn.textContent = STATUS_LABELS[data.status];
         btn.closest('tr').dataset.status = data.status;
         btn.setAttribute('onclick', `cycleStatus(event, ${id}, '${data.status}')`);
@@ -521,7 +521,7 @@ function saveDrawer() {
             row.dataset.status = data.status;
             row.dataset.notes = data.notes;
             const statusBtn = row.querySelector('.enq-status');
-            statusBtn.className = 'enq-status ' + data.status;
+            statusBtn.className = 'badge ' + badgeClass(data.status, 'enq') + ' enq-status';
             statusBtn.textContent = STATUS_LABELS[data.status];
             statusBtn.setAttribute('onclick', `cycleStatus(event, ${currentEnquiryId}, '${data.status}')`);
         }

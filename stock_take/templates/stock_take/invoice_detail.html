@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load static humanize %}
+{% load static humanize custom_filters %}
 
 {% block title %}{{ invoice.invoice_number }} – Invoice Detail{% endblock %}
 {% block page_title %}
@@ -23,18 +23,18 @@
     <div class="inv-detail-title-row">
         <div>
             <h2 class="inv-detail-number">{{ invoice.invoice_number }}</h2>
-            <span class="inv-status {{ invoice.status|lower }}">{{ invoice.status }}</span>
+            <span class="badge {{ invoice.status|badge_class:'invoice' }}">{{ invoice.status }}</span>
             {% if invoice.is_overdue %}
-            <span class="inv-payment overdue">Overdue</span>
+            <span class="badge badge-danger">Overdue</span>
             {% elif invoice.payment_status == 'paid' %}
-            <span class="inv-payment paid">Paid</span>
+            <span class="badge badge-success">Paid</span>
             {% elif invoice.payment_status == 'partial' %}
-            <span class="inv-payment partial">Partial</span>
+            <span class="badge badge-warning">Partial</span>
             {% else %}
-            <span class="inv-payment unpaid">Unpaid</span>
+            <span class="badge badge-danger">Unpaid</span>
             {% endif %}
             {% if invoice.parent_invoice %}
-            <span class="inv-status draft">
+            <span class="badge badge-neutral">
                 Amendment of <a href="{% url 'invoice_detail' invoice.parent_invoice.id %}" class="inv-link-inherit">{{ invoice.parent_invoice.invoice_number }}</a>
             </span>
             {% endif %}
@@ -261,7 +261,7 @@
                     <td>{{ info.po.supplier_name|default:"—" }}</td>
                     <td>{{ info.po.project_name|default:"—" }}</td>
                     <td>
-                        <span class="inv-status {{ info.po.status|lower }}">{{ info.po.status|default:"—" }}</span>
+                        <span class="badge {{ info.po.status|badge_class:'po' }}">{{ info.po.status|default:"—" }}</span>
                     </td>
                     <td class="number-cell">£{{ info.po.total|floatformat:2 }}</td>
                     <td>
@@ -453,7 +453,7 @@
                     <td class="inv-text-secondary-sm">{{ amend.amendment_reason|default:"—" }}</td>
                     <td>{{ amend.date|date:"d/m/Y"|default:"—" }}</td>
                     <td class="number-cell">£{{ amend.total|floatformat:2 }}</td>
-                    <td><span class="inv-status {{ amend.status|lower }}">{{ amend.status }}</span></td>
+                    <td><span class="badge {{ amend.status|badge_class:'invoice' }}">{{ amend.status }}</span></td>
                     <td><a href="{% url 'invoice_detail' amend.id %}" class="btn btn-sm btn-outline-secondary">View</a></td>
                 </tr>
                 {% endfor %}
@@ -530,7 +530,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                     </div>
                                     <div style="text-align:right;">
                                         <span style="font-size:0.85rem;color:var(--text-secondary);">${po.project_number}</span>
-                                        <span style="margin-left:8px;font-size:0.8rem;" class="inv-status ${po.status.toLowerCase()}">${po.status}</span>
+                                        <span style="margin-left:8px;font-size:0.8rem;" class="badge ${badgeClass(po.status, 'po')}">${po.status}</span>
                                     </div>
                                  </div>`;
                     });
