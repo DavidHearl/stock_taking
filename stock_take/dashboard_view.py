@@ -3119,6 +3119,90 @@ def _fit_period_rows(start, end, prefixes=None, jobs=None):
 	]
 
 
+def _target_period_range(key, today):
+	"""``(start, end, label, sales_target)`` for a sales-target period key.
+
+	Mirrors the ranges and objectives built in :func:`_compute_sales_targets`
+	so the target card and its drill-down modal describe the exact same window
+	and target. Returns ``None`` for an unknown key.
+	"""
+	from calendar import monthrange
+	this_week_start = today - timedelta(days=today.weekday())
+	wk = float(WEEKLY_SALES_TARGET)
+	ranges = {
+		'last_week': (this_week_start - timedelta(days=7), this_week_start - timedelta(days=1), 'Last Week', wk),
+		'this_week': (this_week_start, this_week_start + timedelta(days=6), 'This Week', wk),
+		'next_week': (this_week_start + timedelta(days=7), this_week_start + timedelta(days=13), 'Next Week', wk),
+		'week_after': (this_week_start + timedelta(days=14), this_week_start + timedelta(days=20), 'In 2 Weeks', wk),
+		'this_month': (today.replace(day=1), today.replace(day=monthrange(today.year, today.month)[1]), 'This Month', float(MONTHLY_SALES_TARGET)),
+		'this_year': (today.replace(month=1, day=1), today.replace(month=12, day=31), 'This Year', float(YEARLY_SALES_TARGET)),
+	}
+	return ranges.get(key)
+
+
+@login_required
+def dashboard_target_fits_report(request):
+	"""JSON — per-fit paid/outstanding breakdown behind a sales-target ring.
+
+	Feeds the target-card drill-down modal (pie of paid vs outstanding + a
+	table of each fit and its payment state). Reuses ``_fit_jobs`` so the
+	totals here can never disagree with the card that opened it.
+	"""
+	profile = getattr(request.user, 'profile', None)
+	prefixes = _contract_prefixes_for_locations(profile.selected_location_list if profile else [])
+	today = datetime.now().date()
+	rng = _target_period_range(request.GET.get('period', 'this_week'), today)
+	if not rng:
+		return JsonResponse({'error': 'Unknown period'}, status=400)
+	start, end, label, sales_target = rng
+	jobs = _jobs_in(_fit_jobs(start, end, prefixes), start, end)
+	rows = []
+	for j in jobs:
+		outstanding = j['outstanding']
+		paid = j['paid']
+		if paid <= 0.005:
+			status = 'unpaid'
+		elif outstanding <= 0.005:
+			status = 'paid'
+		else:
+			status = 'part'
+		rows.append({
+			'pk': j['sale_pk'],
+			'customer': j['customer'],
+			'sale_number': j['contract_number'],
+			'designer': j['designer'],
+			'fit_date': j['date'].strftime('%d/%m/%Y'),
+			'value': j['value'],
+			'paid': paid,
+			'outstanding': outstanding,
+			'estimated': j['estimated'],
+			'status': status,
+		})
+	# Unpaid first, then part-paid, then settled — so the money still owed
+	# sits at the top of the table; ties fall back to the largest value.
+	order = {'unpaid': 0, 'part': 1, 'paid': 2}
+	rows.sort(key=lambda r: (order[r['status']], -r['value']))
+	total_value = sum(r['value'] for r in rows)
+	return JsonResponse({
+		'success': True,
+		'rows': rows,
+		'count': len(rows),
+		'label': label,
+		'sublabel': f"{start.strftime('%d %b')} – {end.strftime('%d %b %Y')}",
+		'target': sales_target,
+		'total_value': total_value,
+		'total_paid': sum(r['paid'] for r in rows),
+		'total_outstanding': sum(r['outstanding'] for r in rows),
+		# Shortfall against the objective, so the pie can carry the same
+		# "remaining to target" context the card ring shows.
+		'remaining': max(sales_target - total_value, 0.0),
+		'target_pct': round(total_value / sales_target * 100, 1) if sales_target else 0.0,
+		'paid_count': sum(1 for r in rows if r['status'] == 'paid'),
+		'part_count': sum(1 for r in rows if r['status'] == 'part'),
+		'unpaid_count': sum(1 for r in rows if r['status'] == 'unpaid'),
+	})
+
+
 @login_required
 def dashboard_week_report(request):
     """JSON endpoint — sales with fit_date in the current Mon–Sun week."""

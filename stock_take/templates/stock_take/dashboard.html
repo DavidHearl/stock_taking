@@ -286,7 +286,7 @@
 </div>
 
 <!-- Item Shortages Modal -->
-<dialog id="shortagesModal" class="dash-report-modal dash-modal-w860">
+<dialog id="shortagesModal" class="dash-report-modal">
     <div class="dash-report-header">
         <div class="dash-report-title">
             <i class="bi bi-exclamation-circle text-danger"></i>
@@ -321,7 +321,7 @@
 </dialog>
 
 <!-- Incoming Materials Modal -->
-<dialog id="incomingModal" class="dash-report-modal dash-modal-w1000">
+<dialog id="incomingModal" class="dash-report-modal">
     <div class="dash-report-header">
         <div class="dash-report-title">
             <i class="bi bi-truck text-info"></i>
@@ -987,7 +987,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const pctClass = met ? 'target-pct-met' : (t.pct >= 75 ? 'target-pct-near' : 'target-pct-low');
 
         const card = document.createElement('div');
-        card.className = 'target-card';
+        card.className = 'target-card target-card-clickable';
+        card.tabIndex = 0;
+        card.setAttribute('role', 'button');
+        card.title = 'View fits & payment breakdown';
+        card.addEventListener('click', () => openTargetFits(t.key, t.label));
+        card.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openTargetFits(t.key, t.label); }
+        });
         card.innerHTML =
             '<div class="target-card-head">' +
                 '<span class="target-card-label">' + t.label + '</span>' +
@@ -2715,6 +2722,187 @@ function openWeekReport() {
 }
 </script>
 
+<!-- Sales Target Fits Drill-down Modal -->
+<dialog id="targetFitsModal" class="dash-report-modal">
+    <div class="dash-report-header">
+        <div class="dash-report-title">
+            <i class="bi bi-bullseye text-accent"></i>
+            <span id="targetFitsTitle">Sales Target</span>
+            <span id="targetFitsMeta" class="dash-report-meta"></span>
+        </div>
+        <div class="dash-report-controls">
+            <button class="dash-report-close" onclick="document.getElementById('targetFitsModal').close()">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+    <div class="dash-report-body target-fits-layout">
+        <div class="target-fits-chart-col">
+            <div class="target-fits-chart-wrap">
+                <canvas id="targetFitsChart"></canvas>
+                <div class="target-fits-center">
+                    <span class="target-fits-center-pct" id="targetFitsCenterPct">0%</span>
+                    <span class="target-fits-center-label" id="targetFitsCenterLabel"></span>
+                </div>
+            </div>
+            <div class="target-fits-legend" id="targetFitsLegend"></div>
+        </div>
+        <div class="target-fits-table-col" id="targetFitsTableCol">
+            <p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>
+        </div>
+    </div>
+</dialog>
+
+<script>
+(function() {
+    const modal = document.getElementById('targetFitsModal');
+    let chart = null;
+
+    modal.addEventListener('click', function(e) { if (e.target === this) this.close(); });
+    modal.addEventListener('close', function() {
+        if (chart) { chart.destroy(); chart = null; }
+    });
+
+    const money = v => '£' + Math.round(v).toLocaleString();
+
+    window.openTargetFits = function(period, label) {
+        const tableCol = document.getElementById('targetFitsTableCol');
+        const legend = document.getElementById('targetFitsLegend');
+        document.getElementById('targetFitsTitle').textContent = (label || 'Sales Target') + ' — Fits';
+        document.getElementById('targetFitsMeta').textContent = '';
+        document.getElementById('targetFitsCenterPct').textContent = '';
+        document.getElementById('targetFitsCenterLabel').textContent = '';
+        tableCol.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">Loading&hellip;</p>';
+        legend.innerHTML = '';
+        if (chart) { chart.destroy(); chart = null; }
+        modal.showModal();
+
+        fetch('{% url "dashboard_target_fits_report" %}?period=' + encodeURIComponent(period))
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) {
+                    tableCol.innerHTML = '<p style="padding:12px;color:var(--danger-color)">' +
+                        (data.error || 'Failed to load.') + '</p>';
+                    return;
+                }
+                const meta = document.getElementById('targetFitsMeta');
+                meta.innerHTML = '&nbsp;&mdash;&nbsp;' + data.count + ' fit' + (data.count !== 1 ? 's' : '') +
+                    ' &nbsp;|&nbsp; ' + data.sublabel;
+
+                const css = getComputedStyle(document.documentElement);
+                const tok = (n, f) => (css.getPropertyValue(n).trim() || f);
+                const cPaid = tok('--success-color', '#22c55e');
+                const cOutstanding = tok('--warning-color', '#f5a524');
+                const cTrack = tok('--border-color', '#34363b');
+
+                // Pie carries the same story as the card ring: paid + outstanding
+                // (what's booked) plus the shortfall still needed to hit target.
+                const met = data.total_value >= data.target;
+                const segLabels = ['Paid', 'Outstanding'];
+                const segValues = [data.total_paid, data.total_outstanding];
+                const segColors = [cPaid, cOutstanding];
+                if (!met && data.remaining > 0) {
+                    segLabels.push('Remaining to target');
+                    segValues.push(data.remaining);
+                    segColors.push(cTrack);
+                }
+                const empty = (data.total_paid + data.total_outstanding + data.remaining) <= 0;
+
+                const ctx = document.getElementById('targetFitsChart').getContext('2d');
+                chart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: segLabels,
+                        datasets: [{
+                            data: empty ? [1] : segValues,
+                            backgroundColor: empty ? [cTrack] : segColors,
+                            borderColor: 'transparent',
+                            borderWidth: 0,
+                            hoverOffset: 4,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '68%',
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                enabled: !empty,
+                                callbacks: { label: c => ' ' + c.label + ': ' + money(c.parsed) },
+                            },
+                        },
+                    },
+                });
+
+                document.getElementById('targetFitsCenterPct').textContent = Math.round(data.target_pct) + '%';
+                document.getElementById('targetFitsCenterLabel').textContent = 'of ' + money(data.target);
+
+                const pctPaid = (data.total_value > 0)
+                    ? Math.round(data.total_paid / data.total_value * 100) : 0;
+                legend.innerHTML =
+                    '<div class="target-fits-legend-row"><span class="target-fits-swatch" style="background:' + cPaid + '"></span>' +
+                        'Paid<strong>' + money(data.total_paid) + '</strong></div>' +
+                    '<div class="target-fits-legend-row"><span class="target-fits-swatch" style="background:' + cOutstanding + '"></span>' +
+                        'Outstanding<strong>' + money(data.total_outstanding) + '</strong></div>' +
+                    '<div class="target-fits-legend-row target-fits-legend-total">' +
+                        '<span>Booked</span><strong>' + money(data.total_value) + '</strong></div>' +
+                    (met
+                        ? '<div class="target-fits-legend-row"><span class="target-fits-swatch target-fits-swatch-hollow"></span>' +
+                            'Over target<strong>' + money(data.total_value - data.target) + '</strong></div>'
+                        : '<div class="target-fits-legend-row"><span class="target-fits-swatch" style="background:' + cTrack + '"></span>' +
+                            'To target<strong>' + money(data.remaining) + '</strong></div>') +
+                    '<div class="target-fits-legend-row target-fits-legend-total">' +
+                        '<span>Target</span><strong>' + money(data.target) + '</strong></div>' +
+                    '<div class="target-fits-legend-sub">' + pctPaid + '% of booked collected &middot; ' +
+                        data.paid_count + ' paid &middot; ' + data.part_count + ' part &middot; ' +
+                        data.unpaid_count + ' unpaid</div>';
+
+                if (!data.rows.length) {
+                    tableCol.innerHTML = '<p style="padding:12px;color:var(--text-secondary)">No fits scheduled in this period.</p>';
+                    return;
+                }
+
+                const badge = s => s === 'paid'
+                    ? '<span class="tf-pill tf-pill-paid">Paid</span>'
+                    : (s === 'part'
+                        ? '<span class="tf-pill tf-pill-part">Part</span>'
+                        : '<span class="tf-pill tf-pill-unpaid">Unpaid</span>');
+
+                let html = '<table class="table dash-report-table target-fits-table"><thead><tr>' +
+                    '<th>Customer</th><th>Sale #</th><th>Fit Date</th><th>Status</th>' +
+                    '<th class="text-right">Value</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th>' +
+                    '</tr></thead><tbody>';
+                data.rows.forEach(r => {
+                    const cust = r.pk
+                        ? '<a href="/sale/' + r.pk + '/" target="_blank" class="dash-report-link">' + r.customer + '</a>'
+                        : r.customer;
+                    html += '<tr>' +
+                        '<td>' + cust + '</td>' +
+                        '<td>' + (r.sale_number || '-') + '</td>' +
+                        '<td>' + (r.fit_date || '-') + '</td>' +
+                        '<td>' + badge(r.status) + '</td>' +
+                        '<td class="text-right">' + money(r.value) + (r.estimated ? ' <span class="target-fits-est" title="Estimated value">~</span>' : '') + '</td>' +
+                        '<td class="text-right">' + money(r.paid) + '</td>' +
+                        '<td class="text-right">' + (r.outstanding > 0.005 ? money(r.outstanding) : '—') + '</td>' +
+                        '</tr>';
+                });
+                html += '<tr class="dash-report-year-sep">' +
+                    '<td colspan="4"><strong>' + data.count + ' fit' + (data.count !== 1 ? 's' : '') + '</strong></td>' +
+                    '<td class="text-right" style="font-weight:600">' + money(data.total_value) + '</td>' +
+                    '<td class="text-right" style="font-weight:600">' + money(data.total_paid) + '</td>' +
+                    '<td class="text-right" style="font-weight:600">' + money(data.total_outstanding) + '</td>' +
+                    '</tr>';
+                html += '</tbody></table>';
+                tableCol.innerHTML = html;
+            })
+            .catch(function() {
+                tableCol.innerHTML = '<p style="padding:12px;color:var(--danger-color)">Failed to load report.</p>';
+            });
+    };
+})();
+</script>
+
 <!-- Monthly Fits Report Modal -->
 <dialog id="monthlyReportModal" class="dash-report-modal">
     <div class="dash-report-header">
@@ -3185,7 +3373,7 @@ function openDashStageOrders(stageId) {
 </script>
 
 <!-- Dashboard Stage Orders Modal -->
-<dialog id="dashStageOrdersModal" class="dash-report-modal dash-modal-w700">
+<dialog id="dashStageOrdersModal" class="dash-report-modal">
     <div class="dash-report-header">
         <div class="dash-report-title">
             <i class="bi bi-people-fill text-accent"></i>
