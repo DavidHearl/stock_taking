@@ -77,6 +77,21 @@ _BADGE_STATUS_MAP = {
 		'bank_transfer': 'badge-primary', 'proforma': 'badge-warning',
 	},
 	'payment_source': {'xero': 'badge-info', 'manual': 'badge-purple'},
+	'sync': {
+		'success': 'badge-success', 'warning': 'badge-warning', 'error': 'badge-danger',
+		'never': 'badge-neutral',
+	},
+	'activity': {
+		'job_finished': 'badge-success', 'job_unfinished': 'badge-neutral',
+		'order_created': 'badge-primary', 'order_deleted': 'badge-danger',
+		'po_created': 'badge-purple', 'po_deleted': 'badge-danger', 'po_split': 'badge-purple',
+		'po_status_change': 'badge-info', 'po_updated': 'badge-info',
+		'invoice_created': 'badge-warning', 'invoice_deleted': 'badge-danger',
+		'timesheet_added': 'badge-info', 'timesheet_deleted': 'badge-danger',
+		'product_created': 'badge-success', 'product_updated': 'badge-info',
+		'stock_adjusted': 'badge-warning', 'accessories_generated': 'badge-purple',
+		'page_action': 'badge-neutral', 'error': 'badge-danger', 'other': 'badge-neutral',
+	},
 }
 
 
