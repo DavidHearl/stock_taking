@@ -56,7 +56,7 @@ Each has three variants: base (`-color`), `-hover` (darker, for hover), and `-su
 
 Example: a "pending" badge uses `background: var(--warning-subtle); color: var(--warning-color);`. A primary button uses `background: var(--primary-color);` and `:hover { background: var(--primary-hover); }`.
 
-> **Note:** the primary brand colour token is `--primary-color`, *not* `--accent-color`. `--accent-glow` exists (a soft glow tint) but there is no `--accent-color` token — don't reference it. The Atlas Cobalt gradient (`#2563EB → #38BDF8`, 135°) is reserved for decorative/hero surfaces (avatars, badges, logo) — it isn't a token, reference it directly as a `linear-gradient(...)` where needed.
+> **Note:** the primary brand colour token is `--primary-color`, *not* `--accent-color`. `--accent-glow` exists (a soft glow tint) but there is no `--accent-color` token — don't reference it. The Atlas Cobalt gradient (`#2563EB → #38BDF8`, 135°) is reserved for decorative/hero surfaces (avatars, badges, logo). It is now the `--gradient-brand` token (`styles.css` `:root`) — reference `var(--gradient-brand)`, don't re-inline the `linear-gradient(...)` literal.
 
 ---
 
