@@ -3194,6 +3194,139 @@ def toggle_payment_ignored(request, pk, payment_pk):
     return JsonResponse({'success': True, 'ignored': payment.ignored})
 
 
+def _payment_is_credit(payment):
+	"""A payment counts as a credit when its amount is negative and its type
+	names it a credit — the convention ``_match_credits_to_payments`` keys on."""
+	return (
+		payment.amount is not None and payment.amount < 0
+		and 'credit' in (payment.payment_type or '').lower()
+	)
+
+
+def _payment_json(payment):
+	"""Serialise a payment for an edit endpoint's JSON response."""
+	return {
+		'pk': payment.pk,
+		'payment_type': payment.payment_type,
+		'amount': str(payment.amount) if payment.amount is not None else '',
+		'is_credit': _payment_is_credit(payment),
+		'date': payment.date.date().isoformat() if payment.date else '',
+		'status': payment.status,
+		'location': payment.location,
+		'user_name': payment.user_name,
+		'ignored': payment.ignored,
+	}
+
+
+def _apply_payment_edits(payment, data):
+	"""Apply an edit payload to ``payment`` in place; return the changed field names.
+
+	Shared by the sale-scoped (``edit_sale_payment``) and customer-scoped
+	(``edit_payment_from_manage``) edit endpoints. Only keys present in ``data``
+	are touched. An ``is_credit`` flag reconciles the amount's sign and the type
+	with the requested kind: a credit is stored as a negative amount whose type
+	contains "credit" (so it reduces the balance as a discount), and clearing it
+	flips the amount back positive. The amount is always taken as a magnitude so
+	callers never send a signed value. Raises ``ValueError`` with a user-facing
+	message on invalid input.
+	"""
+	from datetime import datetime as _dt
+
+	update_fields = []
+
+	if 'payment_type' in data:
+		payment.payment_type = str(data.get('payment_type', '')).strip()[:100]
+		update_fields.append('payment_type')
+
+	if 'location' in data:
+		payment.location = str(data.get('location', '')).strip()[:100]
+		update_fields.append('location')
+
+	if 'user_name' in data:
+		payment.user_name = str(data.get('user_name', '')).strip()[:150]
+		update_fields.append('user_name')
+
+	if 'status' in data:
+		payment.status = str(data.get('status', '')).strip()[:50]
+		update_fields.append('status')
+
+	if 'amount' in data:
+		raw = str(data.get('amount', '0')).replace('£', '').replace(',', '').strip()
+		try:
+			payment.amount = Decimal(raw or '0')
+		except (InvalidOperation, ValueError):
+			raise ValueError('Invalid amount')
+		update_fields.append('amount')
+
+	if 'date' in data:
+		raw_date = str(data.get('date', '')).strip()
+		if raw_date:
+			try:
+				payment.date = _dt.fromisoformat(raw_date)
+			except ValueError:
+				try:
+					payment.date = _dt.strptime(raw_date, '%Y-%m-%d')
+				except ValueError:
+					raise ValueError('Invalid date format')
+		else:
+			payment.date = None
+		update_fields.append('date')
+
+	if 'ignored' in data:
+		payment.ignored = bool(data.get('ignored'))
+		update_fields.append('ignored')
+
+	# Credit flag — align the amount sign and type with the requested kind. A
+	# credit must be negative and typed "credit" for _match_credits_to_payments
+	# to treat it as a discount; clearing the flag flips the amount positive.
+	if 'is_credit' in data:
+		amt = payment.amount or Decimal('0')
+		if bool(data.get('is_credit')):
+			payment.amount = -abs(amt)
+			if 'credit' not in (payment.payment_type or '').lower():
+				payment.payment_type = 'Credit'
+				if 'payment_type' not in update_fields:
+					update_fields.append('payment_type')
+		else:
+			payment.amount = abs(amt)
+		if 'amount' not in update_fields:
+			update_fields.append('amount')
+
+	return update_fields
+
+
+@login_required
+@require_POST
+def edit_sale_payment(request, pk, payment_pk):
+	"""Edit a payment from the sale-detail Payments card or the Reconcile tab (POST, JSON).
+
+	Scoped to the sale so both surfaces — which list payments under their owning
+	sale — can call it. Accepts the same fields as ``edit_payment_from_manage``
+	plus an ``is_credit`` flag that stores the payment as a credit (see
+	``_apply_payment_edits``).
+	"""
+	payment = get_object_or_404(AnthillPayment, pk=payment_pk, sale__pk=pk)
+
+	try:
+		data = json.loads(request.body)
+	except (json.JSONDecodeError, ValueError):
+		return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
+
+	try:
+		update_fields = _apply_payment_edits(payment, data)
+	except ValueError as exc:
+		return JsonResponse({'success': False, 'error': str(exc)}, status=400)
+
+	if not update_fields:
+		return JsonResponse({'success': False, 'error': 'No fields provided'}, status=400)
+
+	update_fields.append('updated_at')
+	payment.save(update_fields=update_fields)
+	_recalculate_sale_financials(payment.sale)
+
+	return JsonResponse({'success': True, 'payment': _payment_json(payment)})
+
+
 @login_required
 def split_payment(request, pk, payment_pk):
     """Split a payment between the current sale and another sale (POST).
@@ -4544,49 +4677,10 @@ def edit_payment_from_manage(request, pk, payment_pk):
     except (json.JSONDecodeError, ValueError):
         return JsonResponse({'success': False, 'error': 'Invalid JSON'}, status=400)
 
-    update_fields = []
-
-    if 'payment_type' in data:
-        payment.payment_type = str(data.get('payment_type', '')).strip()[:100]
-        update_fields.append('payment_type')
-
-    if 'location' in data:
-        payment.location = str(data.get('location', '')).strip()[:100]
-        update_fields.append('location')
-
-    if 'user_name' in data:
-        payment.user_name = str(data.get('user_name', '')).strip()[:150]
-        update_fields.append('user_name')
-
-    if 'status' in data:
-        payment.status = str(data.get('status', '')).strip()[:50]
-        update_fields.append('status')
-
-    if 'amount' in data:
-        try:
-            payment.amount = Decimal(str(data.get('amount', '0')))
-        except (InvalidOperation, ValueError):
-            return JsonResponse({'success': False, 'error': 'Invalid amount'}, status=400)
-        update_fields.append('amount')
-
-    if 'date' in data:
-        raw_date = str(data.get('date', '')).strip()
-        if raw_date:
-            from datetime import datetime as _dt
-            try:
-                payment.date = _dt.fromisoformat(raw_date)
-            except ValueError:
-                try:
-                    payment.date = _dt.strptime(raw_date, '%Y-%m-%d')
-                except ValueError:
-                    return JsonResponse({'success': False, 'error': 'Invalid date format'}, status=400)
-        else:
-            payment.date = None
-        update_fields.append('date')
-
-    if 'ignored' in data:
-        payment.ignored = bool(data.get('ignored'))
-        update_fields.append('ignored')
+    try:
+        update_fields = _apply_payment_edits(payment, data)
+    except ValueError as exc:
+        return JsonResponse({'success': False, 'error': str(exc)}, status=400)
 
     if not update_fields:
         return JsonResponse({'success': False, 'error': 'No fields provided'}, status=400)
@@ -4597,17 +4691,5 @@ def edit_payment_from_manage(request, pk, payment_pk):
     _recalculate_sale_financials(payment.sale)
     _refresh_xero_cache_linked_sales(customer)
 
-    return JsonResponse({
-        'success': True,
-        'payment': {
-            'pk': payment.pk,
-            'payment_type': payment.payment_type,
-            'amount': str(payment.amount) if payment.amount is not None else '',
-            'date': payment.date.date().isoformat() if payment.date else '',
-            'status': payment.status,
-            'location': payment.location,
-            'user_name': payment.user_name,
-            'ignored': payment.ignored,
-        }
-    })
+    return JsonResponse({'success': True, 'payment': _payment_json(payment)})
 

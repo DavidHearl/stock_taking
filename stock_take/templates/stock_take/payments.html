@@ -110,6 +110,7 @@
                                             <span class="pay-source {% if p.source == 'xero' %}xero{% endif %}">{{ p.source }}</span>
                                             <span class="rp-amount">£{{ p.amount|floatformat:2|intcomma }}</span>
                                             <span class="rp-actions">
+                                                <button type="button" class="pay-recon-mini" data-recon-action="edit-payment" data-url="{% url 'edit_sale_payment' s.pk p.id %}" data-type="{{ p.type|default:''|escape }}" data-amount="{{ p.amount }}" data-date="{{ p.date|date:'Y-m-d' }}" data-ignored="{{ p.ignored|yesno:'true,false' }}">Edit</button>
                                                 <button type="button" class="pay-recon-mini" data-recon-action="toggle-ignore" data-url="{% url 'toggle_payment_ignored' s.pk p.id %}">{% if p.ignored %}Un-ignore{% else %}Ignore{% endif %}</button>
                                                 {% if p.source != 'xero' %}
                                                 <button type="button" class="pay-recon-mini danger" data-recon-action="delete-manual" data-url="{% url 'delete_manual_payment' s.pk p.id %}">Delete</button>
@@ -174,6 +175,38 @@
     </div>
 </div>
 {% endfor %}
+
+<!-- Edit payment modal (shared across every reconcile row; also marks a payment as a credit) -->
+<dialog id="reconEditModal" class="pay-recon-modal">
+    <div class="pay-recon-modal-head">
+        <h3>Edit payment</h3>
+        <button type="button" class="pay-recon-modal-x" data-recon-action="edit-cancel" aria-label="Close"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="pay-recon-modal-body">
+        <label class="pay-recon-modal-field">Type
+            <input type="text" id="reType" maxlength="100">
+        </label>
+        <label class="pay-recon-modal-field">Date
+            <input type="date" id="reDate">
+        </label>
+        <label class="pay-recon-modal-field">Amount (£)
+            <input type="number" step="0.01" min="0" id="reAmount">
+        </label>
+        <label class="pay-recon-modal-check">
+            <input type="checkbox" id="reCredit">
+            <span>This is a credit <span class="pay-recon-modal-hint">(reduces the balance owed)</span></span>
+        </label>
+        <label class="pay-recon-modal-check">
+            <input type="checkbox" id="reIgnored">
+            <span>Exclude from calculations</span>
+        </label>
+    </div>
+    <div class="pay-recon-modal-foot">
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-recon-action="edit-cancel">Cancel</button>
+        <button type="button" class="btn btn-sm btn-primary" data-recon-action="edit-save">Save</button>
+        <span class="pay-recon-modal-msg" id="reMsg"></span>
+    </div>
+</dialog>
 
 {% else %}
 

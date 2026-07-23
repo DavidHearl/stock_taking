@@ -1313,6 +1313,83 @@ class DistributePaymentsViewTests(TestCase):
 		)
 
 
+class EditSalePaymentViewTests(TestCase):
+	"""The sale-scoped edit endpoint drives the sale-detail and Reconcile edit
+	modals. Editing fields is straightforward; the ``is_credit`` flag must store
+	the payment as a credit — negative amount, "credit" type — so
+	_match_credits_to_payments treats it as a discount rather than cash."""
+
+	def setUp(self):
+		self.client = Client()
+		self.user = _create_user()
+		self.user.profile.role = _create_role('admin')
+		self.user.profile.save()
+		self.client.login(username='testuser', password='testpass123')
+
+		self.customer = _create_customer(name='Edit Customer')
+		self.sale = AnthillSale.objects.create(
+			anthill_activity_id='ACT300', customer=self.customer,
+			customer_name='Edit Customer', sale_value=Decimal('5000'),
+		)
+		self.payment = AnthillPayment.objects.create(
+			sale=self.sale, source='manual', payment_type='Deposit',
+			amount=Decimal('500.00'), status='Confirmed',
+		)
+
+	def _post(self, payload, payment=None):
+		payment = payment or self.payment
+		url = reverse('edit_sale_payment', args=[self.sale.pk, payment.pk])
+		return self.client.post(
+			url, data=json.dumps(payload), content_type='application/json',
+		)
+
+	def test_edit_updates_fields(self):
+		response = self._post({
+			'payment_type': 'Stock', 'amount': '750.00', 'status': 'Pending',
+		})
+		self.assertEqual(response.status_code, 200)
+		self.assertTrue(response.json()['success'])
+		self.payment.refresh_from_db()
+		self.assertEqual(self.payment.payment_type, 'Stock')
+		self.assertEqual(self.payment.amount, Decimal('750.00'))
+		self.assertEqual(self.payment.status, 'Pending')
+
+	def test_convert_to_credit_negates_and_types(self):
+		response = self._post({'amount': '500.00', 'is_credit': True})
+		self.assertEqual(response.status_code, 200)
+		body = response.json()
+		self.assertTrue(body['success'])
+		self.assertTrue(body['payment']['is_credit'])
+		self.payment.refresh_from_db()
+		# Stored as a credit: negative amount, "credit" in the type.
+		self.assertEqual(self.payment.amount, Decimal('-500.00'))
+		self.assertIn('credit', self.payment.payment_type.lower())
+
+	def test_credit_flag_forces_negative_regardless_of_input_sign(self):
+		# The amount is a magnitude — a positive input still stores a credit.
+		self._post({'payment_type': 'Credit', 'amount': '120.00', 'is_credit': True})
+		self.payment.refresh_from_db()
+		self.assertEqual(self.payment.amount, Decimal('-120.00'))
+		self.assertEqual(self.payment.payment_type, 'Credit')
+
+	def test_clearing_credit_restores_positive_amount(self):
+		self.payment.amount = Decimal('-300.00')
+		self.payment.payment_type = 'Credit'
+		self.payment.save()
+		self._post({'amount': '300.00', 'is_credit': False})
+		self.payment.refresh_from_db()
+		self.assertEqual(self.payment.amount, Decimal('300.00'))
+
+	def test_invalid_amount_rejected(self):
+		response = self._post({'amount': 'not-a-number'})
+		self.assertEqual(response.status_code, 400)
+		self.assertFalse(response.json()['success'])
+
+	def test_get_not_allowed(self):
+		url = reverse('edit_sale_payment', args=[self.sale.pk, self.payment.pk])
+		self.assertEqual(self.client.get(url).status_code, 405)
+
+
 class XeroMatchManualPaymentTests(TestCase):
 	"""Xero is the source of truth: matching imports the invoice and removes the
 	manual placeholder, so the same money is never counted twice."""

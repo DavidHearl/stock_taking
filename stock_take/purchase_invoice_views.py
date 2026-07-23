@@ -1495,12 +1495,13 @@ def flatten_vat_to_line_item(request, invoice_id):
     })
 
 
-@login_required
-def flatten_discount_to_line_item(request, invoice_id):
-    """Convert the invoice's discount into an explicit negative line item.
+def _flatten_discount_to_lines(invoice):
+    """Convert a stored invoice discount into explicit line item(s).
 
-    Xero only picks up amounts that exist as line items, so this turns the
-    stored discount into a real (negative) line and clears the discount field.
+    Returns the list of ``PurchaseInvoiceLineItem`` rows created (empty when the
+    invoice has no discount). Shared by the manual "flatten" endpoint and the
+    Xero push so a stored discount is never silently dropped — Xero only picks
+    up amounts that exist as line items, not the invoice-level discount field.
 
     Tax handling preserves the invoice total:
       * Pre-VAT discount  → the negative line keeps the invoice's VAT treatment
@@ -1508,14 +1509,9 @@ def flatten_discount_to_line_item(request, invoice_id):
       * Post-VAT discount → if a VAT rate is set it is first flattened to its own
         line item so the (after-tax) discount line is not taxed.
     """
-    if request.method != 'POST':
-        return JsonResponse({'error': 'POST required'}, status=405)
-
-    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
-
     discount = invoice.discount or Decimal('0')
     if discount <= 0:
-        return JsonResponse({'error': 'This invoice has no discount set.'}, status=400)
+        return []
 
     created_lines = []
 
@@ -1553,6 +1549,31 @@ def flatten_discount_to_line_item(request, invoice_id):
     invoice.save(update_fields=['discount'])
     _recalc_invoice_total(invoice)
     invoice.refresh_from_db()
+    return created_lines
+
+
+@login_required
+def flatten_discount_to_line_item(request, invoice_id):
+    """Convert the invoice's discount into an explicit negative line item.
+
+    Xero only picks up amounts that exist as line items, so this turns the
+    stored discount into a real (negative) line and clears the discount field.
+
+    Tax handling preserves the invoice total:
+      * Pre-VAT discount  → the negative line keeps the invoice's VAT treatment
+        (it is taxed at the same rate, correctly reducing the taxable base).
+      * Post-VAT discount → if a VAT rate is set it is first flattened to its own
+        line item so the (after-tax) discount line is not taxed.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    invoice = get_object_or_404(PurchaseInvoice, id=invoice_id)
+
+    if (invoice.discount or Decimal('0')) <= 0:
+        return JsonResponse({'error': 'This invoice has no discount set.'}, status=400)
+
+    created_lines = _flatten_discount_to_lines(invoice)
 
     return JsonResponse({
         'success': True,
@@ -2014,6 +2035,13 @@ def push_purchase_invoice_to_xero(request, invoice_id):
             if not contact_id:
                 err = xero_api.get_last_api_error() or f'Contact "{supplier_name}" not found in Xero and auto-create failed.'
                 return JsonResponse({'success': False, 'error': err})
+
+        # A stored discount lives on the invoice, not as a line item, so Xero
+        # would otherwise ignore it (leaving the pushed bill higher than the
+        # Atlas total). Flatten it into a real (negative) line — respecting the
+        # pre/post-VAT treatment — so the discount is carried across.
+        if (invoice.discount or Decimal('0')) > 0:
+            _flatten_discount_to_lines(invoice)
 
         # ── Build line items ──────────────────────────────────────
         line_items_qs = invoice.line_items.all().order_by('sort_order', 'id')

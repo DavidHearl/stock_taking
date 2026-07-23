@@ -165,10 +165,74 @@
 		});
 	}
 
+	// ── Edit a payment (also marks it as a credit) ──
+	// A credit is a negative-amount entry whose type contains "credit" — the
+	// balance treats it as a discount. The Amount field is entered as a positive
+	// magnitude; the credit checkbox controls the sign (the server signs it).
+
+	let editUrl = null;
+
+	function openEditModal(btn) {
+		const modal = document.getElementById('reconEditModal');
+		if (!modal) return;
+		editUrl = btn.getAttribute('data-url');
+		const type = btn.getAttribute('data-type') || '';
+		const amt = parseFloat(btn.getAttribute('data-amount'));
+		document.getElementById('reType').value = type;
+		document.getElementById('reDate').value = btn.getAttribute('data-date') || '';
+		document.getElementById('reAmount').value = isNaN(amt) ? '' : Math.abs(amt).toFixed(2);
+		document.getElementById('reCredit').checked =
+			(!isNaN(amt) && amt < 0 && type.toLowerCase().indexOf('credit') !== -1);
+		document.getElementById('reIgnored').checked = (btn.getAttribute('data-ignored') === 'true');
+		document.getElementById('reMsg').textContent = '';
+		if (typeof modal.showModal === 'function') {
+			modal.showModal();
+		} else {
+			modal.setAttribute('open', '');
+		}
+	}
+
+	function closeEditModal() {
+		const modal = document.getElementById('reconEditModal');
+		if (modal && modal.open) modal.close();
+	}
+
+	function saveEdit(btn) {
+		if (!editUrl) return;
+		const payload = {
+			payment_type: document.getElementById('reType').value.trim(),
+			date: document.getElementById('reDate').value,
+			amount: document.getElementById('reAmount').value,
+			ignored: document.getElementById('reIgnored').checked,
+			is_credit: document.getElementById('reCredit').checked,
+		};
+		const msg = document.getElementById('reMsg');
+		msg.textContent = 'Saving…';
+		setBusy(btn, true);
+		postJSON(editUrl, payload)
+			.then(function (res) { reloadOr(btn, res, 'Could not save payment.'); })
+			.catch(function () { setBusy(btn, false); msg.textContent = 'Network error — not saved.'; });
+	}
+
+	// Ticking "credit" implies a Credit type — reflect that in the field.
+	const reCreditEl = document.getElementById('reCredit');
+	if (reCreditEl) {
+		reCreditEl.addEventListener('change', function () {
+			const t = document.getElementById('reType');
+			if (this.checked && t && t.value.toLowerCase().indexOf('credit') === -1) {
+				t.value = 'Credit';
+			}
+		});
+	}
+
 	// ── Action dispatch ──
 
 	function handleAction(btn) {
 		const action = btn.getAttribute('data-recon-action');
+
+		if (action === 'edit-payment') { openEditModal(btn); return; }
+		if (action === 'edit-cancel') { closeEditModal(); return; }
+		if (action === 'edit-save') { saveEdit(btn); return; }
 
 		if (action === 'search-xero') {
 			searchXero(btn);
