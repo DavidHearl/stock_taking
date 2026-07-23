@@ -155,6 +155,34 @@ body {
 	--warning-color-rgb: var(--warning-rgb);
 }
 
+/* ===== Mobile token overrides ===== */
+/* Redefining the token VALUES (not per-component rules) at the phone breakpoint,
+   so every var() reference scales automatically — the same mechanism light-mode
+   uses. Only the *large* end of each scale is dialled back: hero headings and
+   generous margins dominate a narrow viewport, while body text and small
+   control gaps must stay legible/tappable, so --fs-sm/md/lg and --sp-1..4 are
+   left untouched. 768px matches the sidebar→hamburger breakpoint. */
+@media (max-width: 768px) {
+	:root {
+		/* Cap the top of the type scale — 32/24/20px headings are oversized on a
+		   phone. Body/label sizes below --fs-xl are unchanged. */
+		--fs-4xl: 1.5rem;    /* 32 → 24 */
+		--fs-3xl: 1.25rem;   /* 24 → 20 */
+		--fs-2xl: 1.125rem;  /* 20 → 18 */
+		--fs-xl: 1rem;       /* 18 → 16 */
+
+		/* Base UI/body text — 14px reads a touch large on a phone. Dropping the
+		   body default to 12px cascades to every element that inherits it or
+		   references var(--fs-md) directly (buttons, inputs, table cells). */
+		--fs-md: 0.75rem;    /* 14 → 12 */
+
+		/* Tighten the large spacing steps so dense pages reclaim horizontal room.
+		   The small steps (4–16px) stay as-is to keep controls comfortable. */
+		--sp-6: 16px;        /* 24 → 16 */
+		--sp-5: 14px;        /* 20 → 14 */
+	}
+}
+
 /* ===== Reset & Base Styles ===== */
 * {
     margin: 0;
@@ -2558,6 +2586,38 @@ td > .qty-stepper-input {
 /* Column widths honoured exactly; pair with explicit th widths. */
 .table-fixed {
 	table-layout: fixed;
+}
+
+/* --- Mobile: wide data tables scroll instead of breaking the layout ------ */
+/* Dense tables have far more columns than a phone is wide. Rather than let them
+   squash to unreadable or force the whole page sideways, each table (or its
+   scroll wrapper) becomes its own horizontal scroll area. */
+@media (max-width: 768px) {
+	/* The sanctioned .table-wrap plus every bespoke wrapper — they all end in
+	   -wrap / -wrapper / -container, so substring matching covers the lot,
+	   including the few that were missing overflow-x. */
+	[class*="table-wrap"],
+	[class*="table-container"],
+	.table-responsive {
+		overflow-x: auto;
+	}
+
+	/* A bare .table with no scroll wrapper turns into its own scroll area:
+	   width:100% (from the base rule) keeps narrow tables full-width, while
+	   wider column sets overflow and scroll horizontally within it. */
+	.table {
+		display: block;
+		overflow-x: auto;
+	}
+
+	/* ...but a .table already inside a scroll wrapper stays a normal table so it
+	   fills the bordered wrapper (which is doing the scrolling) at 100% width. */
+	[class*="table-wrap"] > .table,
+	[class*="table-container"] > .table,
+	.table-responsive > .table {
+		display: table;
+		overflow: hidden;
+	}
 }
 
 /* ===== Badges ===== */
